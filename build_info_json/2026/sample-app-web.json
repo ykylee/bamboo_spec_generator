@@ -17,15 +17,13 @@
     ]
   },
   "requirements": {
-    "os": "windows",
-    "extraCapabilities": [
-      "nuget"
-    ]
+    "os": "linux",
+    "extraCapabilities": []
   },
   "build": {
     "subPath": "apps/sample-app-web",
-    "prepareCommand": "python scripts/prepare_build.py --tool node",
-    "buildCommand": "python scripts/run_build.py --tool node --task build",
+    "prepareCommand": "npm ci",
+    "buildCommand": "npm run build",
     "staticAnalysis": {
       "customTool": {
         "commands": [

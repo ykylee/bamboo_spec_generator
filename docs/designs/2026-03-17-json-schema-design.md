@@ -84,13 +84,11 @@ build_info_json/
   },
   "requirements": {
     "os": "linux",
-    "extraCapabilities": [
-      "cuda12.1"
-    ]
+    "extraCapabilities": []
   },
   "build": {
-    "prepareCommand": "python scripts/prepare_build.py --tool maven",
-    "buildCommand": "python scripts/run_build.py --tool maven --goal package",
+    "prepareCommand": "mvn -B dependency:go-offline",
+    "buildCommand": "mvn -B clean package",
     "staticAnalysis": {
         "customTool": {
           "commands": [
