@@ -1,0 +1,35 @@
+{
+  "buildId": "sample-app-web",
+  "name": "Sample App Web",
+  "planKey": "SAMPWEB",
+  "description": "Sample App Web build plan",
+  "language": "nodejs",
+  "compiler": "node.js",
+  "repository": {
+    "name": "sample-app-web-repo",
+    "branch": "release"
+  },
+  "requirements": {
+    "os": "windows",
+    "extraCapabilities": [
+      "nuget"
+    ]
+  },
+  "build": {
+    "prepareCommand": "python scripts/prepare_build.py --tool node",
+    "buildCommand": "python scripts/run_build.py --tool node --task build",
+    "staticAnalysis": {
+      "customTool": {
+        "commands": [
+          "python scripts/custom_tool.py init --frontend",
+          "custom-tool analyze {buildCommand}",
+          "python scripts/custom_tool.py publish --frontend"
+        ]
+      }
+    },
+    "postBuildTrigger": {
+      "type": "plan",
+      "targetPlanKey": "POSTWEB"
+    }
+  }
+}

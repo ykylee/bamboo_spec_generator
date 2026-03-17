@@ -1,0 +1,35 @@
+{
+  "buildId": "sample-app-api",
+  "name": "Sample App API",
+  "planKey": "SAMPAPI",
+  "description": "Sample App API build plan",
+  "language": "java",
+  "compiler": "maven",
+  "repository": {
+    "name": "sample-app-repo",
+    "branch": "main"
+  },
+  "requirements": {
+    "os": "linux",
+    "extraCapabilities": [
+      "cuda12.1"
+    ]
+  },
+  "build": {
+    "prepareCommand": "python scripts/prepare_build.py --tool maven",
+    "buildCommand": "python scripts/run_build.py --tool maven --goal package",
+    "staticAnalysis": {
+      "customTool": {
+        "commands": [
+          "python scripts/custom_tool.py init",
+          "custom-tool analyze {buildCommand}",
+          "python scripts/custom_tool.py publish"
+        ]
+      }
+    },
+    "postBuildTrigger": {
+      "type": "plan",
+      "targetPlanKey": "POSTBUILD"
+    }
+  }
+}
