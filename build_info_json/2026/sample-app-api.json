@@ -6,8 +6,15 @@
   "language": "java",
   "compiler": "maven",
   "repository": {
-    "name": "sample-app-repo",
-    "branch": "main"
+    "provider": "bitbucket",
+    "projectKey": "SAMPLE",
+    "repoSlug": "sample-app-api",
+    "linkageMode": "linked",
+    "branches": [
+      "dev",
+      "release",
+      "master"
+    ]
   },
   "requirements": {
     "os": "linux",
@@ -16,6 +23,7 @@
     ]
   },
   "build": {
+    "subPath": "services/sample-app-api",
     "prepareCommand": "python scripts/prepare_build.py --tool maven",
     "buildCommand": "python scripts/run_build.py --tool maven --goal package",
     "staticAnalysis": {

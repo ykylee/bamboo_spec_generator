@@ -5,8 +5,11 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True)
 class RepositoryDefinition:
-    name: str
-    branch: str
+    provider: str
+    project_key: str
+    repo_slug: str
+    linkage_mode: str
+    branches: list[str]
 
 
 @dataclass(frozen=True)
@@ -28,6 +31,7 @@ class PostBuildTriggerDefinition:
 
 @dataclass(frozen=True)
 class BuildConfigDefinition:
+    sub_path: str
     prepare_command: str
     build_command: str
     static_analysis: StaticAnalysisDefinition

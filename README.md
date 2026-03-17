@@ -45,10 +45,13 @@
 - Capability 요구사항: `requirements`
 - 빌드 상세 설정: `build`
 
+`build` 블록에는 필요 시 `subPath`를 지정해 저장소 루트가 아닌 하위 디렉터리를 작업 기준 경로로 사용할 수 있습니다. 이 필드는 MSBuild 전용이 아니라 모든 빌드 유형에서 공통으로 사용할 수 있습니다.
+
 예제 파일:
 
 - [sample-app-api.json](./build_info_json/2026/sample-app-api.json)
 - [sample-app-web.json](./build_info_json/2026/sample-app-web.json)
+- [sample-app-mfc.json](./build_info_json/2026/sample-app-mfc.json)
 
 ## Capability 처리
 
@@ -58,8 +61,13 @@
 
 - `maven` -> `system.builder.mvn3.Maven 3`
 - `node.js` -> `system.builder.nodejs`
+- `vs2022` -> `system.builder.visualstudio.2022`
 - `cuda12.1` -> `system.cuda.12.1`
 - `nuget` -> `system.builder.nuget`
+
+`msbuild`가 수행되는 플랜은 생성된 `run_build.py`에서 빌드 직전에 `Directory.Build.targets`를 생성해 최적화 관련 옵션을 무력화하도록 구성합니다.
+또한 Visual Studio 환경 설정 스크립트 경로는 에이전트 환경변수로 관리하며, 예를 들어 `vs2022` 컴파일러는 `VS2022_ENV`에 `VsDevCmd.bat` 또는 `vcvars*.bat` 경로를 설정해 사용합니다. 해당 규칙은 `prepare_build.py`, `run_build.py`, `run_custom_analysis.py` 같은 MSBuild 관련 생성 스크립트에 공통 적용됩니다.
+`subPath`가 지정된 경우 준비, 빌드, 정적 분석 스크립트는 모두 해당 하위 경로를 작업 디렉터리로 사용합니다. MSBuild 플랜에서는 `Directory.Build.targets`도 같은 위치에 생성합니다.
 
 ## 샘플 생성기 구조
 

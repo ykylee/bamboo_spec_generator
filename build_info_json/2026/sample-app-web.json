@@ -6,8 +6,15 @@
   "language": "nodejs",
   "compiler": "node.js",
   "repository": {
-    "name": "sample-app-web-repo",
-    "branch": "release"
+    "provider": "bitbucket",
+    "projectKey": "SAMPLE",
+    "repoSlug": "sample-app-web",
+    "linkageMode": "linked",
+    "branches": [
+      "dev",
+      "release",
+      "master"
+    ]
   },
   "requirements": {
     "os": "windows",
@@ -16,6 +23,7 @@
     ]
   },
   "build": {
+    "subPath": "apps/sample-app-web",
     "prepareCommand": "python scripts/prepare_build.py --tool node",
     "buildCommand": "python scripts/run_build.py --tool node --task build",
     "staticAnalysis": {

@@ -1,0 +1,43 @@
+{
+  "buildId": "sample-app-mfc",
+  "name": "Sample App MFC",
+  "planKey": "SAMPMFC",
+  "description": "Sample App MFC build plan for Visual Studio 2022",
+  "language": "cpp",
+  "compiler": "vs2022",
+  "repository": {
+    "provider": "bitbucket",
+    "projectKey": "SAMPLE",
+    "repoSlug": "sample-app-mfc",
+    "linkageMode": "linked",
+    "branches": [
+      "dev",
+      "release",
+      "master"
+    ]
+  },
+  "requirements": {
+    "os": "windows",
+    "extraCapabilities": [
+      "mfc"
+    ]
+  },
+  "build": {
+    "subPath": "src/SampleAppMfc",
+    "prepareCommand": "python scripts/prepare_build.py --tool vs2022 --restore-nuget --solution SampleAppMfc.sln",
+    "buildCommand": "python scripts/run_build.py --tool msbuild --solution SampleAppMfc.sln --configuration Release --platform x64",
+    "staticAnalysis": {
+      "customTool": {
+        "commands": [
+          "python scripts/custom_tool.py init --windows-native",
+          "custom-tool analyze {buildCommand}",
+          "python scripts/custom_tool.py publish --windows-native"
+        ]
+      }
+    },
+    "postBuildTrigger": {
+      "type": "plan",
+      "targetPlanKey": "POSTMFC"
+    }
+  }
+}

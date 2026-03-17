@@ -22,9 +22,13 @@ def parse_build_definition(path: Path) -> BuildDefinition:
     with path.open("r", encoding="utf-8") as handle:
         raw = json.load(handle)
 
+    repository_raw = raw["repository"]
     repository = RepositoryDefinition(
-        name=raw["repository"]["name"],
-        branch=raw["repository"]["branch"],
+        provider=repository_raw.get("provider", "bitbucket"),
+        project_key=repository_raw.get("projectKey", ""),
+        repo_slug=repository_raw.get("repoSlug", ""),
+        linkage_mode=repository_raw.get("linkageMode", "linked"),
+        branches=list(repository_raw.get("branches", ["dev", "release", "master"])),
     )
 
     requirements = RequirementsDefinition(
@@ -42,6 +46,7 @@ def parse_build_definition(path: Path) -> BuildDefinition:
     )
 
     build_config = BuildConfigDefinition(
+        sub_path=raw["build"].get("subPath", "."),
         prepare_command=raw["build"]["prepareCommand"],
         build_command=raw["build"]["buildCommand"],
         static_analysis=static_analysis,
