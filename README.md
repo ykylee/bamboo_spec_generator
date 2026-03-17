@@ -10,7 +10,7 @@
 - 공통 워크플로우 기반 JSON 스키마 초안이 있습니다.
 - Python 기반 샘플 생성기가 구현되어 있습니다.
 - 샘플 생성기는 `build_info_json/`을 읽어 `bamboo-specs/`를 생성합니다.
-- 생성 결과는 Bamboo Specs Java 샘플, Coverity 설정 파일, Python 실행 스크립트를 포함합니다.
+- 생성 결과는 Bamboo Specs Maven 프로젝트, Java Specs 클래스, Coverity 설정 파일, Python 실행 스크립트를 포함합니다.
 
 ## 목표 구조
 
@@ -18,6 +18,7 @@
 - 출력: `bamboo-specs/`
 - 출력물 구성:
   - Bamboo Specs Java 파일
+  - Bamboo Specs Maven `pom.xml`
   - 빌드별 Python 스크립트
   - 빌드별 `coverity.yaml`
 
@@ -80,9 +81,39 @@
 - `generator.py`: Java, Python 스크립트, Coverity 설정 생성
 - `writer.py`: 출력 파일 기록
 
-## 실행
+## 초기 셋업
 
-기본 출력 경로는 루트의 `bamboo-specs/` 입니다.
+이 프로젝트를 로컬에서 실행하고 생성 결과를 검증하려면 다음 도구가 필요합니다.
+
+- Python 3
+- Java 17 이상
+- Maven 3.9 이상
+
+권장 확인 명령:
+
+```bash
+python3 --version
+java -version
+mvn -version
+```
+
+MSBuild 기반 샘플까지 함께 검토할 경우 Bamboo Windows 에이전트에는 추가로 다음 준비가 필요합니다.
+
+- Visual Studio C++ 빌드 도구 또는 Visual Studio 2022 설치
+- `VS2022_ENV` 같은 환경변수에 `VsDevCmd.bat` 또는 `vcvars*.bat` 경로 등록
+- Bamboo capability에 Visual Studio 및 추가 capability 등록
+
+예:
+
+```bash
+set VS2022_ENV=C:\Program Files\Microsoft Visual Studio\2022\BuildTools\Common7\Tools\VsDevCmd.bat
+```
+
+## 실행 가이드
+
+기본 출력 경로는 루트의 `bamboo-specs/` 이며, 이 디렉터리는 Bamboo Repository Stored Specs에 올릴 수 있는 Maven 프로젝트 형태로 생성됩니다.
+
+### 1. 생성기 실행
 
 ```bash
 PYTHONPATH=. python3 -m src.bamboo_spec_generator.cli
@@ -94,6 +125,37 @@ PYTHONPATH=. python3 -m src.bamboo_spec_generator.cli
 PYTHONPATH=. python3 -m src.bamboo_spec_generator.cli --output-root bamboo-specs
 ```
 
+### 2. 생성 결과 컴파일 검증
+
+생성된 Bamboo Specs 프로젝트가 실제 Java/Maven 프로젝트로 컴파일되는지 확인하려면:
+
+```bash
+cd bamboo-specs
+mvn -q -DskipTests compile
+```
+
+### 3. Bamboo Specs 수동 배포
+
+생성 결과에는 `SpecsPublisher.java`가 포함되며, 환경변수를 설정한 뒤 Maven으로 publish 진입점을 실행할 수 있습니다.
+
+필수 환경변수:
+
+- `BAMBOO_URL`: Bamboo 서버 URL
+- `BAMBOO_TOKEN_FILE`: Bamboo 토큰 파일 경로. 생략 시 `.credentials`
+
+예:
+
+```bash
+export BAMBOO_URL=https://bamboo.example.com
+export BAMBOO_TOKEN_FILE=/path/to/.credentials
+cd bamboo-specs
+mvn -q -Ppublish-specs bamboo-specs-runner:run
+```
+
+### 4. Repository Stored Specs 사용
+
+수동 publish 대신 Repository Stored Specs로 사용할 경우에는 생성된 `bamboo-specs/` 디렉터리를 Bamboo가 읽는 저장소에 포함시키고, Bamboo 쪽에서 해당 저장소를 Specs 저장소로 등록합니다.
+
 ## 테스트
 
 ```bash
@@ -104,9 +166,11 @@ PYTHONPATH=. python3 -m unittest discover -s tests
 
 생성 결과 예시 경로:
 
+- [pom.xml](./bamboo-specs/pom.xml)
 - [AllPlansRegistry.java](./bamboo-specs/src/main/java/com/example/specs/generated/AllPlansRegistry.java)
 - [SampleAppApiPlanSpecs.java](./bamboo-specs/src/main/java/com/example/specs/generated/SampleAppApiPlanSpecs.java)
 - [SampleAppWebPlanSpecs.java](./bamboo-specs/src/main/java/com/example/specs/generated/SampleAppWebPlanSpecs.java)
+- [SpecsPublisher.java](./bamboo-specs/src/main/java/com/example/specs/generated/SpecsPublisher.java)
 - [sample-app-api coverity.yaml](./bamboo-specs/coverity/sample-app-api/coverity.yaml)
 - [sample-app-api prepare_build.py](./bamboo-specs/scripts/generated/sample-app-api/prepare_build.py)
 
@@ -133,6 +197,7 @@ PYTHONPATH=. python3 -m unittest discover -s tests
 
 ## 현재 한계
 
-- 생성된 Java 코드는 Bamboo Specs API 형태에 가깝게 만든 샘플이며, 실제 Bamboo 라이브러리로 컴파일하는 프로젝트 설정은 아직 없습니다.
+- 생성 결과는 실제 Bamboo Specs Maven 프로젝트 구조를 따르며 로컬 `mvn compile`까지 검증했습니다. 다만 실제 Bamboo 서버 import와 실행까지는 아직 검증하지 않았습니다.
 - Python 실행 스크립트는 `subprocess.run()` 기반이며, 더 엄격한 명령 모델로 추가 개선 여지가 있습니다.
 - 실제 Bamboo 인스턴스 capability naming convention은 환경별 차이가 있을 수 있으므로 추가 매핑 정리가 필요할 수 있습니다.
+- Linked Repository 이름은 현재 `projectKey/repoSlug` 규칙을 전제로 생성하므로, Bamboo 환경과 다르면 조정이 필요합니다.

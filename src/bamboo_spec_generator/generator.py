@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from .model import BuildDefinition
 
+BAMBOO_SPECS_VERSION = "11.0.8"
+
 
 def to_java_class_name(build_id: str) -> str:
     return "".join(part.capitalize() for part in build_id.replace("_", "-").split("-")) + "PlanSpecs"
@@ -12,33 +14,39 @@ def generate_plan_java(build: BuildDefinition, package_name: str) -> str:
     description = _escape_java(build.description or build.name)
     project_key = _project_key(build.year)
     build_script_root = f"scripts/generated/{build.build_id}"
+    linked_repository_name = _linked_repository_name(build)
 
     return f"""package {package_name};
 
-import com.atlassian.bamboo.specs.api.builders.job.Job;
+import com.atlassian.bamboo.specs.api.BambooSpec;
 import com.atlassian.bamboo.specs.api.builders.plan.Plan;
-import com.atlassian.bamboo.specs.api.builders.plan.Project;
+import com.atlassian.bamboo.specs.api.builders.plan.Job;
 import com.atlassian.bamboo.specs.api.builders.plan.Stage;
+import com.atlassian.bamboo.specs.api.builders.project.Project;
 import com.atlassian.bamboo.specs.api.builders.requirement.Requirement;
 import com.atlassian.bamboo.specs.builders.task.ScriptTask;
+import com.atlassian.bamboo.specs.builders.task.VcsCheckoutTask;
 
-// Sample generated Bamboo Specs source close to Bamboo Java Specs builder style.
-public final class {class_name} {{
+@BambooSpec
+public class {class_name} {{
     private static final String PROJECT_KEY = "{project_key}";
     private static final String PLAN_KEY = "{build.plan_key}";
     private static final String YEAR = "{build.year}";
     private static final String SCRIPT_ROOT = "{build_script_root}";
+    private static final String LINKED_REPOSITORY = "{linked_repository_name}";
 
-    private {class_name}() {{
+    public Plan plan() {{
+        return createPlan();
     }}
 
-    public static Plan plan() {{
+    public Plan createPlan() {{
         Project project = new Project()
             .key(PROJECT_KEY)
             .name("Generated Plans " + YEAR);
 
         return new Plan(project, "{description}", PLAN_KEY)
             .description("{description}")
+            .linkedRepositories(LINKED_REPOSITORY)
             .stages(
                 prepareStage(),
                 buildStage(),
@@ -47,41 +55,53 @@ public final class {class_name} {{
             );
     }}
 
-    public static Stage prepareStage() {{
+    private Stage prepareStage() {{
         return new Stage("Prepare")
             .jobs(new Job("Prepare Job", "PREP")
 {_requirements_chain(build, 4)}
-                .tasks(new ScriptTask()
-                    .fileFromPath(SCRIPT_ROOT + "/prepare_build.py")
-                    .interpreterShell()));
+                .tasks(
+                    new VcsCheckoutTask().addCheckoutOfDefaultRepository(),
+                    new ScriptTask()
+                        .fileFromPath(SCRIPT_ROOT + "/prepare_build.py")
+                        .interpreterShell()
+                ));
     }}
 
-    public static Stage buildStage() {{
+    private Stage buildStage() {{
         return new Stage("Build")
             .jobs(new Job("Build Job", "BLD")
 {_requirements_chain(build, 4)}
-                .tasks(new ScriptTask()
-                    .fileFromPath(SCRIPT_ROOT + "/run_build.py")
-                    .interpreterShell()));
+                .tasks(
+                    new VcsCheckoutTask().addCheckoutOfDefaultRepository(),
+                    new ScriptTask()
+                        .fileFromPath(SCRIPT_ROOT + "/run_build.py")
+                        .interpreterShell()
+                ));
     }}
 
-    public static Stage staticAnalysisStage() {{
+    private Stage staticAnalysisStage() {{
         return new Stage("Static Analysis")
             .jobs(
                 new Job("Coverity Scan", "COV")
 {_requirements_chain(build, 5)}
-                    .tasks(new ScriptTask()
-                        .fileFromPath(SCRIPT_ROOT + "/run_coverity.py")
-                        .interpreterShell()),
+                    .tasks(
+                        new VcsCheckoutTask().addCheckoutOfDefaultRepository(),
+                        new ScriptTask()
+                            .fileFromPath(SCRIPT_ROOT + "/run_coverity.py")
+                            .interpreterShell()
+                    ),
                 new Job("Custom Analysis", "CUST")
 {_requirements_chain(build, 5)}
-                    .tasks(new ScriptTask()
-                        .fileFromPath(SCRIPT_ROOT + "/run_custom_analysis.py")
-                        .interpreterShell())
+                    .tasks(
+                        new VcsCheckoutTask().addCheckoutOfDefaultRepository(),
+                        new ScriptTask()
+                            .fileFromPath(SCRIPT_ROOT + "/run_custom_analysis.py")
+                            .interpreterShell()
+                    )
             );
     }}
 
-    public static Stage triggerFollowUpStage() {{
+    private Stage triggerFollowUpStage() {{
         return new Stage("Trigger Follow-up")
             .jobs(new Job("Trigger Job", "TRIG")
                 .tasks(new ScriptTask()
@@ -106,7 +126,7 @@ def generate_coverity_yaml(build: BuildDefinition) -> str:
 
 def generate_registry_java(builds: list[BuildDefinition], package_name: str) -> str:
     class_names = [to_java_class_name(build.build_id) for build in builds]
-    registry_lines = ",\n".join(f"            {name}.plan()" for name in class_names)
+    registry_lines = ",\n".join(f"            new {name}().plan()" for name in class_names)
 
     return f"""package {package_name};
 
@@ -124,6 +144,100 @@ public final class AllPlansRegistry {{
         );
     }}
 }}
+"""
+
+
+def generate_specs_publisher_java(package_name: str) -> str:
+    return f"""package {package_name};
+
+import com.atlassian.bamboo.specs.api.builders.plan.Plan;
+import com.atlassian.bamboo.specs.util.BambooServer;
+import com.atlassian.bamboo.specs.util.FileTokenCredentials;
+import java.util.List;
+
+public final class SpecsPublisher {{
+    private SpecsPublisher() {{
+    }}
+
+    public static void main(String[] args) {{
+        String bambooUrl = System.getenv("BAMBOO_URL");
+        if (bambooUrl == null || bambooUrl.isBlank()) {{
+            throw new IllegalStateException("BAMBOO_URL environment variable is required.");
+        }}
+
+        String credentialsFile = System.getenv().getOrDefault("BAMBOO_TOKEN_FILE", ".credentials");
+        BambooServer server = new BambooServer(bambooUrl, new FileTokenCredentials(credentialsFile));
+        List<Plan> plans = AllPlansRegistry.plans();
+        for (Plan plan : plans) {{
+            server.publish(plan);
+        }}
+    }}
+}}
+"""
+
+
+def generate_pom_xml(package_name: str) -> str:
+    package_path = package_name.replace(".", "/")
+    return f"""<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>com.atlassian.bamboo</groupId>
+    <artifactId>bamboo-specs-parent</artifactId>
+    <version>{BAMBOO_SPECS_VERSION}</version>
+  </parent>
+
+  <groupId>com.example.specs</groupId>
+  <artifactId>bamboo-specs</artifactId>
+  <version>1.0.0-SNAPSHOT</version>
+  <packaging>jar</packaging>
+  <name>Generated Bamboo Specs</name>
+
+  <properties>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    <java.version>17</java.version>
+    <maven.compiler.source>17</maven.compiler.source>
+    <maven.compiler.target>17</maven.compiler.target>
+    <maven.compiler.release></maven.compiler.release>
+    <generated.specs.package>{package_name}</generated.specs.package>
+  </properties>
+
+  <dependencies>
+    <dependency>
+      <groupId>com.atlassian.bamboo</groupId>
+      <artifactId>bamboo-specs-api</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>com.atlassian.bamboo</groupId>
+      <artifactId>bamboo-specs</artifactId>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.codehaus.mojo</groupId>
+        <artifactId>exec-maven-plugin</artifactId>
+        <version>3.5.0</version>
+        <configuration>
+          <mainClass>{package_name}.SpecsPublisher</mainClass>
+        </configuration>
+      </plugin>
+    </plugins>
+    <resources>
+      <resource>
+        <directory>scripts</directory>
+        <targetPath>scripts</targetPath>
+      </resource>
+      <resource>
+        <directory>coverity</directory>
+        <targetPath>coverity</targetPath>
+      </resource>
+    </resources>
+  </build>
+</project>
 """
 
 
@@ -447,6 +561,10 @@ def _extra_capability_key(capability: str) -> str:
         "nuget": "system.builder.nuget",
     }
     return mapping.get(capability, capability)
+
+
+def _linked_repository_name(build: BuildDefinition) -> str:
+    return f"{build.repository.project_key}/{build.repository.repo_slug}"
 
 
 
