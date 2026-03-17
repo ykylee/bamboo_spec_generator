@@ -19,13 +19,13 @@
   "requirements": {
     "os": "windows",
     "extraCapabilities": [
-      "mfc"
+      "nuget"
     ]
   },
   "build": {
     "subPath": "src/SampleAppMfc",
-    "prepareCommand": "python scripts/prepare_build.py --tool vs2022 --restore-nuget --solution SampleAppMfc.sln",
-    "buildCommand": "python scripts/run_build.py --tool msbuild --solution SampleAppMfc.sln --configuration Release --platform x64",
+    "prepareCommand": "nuget restore SampleAppMfc.sln",
+    "buildCommand": "msbuild SampleAppMfc.sln /p:Configuration=Release /p:Platform=x64",
     "staticAnalysis": {
       "customTool": {
         "commands": [

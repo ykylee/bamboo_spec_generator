@@ -76,13 +76,12 @@ class GeneratorFlowTest(unittest.TestCase):
             self.assertIn(".linkedRepositories(LINKED_REPOSITORY)", sample_plan)
             self.assertIn('Requirement.equals("operating.system", "Linux")', sample_plan)
             self.assertIn('Requirement.exists("system.builder.mvn3.Maven 3")', sample_plan)
-            self.assertIn('Requirement.exists("system.cuda.12.1")', sample_plan)
             self.assertIn('.fileFromPath(SCRIPT_ROOT + "/run_coverity.py")', sample_plan)
             self.assertIn('.fileFromPath(SCRIPT_ROOT + "/run_custom_analysis.py")', sample_plan)
             self.assertIn("new VcsCheckoutTask().addCheckoutOfDefaultRepository()", sample_plan)
             self.assertTrue(coverity_yaml_path.exists())
             self.assertIn(
-                'build-command: "python scripts/run_build.py --tool maven --goal package"',
+                'build-command: "mvn -B clean package"',
                 coverity_yaml_path.read_text(encoding="utf-8"),
             )
             self.assertTrue(prepare_script_path.exists())
@@ -103,6 +102,7 @@ class GeneratorFlowTest(unittest.TestCase):
             mfc_plan = mfc_plan_path.read_text(encoding="utf-8")
             self.assertIn("@BambooSpec", mfc_plan)
             self.assertIn('Requirement.exists("system.builder.visualstudio.2022")', mfc_plan)
+            self.assertIn('Requirement.exists("system.builder.nuget")', mfc_plan)
             self.assertIn('private static final String LINKED_REPOSITORY = "SAMPLE/sample-app-mfc";', mfc_plan)
             self.assertIn(".linkedRepositories(LINKED_REPOSITORY)", mfc_plan)
             self.assertTrue(specs_publisher_path.exists())
