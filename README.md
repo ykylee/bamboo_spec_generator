@@ -97,6 +97,14 @@ java -version
 mvn -version
 ```
 
+Windows `cmd` 기준:
+
+```bat
+python --version
+java -version
+mvn -version
+```
+
 MSBuild 기반 샘플까지 함께 검토할 경우 Bamboo Windows 에이전트에는 추가로 다음 준비가 필요합니다.
 
 - Visual Studio C++ 빌드 도구 또는 Visual Studio 2022 설치
@@ -119,10 +127,24 @@ set VS2022_ENV=C:\Program Files\Microsoft Visual Studio\2022\BuildTools\Common7\
 PYTHONPATH=. python3 -m src.bamboo_spec_generator.cli
 ```
 
+Windows `cmd` 기준:
+
+```bat
+set PYTHONPATH=.
+python -m src.bamboo_spec_generator.cli
+```
+
 출력 경로를 바꾸려면:
 
 ```bash
 PYTHONPATH=. python3 -m src.bamboo_spec_generator.cli --output-root bamboo-specs
+```
+
+Windows `cmd` 기준:
+
+```bat
+set PYTHONPATH=.
+python -m src.bamboo_spec_generator.cli --output-root bamboo-specs
 ```
 
 ### 2. 생성 결과 컴파일 검증
@@ -130,6 +152,13 @@ PYTHONPATH=. python3 -m src.bamboo_spec_generator.cli --output-root bamboo-specs
 생성된 Bamboo Specs 프로젝트가 실제 Java/Maven 프로젝트로 컴파일되는지 확인하려면:
 
 ```bash
+cd bamboo-specs
+mvn -q -DskipTests compile
+```
+
+Windows `cmd` 기준:
+
+```bat
 cd bamboo-specs
 mvn -q -DskipTests compile
 ```
@@ -152,6 +181,15 @@ cd bamboo-specs
 mvn -q -Ppublish-specs bamboo-specs-runner:run
 ```
 
+Windows `cmd` 기준:
+
+```bat
+set BAMBOO_URL=https://bamboo.example.com
+set BAMBOO_TOKEN_FILE=C:\path\to\.credentials
+cd bamboo-specs
+mvn -q -Ppublish-specs bamboo-specs-runner:run
+```
+
 ### 4. Repository Stored Specs 사용
 
 수동 publish 대신 Repository Stored Specs로 사용할 경우에는 생성된 `bamboo-specs/` 디렉터리를 Bamboo가 읽는 저장소에 포함시키고, Bamboo 쪽에서 해당 저장소를 Specs 저장소로 등록합니다.
@@ -160,6 +198,13 @@ mvn -q -Ppublish-specs bamboo-specs-runner:run
 
 ```bash
 PYTHONPATH=. python3 -m unittest discover -s tests
+```
+
+Windows `cmd` 기준:
+
+```bat
+set PYTHONPATH=.
+python -m unittest discover -s tests
 ```
 
 ## 생성 결과 예시
