@@ -61,6 +61,8 @@
 - STORY-07 저장소 연결용 JSON 필드 및 검증 규칙 정의
 - STORY-08 Bitbucket 저장소 연결 및 미등록 저장소 대응 설계
 - STORY-09 브랜치별 연결 및 트리거 구성 생성
+- STORY-10 MSBuild 플랜용 Directory.Build.targets 사전 생성 지원
+- STORY-11 빌드 작업 하위 경로 지정 지원
 
 ## 오픈 이슈
 

@@ -2,7 +2,7 @@
 
 ## 개요
 
-현재 통합 CRS를 Jira 등록 가능한 단위로 분해한 초안이다. 상위 에픽 1건과 하위 스토리 9건으로 구성한다.
+현재 통합 CRS를 Jira 등록 가능한 단위로 분해한 초안이다. 상위 에픽 1건과 하위 스토리 11건으로 구성한다.
 
 ## 이슈 목록
 
@@ -16,6 +16,8 @@
 - [STORY-07 저장소 연결용 JSON 필드 및 검증 규칙 정의](./STORY-07-repository-json-fields.md)
 - [STORY-08 Bitbucket 저장소 연결 및 미등록 저장소 대응 설계](./STORY-08-bitbucket-linking-and-fallback.md)
 - [STORY-09 브랜치별 연결 및 트리거 구성 생성](./STORY-09-branch-trigger-mapping.md)
+- [STORY-10 MSBuild 플랜용 Directory.Build.targets 사전 생성 지원](./STORY-10-msbuild-directory-build-targets-override.md)
+- [STORY-11 빌드 작업 하위 경로 지정 지원](./STORY-11-build-working-subpath-support.md)
 
 ## 분해 기준
 
