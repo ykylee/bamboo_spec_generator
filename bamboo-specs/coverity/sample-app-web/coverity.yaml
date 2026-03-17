@@ -1,6 +1,0 @@
-capture:
-  build:
-    build-command: "python scripts/run_build.py --tool node --task build"
-  languages:
-    include:
-      - javascript
