@@ -33,6 +33,18 @@
         ]
       }
     },
+    "runtimeRequirements": {
+      "commands": [
+        "python3",
+        "npm",
+        "coverity",
+        "custom-tool",
+        "trigger-plan"
+      ],
+      "envVars": [
+        "PATH"
+      ]
+    },
     "postBuildTrigger": {
       "type": "plan",
       "targetPlanKey": "POSTWEB"

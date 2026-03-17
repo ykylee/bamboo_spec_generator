@@ -1,6 +1,6 @@
 # bamboo_spec_generator
 
-`bamboo_spec_generator`는 연도별 JSON 빌드 정의를 읽어 Bamboo Specs Java 코드와 보조 실행 파일을 생성하는 로컬 실행형 샘플 생성기입니다. 여러 빌드 플랜을 하나의 `bamboo-specs/` Maven 프로젝트 형태로 만들고, 이를 Bamboo Repository Stored Specs 또는 수동 Java Specs 배포 흐름에서 사용할 수 있도록 하는 것을 목표로 합니다.
+`bamboo_spec_generator`는 연도별 JSON 빌드 정의를 읽어 Bamboo Specs Java 코드를 생성하는 로컬 실행형 샘플 생성기입니다. 여러 빌드 플랜을 하나의 `bamboo-specs/` Maven 프로젝트 형태로 만들고, 이를 Bamboo Repository Stored Specs 또는 수동 Java Specs 배포 흐름에서 사용할 수 있도록 하는 것을 목표로 합니다.
 
 현재 저장소에는 요구사항 문서, 설계 문서, JSON 스키마 초안, Python 기반 초기 생성기 구현이 포함되어 있습니다.
 
@@ -8,7 +8,7 @@
 
 - 입력 JSON 파싱, 검증, 내부 모델 변환, 산출물 생성 흐름이 구현되어 있습니다.
 - 입력 루트 기본값은 `build_info_json/`, 출력 루트 기본값은 `bamboo-specs/`입니다.
-- 생성 결과에는 Bamboo Specs Java 소스, `pom.xml`, 빌드별 Coverity 설정, 빌드별 Python 실행 스크립트가 포함됩니다.
+- 생성 결과에는 Bamboo Specs Java 소스, `pom.xml`, 빌드별 Coverity 설정이 포함되며, Task 실행 로직은 Specs의 `ScriptTask.inlineBody(...)`에 직접 포함됩니다.
 - 테스트는 `unittest` 기반으로 일부 포함되어 있습니다.
 - 실제 Bamboo 서버 import 및 실행까지는 아직 검증되지 않았습니다.
 
@@ -52,6 +52,8 @@
 - `prepareCommand`: 준비 단계에서 실행할 실제 명령
 - `buildCommand`: 빌드 단계에서 실행할 실제 명령
 - `staticAnalysis.customTool.commands`: 커스텀 분석 단계 명령 목록
+- `runtimeRequirements.commands`: 에이전트에 있어야 하는 실행 명령 목록
+- `runtimeRequirements.envVars`: 에이전트에 있어야 하는 환경변수 목록
 - `postBuildTrigger`: 후속 플랜 트리거 설정
 
 중요한 점은 `prepareCommand`와 `buildCommand`가 생성기가 내부적으로 쓰는 스크립트 경로가 아니라, 실제 프로젝트에서 수행할 원본 준비/빌드 명령이라는 점입니다.
@@ -79,9 +81,13 @@
 - `vs2022` -> `system.builder.visualstudio.2022`
 - `nuget` -> `system.builder.nuget`
 
-MSBuild 기반 플랜은 생성된 Python 스크립트에서 실제 MSBuild 호출 직전에 `Directory.Build.targets`를 생성해 최적화 관련 옵션을 무력화합니다. 또한 Visual Studio 환경 설정 스크립트 경로는 `VS2022_ENV` 같은 에이전트 환경변수로 관리합니다.
+MSBuild 기반 플랜은 생성된 inline Python 코드에서 실제 MSBuild 호출 직전에 `Directory.Build.targets`를 생성해 최적화 관련 옵션을 무력화합니다. 또한 Visual Studio 환경 설정 스크립트 경로는 `VS2022_ENV` 같은 에이전트 환경변수로 관리합니다.
 
 `subPath`가 지정된 경우 준비, 빌드, 정적 분석 스크립트는 모두 해당 하위 경로를 작업 디렉터리로 사용합니다. MSBuild 플랜에서는 `Directory.Build.targets`도 같은 위치에 생성합니다.
+
+모든 생성 플랜은 작업 실행을 위해 Bamboo 에이전트에 Python 실행 환경이 있다고 가정하며, 생성된 Specs에는 `system.builder.python` requirement가 함께 포함됩니다.
+
+입력 JSON의 `runtimeRequirements`는 Bamboo capability로 직접 강제하기 어려운 런타임 전제 조건을 명시적으로 남기기 위한 블록입니다. 예를 들어 `coverity`, `custom-tool`, `trigger-plan`, `VS2022_ENV` 같은 항목을 각 빌드 단위로 기록합니다.
 
 ## 구현 구조
 
@@ -91,7 +97,7 @@ MSBuild 기반 플랜은 생성된 Python 스크립트에서 실제 MSBuild 호�
 - `parser.py`: JSON 입력 탐색 및 파싱
 - `validator.py`: 입력 검증
 - `model.py`: 내부 데이터 모델
-- `generator.py`: Java, Python 스크립트, Coverity 설정 생성
+- `generator.py`: Java Specs inline 스크립트와 Coverity 설정 생성
 - `writer.py`: 출력 파일 기록
 
 ## 요구 환경
@@ -101,6 +107,7 @@ MSBuild 기반 플랜은 생성된 Python 스크립트에서 실제 MSBuild 호�
 - Python 3
 - Java 17 이상
 - Maven 3.9 이상
+- Bamboo 에이전트에 등록된 Python capability (`system.builder.python`)
 
 권장 확인 명령:
 
@@ -123,6 +130,7 @@ MSBuild 샘플까지 함께 검토하려면 Windows 에이전트 또는 유사 �
 - Visual Studio 2022 또는 Build Tools 설치
 - `VS2022_ENV` 환경변수에 `VsDevCmd.bat` 또는 `vcvars*.bat` 경로 등록
 - Bamboo capability에 Visual Studio 및 `nuget` capability 등록
+- Bamboo capability에 Python capability 등록
 
 예:
 
@@ -178,13 +186,6 @@ bamboo-specs/
 ├── pom.xml
 ├── coverity/
 │   └── <buildId>/coverity.yaml
-├── scripts/
-│   └── generated/<buildId>/
-│       ├── prepare_build.py
-│       ├── run_build.py
-│       ├── run_coverity.py
-│       ├── run_custom_analysis.py
-│       └── trigger_follow_up.py
 └── src/main/java/com/example/specs/generated/
     ├── AllPlansRegistry.java
     ├── SpecsPublisher.java
@@ -221,22 +222,38 @@ mvn -q -DskipTests compile
 예:
 
 ```bash
+cd bamboo-specs
+mvn -q exec:java -Dexec.args="--dry-run"
+mvn -q exec:java -Dexec.args="--print-plans"
 export BAMBOO_URL=https://bamboo.example.com
 export BAMBOO_TOKEN_FILE=/path/to/.credentials
-cd bamboo-specs
 mvn -q exec:java
 ```
 
 Windows `cmd` 기준:
 
 ```bat
+cd bamboo-specs
+mvn -q exec:java -Dexec.args="--dry-run"
+mvn -q exec:java -Dexec.args="--print-plans"
 set BAMBOO_URL=https://bamboo.example.com
 set BAMBOO_TOKEN_FILE=C:\path\to\.credentials
-cd bamboo-specs
 mvn -q exec:java
 ```
 
 Repository Stored Specs로 사용할 경우에는 생성된 `bamboo-specs/` 디렉터리를 Bamboo가 읽는 저장소에 포함시키고, Bamboo에서 해당 저장소를 Specs 저장소로 등록하면 됩니다.
+
+## Bamboo 사전 점검
+
+실제 Bamboo 서버에 올리기 전에는 최소한 다음 항목을 확인해야 합니다.
+
+- Bamboo 서버 버전이 생성된 `pom.xml`의 Bamboo Specs 버전과 호환되는지 확인
+- Bamboo Linked Repository 이름이 `projectKey/repoSlug` 규칙과 일치하는지 확인
+- 대상 에이전트에 `system.builder.python` capability가 등록되어 있는지 확인
+- 빌드 명령이 사용하는 `mvn`, `npm`, `nuget`, `msbuild` 같은 도구가 에이전트에 설치되어 있는지 확인
+- 정적 분석/후속 단계가 사용하는 `coverity`, `custom-tool`, `trigger-plan` 명령이 에이전트에서 실행 가능한지 확인
+- Windows 플랜의 경우 `VS2022_ENV` 같은 환경변수가 올바른 Visual Studio 환경 스크립트를 가리키는지 확인
+- Repository Stored Specs로 쓸 경우 `bamboo-specs/` 디렉터리가 Bamboo가 읽는 저장소에 실제로 포함되는지 확인
 
 ## 테스트
 

@@ -35,6 +35,20 @@
         ]
       }
     },
+    "runtimeRequirements": {
+      "commands": [
+        "python",
+        "nuget",
+        "msbuild",
+        "coverity",
+        "custom-tool",
+        "trigger-plan"
+      ],
+      "envVars": [
+        "PATH",
+        "VS2022_ENV"
+      ]
+    },
     "postBuildTrigger": {
       "type": "plan",
       "targetPlanKey": "POSTMFC"

@@ -93,6 +93,22 @@ def validate_build_definitions(build_definitions: list[BuildDefinition]) -> None
             raise ValidationError(
                 f"Build '{build.build_id}' custom tool commands must include 'analyze {{buildCommand}}'."
             )
+        if not build.build.runtime_requirements.commands:
+            raise ValidationError(
+                f"Build '{build.build_id}' must define build.runtimeRequirements.commands."
+            )
+        if not build.build.runtime_requirements.env_vars:
+            raise ValidationError(
+                f"Build '{build.build_id}' must define build.runtimeRequirements.envVars."
+            )
+        if any(not command.strip() for command in build.build.runtime_requirements.commands):
+            raise ValidationError(
+                f"Build '{build.build_id}' build.runtimeRequirements.commands must not contain empty values."
+            )
+        if any(not env_var.strip() for env_var in build.build.runtime_requirements.env_vars):
+            raise ValidationError(
+                f"Build '{build.build_id}' build.runtimeRequirements.envVars must not contain empty values."
+            )
         if build.build.post_build_trigger.type != "plan":
             raise ValidationError(
                 f"Build '{build.build_id}' postBuildTrigger.type must be 'plan'."

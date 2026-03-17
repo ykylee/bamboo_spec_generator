@@ -19,6 +19,7 @@ class GeneratorFlowTest(unittest.TestCase):
             output_root = Path(temp_dir) / "bamboo-specs"
             written_files = write_specs_project(output_root, builds)
             pom_path = output_root / "pom.xml"
+            generated_readme_path = output_root / "README.md"
             sample_plan_path = (
                 output_root
                 / "src"
@@ -31,9 +32,6 @@ class GeneratorFlowTest(unittest.TestCase):
                 / "SampleAppApiPlanSpecs.java"
             )
             coverity_yaml_path = output_root / "coverity" / "sample-app-api" / "coverity.yaml"
-            prepare_script_path = output_root / "scripts" / "generated" / "sample-app-api" / "prepare_build.py"
-            api_coverity_script_path = output_root / "scripts" / "generated" / "sample-app-api" / "run_coverity.py"
-            api_custom_analysis_path = output_root / "scripts" / "generated" / "sample-app-api" / "run_custom_analysis.py"
             mfc_plan_path = (
                 output_root
                 / "src"
@@ -56,16 +54,22 @@ class GeneratorFlowTest(unittest.TestCase):
                 / "generated"
                 / "SpecsPublisher.java"
             )
-            mfc_run_build_path = output_root / "scripts" / "generated" / "sample-app-mfc" / "run_build.py"
-            mfc_prepare_path = output_root / "scripts" / "generated" / "sample-app-mfc" / "prepare_build.py"
-            mfc_custom_analysis_path = output_root / "scripts" / "generated" / "sample-app-mfc" / "run_custom_analysis.py"
 
             self.assertTrue(any(path.name == "AllPlansRegistry.java" for path in written_files))
             self.assertTrue(pom_path.exists())
+            self.assertTrue(generated_readme_path.exists())
             pom = pom_path.read_text(encoding="utf-8")
+            generated_readme = generated_readme_path.read_text(encoding="utf-8")
             self.assertIn("<artifactId>bamboo-specs-parent</artifactId>", pom)
             self.assertIn("<artifactId>bamboo-specs</artifactId>", pom)
             self.assertIn("<mainClass>com.example.specs.generated.SpecsPublisher</mainClass>", pom)
+            self.assertIn("## 사전 점검", generated_readme)
+            self.assertIn("## 빌드별 런타임 요구사항", generated_readme)
+            self.assertIn("system.builder.python", generated_readme)
+            self.assertIn("coverity", generated_readme)
+            self.assertIn("trigger-plan", generated_readme)
+            self.assertIn("sample-app-api", generated_readme)
+            self.assertIn("VS2022_ENV", generated_readme)
             self.assertTrue(
                 (output_root / "src" / "main" / "java" / "com" / "example" / "specs" / "generated").exists()
             )
@@ -76,60 +80,32 @@ class GeneratorFlowTest(unittest.TestCase):
             self.assertIn(".linkedRepositories(LINKED_REPOSITORY)", sample_plan)
             self.assertIn('Requirement.equals("operating.system", "Linux")', sample_plan)
             self.assertIn('Requirement.exists("system.builder.mvn3.Maven 3")', sample_plan)
-            self.assertIn('.fileFromPath(SCRIPT_ROOT + "/run_coverity.py")', sample_plan)
-            self.assertIn('.fileFromPath(SCRIPT_ROOT + "/run_custom_analysis.py")', sample_plan)
+            self.assertIn('Requirement.exists("system.builder.python")', sample_plan)
+            self.assertIn('.inlineBody("python3 -c \\"import base64;exec(base64.b64decode(', sample_plan)
             self.assertIn("new VcsCheckoutTask().addCheckoutOfDefaultRepository()", sample_plan)
             self.assertTrue(coverity_yaml_path.exists())
             self.assertIn(
                 'build-command: "mvn -B clean package"',
                 coverity_yaml_path.read_text(encoding="utf-8"),
             )
-            self.assertTrue(prepare_script_path.exists())
-            prepare_script = prepare_script_path.read_text(encoding="utf-8")
-            self.assertIn("WORKING_DIRECTORY = Path('services/sample-app-api')", prepare_script)
-            self.assertIn("import shlex", prepare_script)
-            self.assertIn("shlex.split(command, posix=os.name != \"nt\")", prepare_script)
-            self.assertTrue(api_coverity_script_path.exists())
-            api_coverity_script = api_coverity_script_path.read_text(encoding="utf-8")
-            self.assertIn("WORKING_DIRECTORY = Path('services/sample-app-api')", api_coverity_script)
-            self.assertIn('CONFIG_PATH = REPOSITORY_ROOT / "coverity" / "sample-app-api" / "coverity.yaml"', api_coverity_script)
-            self.assertIn("cwd=WORKING_DIRECTORY", api_coverity_script)
-            self.assertTrue(api_custom_analysis_path.exists())
-            api_custom_analysis = api_custom_analysis_path.read_text(encoding="utf-8")
-            self.assertIn("WORKING_DIRECTORY = Path('services/sample-app-api')", api_custom_analysis)
-            self.assertIn("cwd=WORKING_DIRECTORY", api_custom_analysis)
+            self.assertFalse((output_root / "scripts").exists())
             self.assertTrue(mfc_plan_path.exists())
             mfc_plan = mfc_plan_path.read_text(encoding="utf-8")
             self.assertIn("@BambooSpec", mfc_plan)
             self.assertIn('Requirement.exists("system.builder.visualstudio.2022")', mfc_plan)
             self.assertIn('Requirement.exists("system.builder.nuget")', mfc_plan)
+            self.assertIn('Requirement.exists("system.builder.python")', mfc_plan)
             self.assertIn('private static final String LINKED_REPOSITORY = "SAMPLE/sample-app-mfc";', mfc_plan)
             self.assertIn(".linkedRepositories(LINKED_REPOSITORY)", mfc_plan)
+            self.assertIn('.inlineBody("python -c \\"import base64;exec(base64.b64decode(', mfc_plan)
             self.assertTrue(specs_publisher_path.exists())
             specs_publisher = specs_publisher_path.read_text(encoding="utf-8")
             self.assertIn("BambooServer", specs_publisher)
             self.assertIn("FileTokenCredentials", specs_publisher)
+            self.assertIn('Arrays.asList(args).contains("--dry-run")', specs_publisher)
+            self.assertIn('Arrays.asList(args).contains("--print-plans")', specs_publisher)
+            self.assertIn('System.out.println("DRY RUN: " + plan.toString());', specs_publisher)
             self.assertIn("server.publish(plan);", specs_publisher)
-            self.assertTrue(mfc_run_build_path.exists())
-            mfc_run_build = mfc_run_build_path.read_text(encoding="utf-8")
-            self.assertIn("WORKING_DIRECTORY = Path('src/SampleAppMfc')", mfc_run_build)
-            self.assertIn('(WORKING_DIRECTORY / "Directory.Build.targets").write_text', mfc_run_build)
-            self.assertIn("<Optimization>Disabled</Optimization>", mfc_run_build)
-            self.assertIn("<WholeProgramOptimization>false</WholeProgramOptimization>", mfc_run_build)
-            self.assertIn('env_var_name = "VS2022_ENV"', mfc_run_build)
-            self.assertIn('return ["cmd.exe", "/d", "/s", "/c", f\'call "{vcvars_path}" && {command}\']', mfc_run_build)
-            self.assertIn("return run_command(command)", mfc_run_build)
-            self.assertTrue(mfc_prepare_path.exists())
-            mfc_prepare = mfc_prepare_path.read_text(encoding="utf-8")
-            self.assertIn("WORKING_DIRECTORY = Path('src/SampleAppMfc')", mfc_prepare)
-            self.assertIn('env_var_name = "VS2022_ENV"', mfc_prepare)
-            self.assertIn("return run_command(command)", mfc_prepare)
-            self.assertTrue(mfc_custom_analysis_path.exists())
-            mfc_custom_analysis = mfc_custom_analysis_path.read_text(encoding="utf-8")
-            self.assertIn("WORKING_DIRECTORY = Path('src/SampleAppMfc')", mfc_custom_analysis)
-            self.assertIn('env_var_name = "VS2022_ENV"', mfc_custom_analysis)
-            self.assertIn('(WORKING_DIRECTORY / "Directory.Build.targets").write_text', mfc_custom_analysis)
-            self.assertIn("result = run_command(command)", mfc_custom_analysis)
 
 
 if __name__ == "__main__":

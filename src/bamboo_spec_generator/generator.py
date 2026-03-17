@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import base64
+
 from .model import BuildDefinition
 
 BAMBOO_SPECS_VERSION = "11.0.8"
@@ -13,8 +15,8 @@ def generate_plan_java(build: BuildDefinition, package_name: str) -> str:
     class_name = to_java_class_name(build.build_id)
     description = _escape_java(build.description or build.name)
     project_key = _project_key(build.year)
-    build_script_root = f"scripts/generated/{build.build_id}"
     linked_repository_name = _linked_repository_name(build)
+    python_scripts = generate_python_scripts(build)
 
     return f"""package {package_name};
 
@@ -32,7 +34,6 @@ public class {class_name} {{
     private static final String PROJECT_KEY = "{project_key}";
     private static final String PLAN_KEY = "{build.plan_key}";
     private static final String YEAR = "{build.year}";
-    private static final String SCRIPT_ROOT = "{build_script_root}";
     private static final String LINKED_REPOSITORY = "{linked_repository_name}";
 
     public Plan plan() {{
@@ -61,9 +62,7 @@ public class {class_name} {{
 {_requirements_chain(build, 4)}
                 .tasks(
                     new VcsCheckoutTask().addCheckoutOfDefaultRepository(),
-                    new ScriptTask()
-                        .fileFromPath(SCRIPT_ROOT + "/prepare_build.py")
-                        .interpreterShell()
+{_script_task(build, python_scripts["prepare_build.py"], 20)}
                 ));
     }}
 
@@ -73,9 +72,7 @@ public class {class_name} {{
 {_requirements_chain(build, 4)}
                 .tasks(
                     new VcsCheckoutTask().addCheckoutOfDefaultRepository(),
-                    new ScriptTask()
-                        .fileFromPath(SCRIPT_ROOT + "/run_build.py")
-                        .interpreterShell()
+{_script_task(build, python_scripts["run_build.py"], 20)}
                 ));
     }}
 
@@ -86,17 +83,13 @@ public class {class_name} {{
 {_requirements_chain(build, 5)}
                     .tasks(
                         new VcsCheckoutTask().addCheckoutOfDefaultRepository(),
-                        new ScriptTask()
-                            .fileFromPath(SCRIPT_ROOT + "/run_coverity.py")
-                            .interpreterShell()
+{_script_task(build, python_scripts["run_coverity.py"], 24)}
                     ),
                 new Job("Custom Analysis", "CUST")
 {_requirements_chain(build, 5)}
                     .tasks(
                         new VcsCheckoutTask().addCheckoutOfDefaultRepository(),
-                        new ScriptTask()
-                            .fileFromPath(SCRIPT_ROOT + "/run_custom_analysis.py")
-                            .interpreterShell()
+{_script_task(build, python_scripts["run_custom_analysis.py"], 24)}
                     )
             );
     }}
@@ -104,9 +97,9 @@ public class {class_name} {{
     private Stage triggerFollowUpStage() {{
         return new Stage("Trigger Follow-up")
             .jobs(new Job("Trigger Job", "TRIG")
-                .tasks(new ScriptTask()
-                    .fileFromPath(SCRIPT_ROOT + "/trigger_follow_up.py")
-                    .interpreterShell()));
+                .tasks(
+{_script_task(build, python_scripts["trigger_follow_up.py"], 20)}
+                ));
     }}
 }}
 """
@@ -153,6 +146,7 @@ def generate_specs_publisher_java(package_name: str) -> str:
 import com.atlassian.bamboo.specs.api.builders.plan.Plan;
 import com.atlassian.bamboo.specs.util.BambooServer;
 import com.atlassian.bamboo.specs.util.FileTokenCredentials;
+import java.util.Arrays;
 import java.util.List;
 
 public final class SpecsPublisher {{
@@ -160,6 +154,20 @@ public final class SpecsPublisher {{
     }}
 
     public static void main(String[] args) {{
+        List<Plan> plans = AllPlansRegistry.plans();
+        if (Arrays.asList(args).contains("--print-plans")) {{
+            for (Plan plan : plans) {{
+                System.out.println(plan.toString());
+            }}
+            return;
+        }}
+        if (Arrays.asList(args).contains("--dry-run")) {{
+            for (Plan plan : plans) {{
+                System.out.println("DRY RUN: " + plan.toString());
+            }}
+            return;
+        }}
+
         String bambooUrl = System.getenv("BAMBOO_URL");
         if (bambooUrl == null || bambooUrl.isBlank()) {{
             throw new IllegalStateException("BAMBOO_URL environment variable is required.");
@@ -167,7 +175,6 @@ public final class SpecsPublisher {{
 
         String credentialsFile = System.getenv().getOrDefault("BAMBOO_TOKEN_FILE", ".credentials");
         BambooServer server = new BambooServer(bambooUrl, new FileTokenCredentials(credentialsFile));
-        List<Plan> plans = AllPlansRegistry.plans();
         for (Plan plan : plans) {{
             server.publish(plan);
         }}
@@ -228,10 +235,6 @@ def generate_pom_xml(package_name: str) -> str:
     </plugins>
     <resources>
       <resource>
-        <directory>scripts</directory>
-        <targetPath>scripts</targetPath>
-      </resource>
-      <resource>
         <directory>coverity</directory>
         <targetPath>coverity</targetPath>
       </resource>
@@ -246,6 +249,7 @@ def generate_python_scripts(build: BuildDefinition) -> dict[str, str]:
     custom_tool_command_lines = ",\n        ".join(repr(command) for command in custom_tool_commands)
     prepare_build_script = _generate_prepare_build_script(build)
     run_build_script = _generate_run_build_script(build)
+    coverity_config = generate_coverity_yaml(build)
     run_custom_analysis_script = _generate_run_custom_analysis_script(build, custom_tool_command_lines)
 
     return {
@@ -256,16 +260,24 @@ from __future__ import annotations
 
 from pathlib import Path
 import subprocess
+import tempfile
 
 
 WORKING_DIRECTORY = Path({build.build.sub_path!r})
-REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
-CONFIG_PATH = REPOSITORY_ROOT / "coverity" / "{build.build_id}" / "coverity.yaml"
+CONFIG_CONTENT = {coverity_config!r}
 
 
 def main() -> int:
-    command = ["coverity", "scan", "--config", str(CONFIG_PATH)]
-    return subprocess.run(command, cwd=WORKING_DIRECTORY, check=False).returncode
+    with tempfile.NamedTemporaryFile("w", encoding="utf-8", suffix=".yaml", delete=False) as config_file:
+        config_file.write(CONFIG_CONTENT)
+        config_path = Path(config_file.name)
+
+    try:
+        command = ["coverity", "scan", "--config", str(config_path)]
+        return subprocess.run(command, cwd=WORKING_DIRECTORY, check=False).returncode
+    finally:
+        if config_path.exists():
+            config_path.unlink()
 
 
 if __name__ == "__main__":
@@ -521,13 +533,42 @@ def _coverity_language(language: str) -> str:
 
 def _requirements_chain(build: BuildDefinition, indent_size: int) -> str:
     indent = " " * indent_size
-    lines = [
-        f'{indent}.requirements(Requirement.equals("operating.system", "{_normalize_os(build.requirements.os)}"))',
-        f'{indent}.requirements(Requirement.exists("{_escape_java(_compiler_capability_key(build.compiler))}"))',
-    ]
-    for capability in build.requirements.extra_capabilities:
-        lines.append(f'{indent}.requirements(Requirement.exists("{_escape_java(_extra_capability_key(capability))}"))')
+    lines = [f'{indent}.requirements(Requirement.equals("operating.system", "{_normalize_os(build.requirements.os)}"))']
+    for capability in _required_capability_keys(build):
+        lines.append(f'{indent}.requirements(Requirement.exists("{_escape_java(capability)}"))')
     return "\n".join(lines)
+
+
+def _required_capability_keys(build: BuildDefinition) -> list[str]:
+    capability_keys = [_compiler_capability_key(build.compiler)]
+    capability_keys.extend(_extra_capability_key(capability) for capability in build.requirements.extra_capabilities)
+    capability_keys.append(_runtime_python_capability_key())
+
+    ordered_unique: list[str] = []
+    for capability_key in capability_keys:
+        if capability_key not in ordered_unique:
+            ordered_unique.append(capability_key)
+    return ordered_unique
+
+
+def _runtime_python_capability_key() -> str:
+    return "system.builder.python"
+
+
+def _script_task(build: BuildDefinition, python_script: str, indent_size: int) -> str:
+    indent = " " * indent_size
+    command = _escape_java(_python_inline_command(build, python_script))
+    return (
+        f"{indent}new ScriptTask()\n"
+        f'{indent}    .inlineBody("{command}")\n'
+        f"{indent}    .interpreterShell()"
+    )
+
+
+def _python_inline_command(build: BuildDefinition, python_script: str) -> str:
+    python_command = "python" if build.requirements.os.lower() == "windows" else "python3"
+    encoded_script = base64.b64encode(python_script.encode("utf-8")).decode("ascii")
+    return f'{python_command} -c "import base64;exec(base64.b64decode(\'{encoded_script}\').decode(\'utf-8\'))"'
 
 
 def _normalize_os(value: str) -> str:
@@ -559,6 +600,7 @@ def _extra_capability_key(capability: str) -> str:
     mapping = {
         "cuda12.1": "system.cuda.12.1",
         "nuget": "system.builder.nuget",
+        "python": "system.builder.python",
     }
     return mapping.get(capability, capability)
 

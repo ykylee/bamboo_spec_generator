@@ -24,6 +24,12 @@ class StaticAnalysisDefinition:
 
 
 @dataclass(frozen=True)
+class RuntimeRequirementsDefinition:
+    commands: list[str]
+    env_vars: list[str]
+
+
+@dataclass(frozen=True)
 class PostBuildTriggerDefinition:
     type: str
     target_plan_key: str
@@ -35,6 +41,7 @@ class BuildConfigDefinition:
     prepare_command: str
     build_command: str
     static_analysis: StaticAnalysisDefinition
+    runtime_requirements: RuntimeRequirementsDefinition
     post_build_trigger: PostBuildTriggerDefinition
 
 
