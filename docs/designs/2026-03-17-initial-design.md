@@ -45,9 +45,8 @@
 │       └── build-b.json
 ├── base/
 │   └── bamboo-specs/
-├── generated_specs/
-│   └── bamboo-specs/
-│       └── src/main/java/com/example/specs/
+├── bamboo-specs/
+│   └── src/main/java/com/example/specs/
 └── src/
     ├── parser/
     ├── validator/
@@ -80,15 +79,19 @@
   - `buildId`
   - `planKey`
   - `name`
-  - `stages`
-- `StageDefinition`
-  - `name`
-  - `jobs`
-- `JobDefinition`
-  - `name`
-  - `tasks`
+  - `language`
+  - `compiler`
+  - `requirements`
+  - `buildConfig`
+- `RequirementsDefinition`
+  - `os`
+  - `extraCapabilities`
+- `BuildConfig`
+  - `buildCommand`
+  - `staticAnalysis`
+  - `trigger`
 
-이 모델은 MVP 기준 최소 구조이며, 이후 트리거, 브랜치, 변수, 권한 등을 확장할 수 있다.
+이 모델은 MVP 기준 최소 구조이며, 스테이지 자체는 입력이 아니라 공통 워크플로우 템플릿으로 고정한다. 이후 트리거, 브랜치, 변수, 권한 등을 확장할 수 있다.
 
 ### 4. 입력 관리 전략
 
@@ -96,21 +99,38 @@
 - JSON 내부에는 `year` 필드를 두지 않는다.
 - 빌드 정보 JSON 파일 저장 루트는 `build_info_json/`를 사용한다.
 - 입력 루트 예시는 `build_info_json/<year>/*.json` 형태를 권장한다.
+- JSON은 스테이지 정의 전체를 포함하지 않고, 언어 및 컴파일러 환경에 따른 빌드 상세 정보만 담는다.
 
-### 5. 산출물 관리 전략
+### 5. 공통 워크플로우 전략
 
-- 출력 루트는 `generated_specs/bamboo-specs/`를 기본값으로 둔다.
+- 모든 플랜은 동일한 공통 워크플로우를 사용한다.
+- 스테이지 순서는 다음과 같이 고정한다.
+  1. 빌드 준비
+  2. 빌드
+  3. 정적분석
+  4. 후속 작업 트리거
+- 정적분석 스테이지 내부에는 2개의 병렬 Job을 둔다.
+- 정적분석 Job 1은 Coverity 실행을 담당한다.
+- 정적분석 Job 2는 커스텀툴 실행을 담당하며 `analyze {build command}` 형태의 명령을 포함한다.
+- JSON 입력은 이 공통 워크플로우 안에서 달라지는 빌드 상세 설정만 제공한다.
+- ScriptTask에 전달하는 실제 명령은 가능하면 shell 전용 문법 대신 Python 스크립트 호출 형태로 구성해 Windows와 Linux 호환성을 높인다.
+- 빌드가 포함된 Job에는 compiler와 OS 기반 requirement를 함께 설정한다.
+- 프로젝트 특성에 따라 `cuda12.1`, `nuget` 같은 추가 capability requirement를 붙일 수 있다.
+
+### 6. 산출물 관리 전략
+
+- 출력 루트는 루트의 `bamboo-specs/`를 기본값으로 둔다.
 - 여러 빌드 정의는 하나의 Bamboo Specs 프로젝트 안에 함께 생성한다.
 - 빌드별 식별은 클래스명, 파일명, 패키지 구조 또는 보조 메타데이터로 유지한다.
 - Bamboo는 이 단일 Specs 저장소를 스캔해 전체 플랜 변경을 반영하는 운영 모델을 사용한다.
 
-### 6. Base 코드 관리 전략
+### 7. Base 코드 관리 전략
 
 - Base 코드는 `base/bamboo-specs/` 아래에 둔다.
 - 원본 유지가 필요한 경우 `upstream/`와 `custom/`를 분리하는 방식을 권장한다.
 - 생성기는 Base 코드 전체를 수정하기보다 템플릿, 참조 클래스, 조합 계층을 통해 활용하는 쪽이 유지보수에 유리하다.
 
-### 7. 오류 처리 전략
+### 8. 오류 처리 전략
 
 - 기본 정책은 파일 단위 실패 격리다.
 - 유효하지 않은 특정 JSON이 있어도 다른 유효한 입력 처리는 계속할 수 있게 설계하는 쪽이 운영상 유리하다.
@@ -136,6 +156,7 @@
 ## 영향 범위
 
 - 입력 파일 구조 표준 정의 필요
+- 공통 워크플로우 템플릿 정의 필요
 - 생성기 애플리케이션 구조 결정 필요
 - Base 코드 저장 위치와 관리 정책 결정 필요
 - 단일 Specs 저장소 반영 시 운영 배포 정책 정의 필요
@@ -153,6 +174,7 @@
 - 구현 언어와 빌드 도구를 무엇으로 선택할지 결정 필요
 - 템플릿 기반 생성과 AST/모델 기반 생성 중 어떤 방식을 택할지 결정 필요
 - 최소 지원 Bamboo 구성 요소 범위 확정 필요
+- 공통 워크플로우 각 스테이지의 세부 Task 구성을 어떤 수준까지 고정할지 결정 필요
 - Base 코드 라이선스 확인 필요
 - 단일 저장소 커밋이 여러 플랜에 동시에 영향을 줄 때 승인 또는 배포 절차를 어떻게 둘지 결정 필요
 

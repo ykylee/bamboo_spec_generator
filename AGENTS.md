@@ -22,10 +22,10 @@
 - 현재 이 저장소에는 정해진 설치, 빌드, 린트, 테스트 명령이 없습니다.
 - 관련 프로젝트 파일이 생기기 전까지 특정 언어 런타임이나 패키지 매니저를 가정하지 않습니다.
 - 도구가 추가되면 아래 형식으로 표준 명령을 기록합니다.
-- Install: `<command>`
-- Build: `<command>`
-- Lint: `<command>`
-- Test: `<command>`
+- Install: `별도 설치 없음`
+- Build: `PYTHONPATH=. python3 -m src.bamboo_spec_generator.cli`
+- Lint: `현재 별도 린트 명령 없음`
+- Test: `PYTHONPATH=. python3 -m unittest discover -s tests`
 
 ## 코드 스타일
 
@@ -33,6 +33,7 @@
 - 성급한 추상화보다 명확한 이름과 단순한 구조를 우선합니다.
 - 주석은 꼭 필요한 경우에만 짧게 추가하고, 코드만으로 의도가 충분히 드러나면 생략합니다.
 - 프로젝트 방향상 타당한 이유가 없으면 큰 의존성이나 생성기를 추가하지 않습니다.
+- Bamboo 빌드 Task에서 스크립트를 사용할 때는 가능하면 Windows와 Linux에서 모두 호환될 수 있도록 shell 전용 스크립트보다 Python 스크립트 호출 방식을 우선합니다.
 
 ## 테스트
 

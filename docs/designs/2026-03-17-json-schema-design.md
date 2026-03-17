@@ -10,13 +10,13 @@
 
 ## 요약
 
-이 문서는 Bamboo Specs 생성기에 입력으로 사용할 JSON 빌드 정의 스키마 초안을 제안한다. 연도 정보는 JSON 내부가 아니라 디렉터리 경로에서 관리하며, JSON은 개별 빌드 정의 자체에만 집중한다.
+이 문서는 Bamboo Specs 생성기에 입력으로 사용할 JSON 빌드 정의 스키마 초안을 제안한다. 연도 정보는 JSON 내부가 아니라 디렉터리 경로에서 관리하며, JSON은 개별 빌드 정의의 언어 및 빌드 상세 설정에 집중한다. 스테이지 워크플로우는 공통 템플릿으로 고정한다.
 
 ## 배경
 
 - 연도별 운영 기준을 디렉터리 구조로 확정했다.
 - 따라서 JSON은 빌드 정의의 내용만 표현하고, 관리 메타데이터 일부는 파일 시스템 구조가 담당한다.
-- 초기 MVP에서는 최소 Bamboo 플랜 생성에 필요한 필드만 포함하는 것이 적절하다.
+- 초기 MVP에서는 최소 Bamboo 플랜 생성에 필요한 필드만 포함하고, 공통 스테이지 정의는 입력에서 제외하는 것이 적절하다.
 
 ## 목표
 
@@ -46,7 +46,22 @@ build_info_json/
     └── sample-app-web.json
 ```
 
-### 2. 최상위 JSON 구조
+### 2. 공통 워크플로우 전제
+
+- 모든 플랜은 동일한 워크플로우를 사용한다.
+- 스테이지 순서는 다음과 같이 고정한다.
+  1. 빌드 준비
+  2. 빌드
+  3. 정적분석
+  4. 후속 작업 트리거
+- 정적분석 스테이지는 2개의 병렬 Job으로 실행한다.
+- 정적분석 Job 1은 Coverity로 고정한다.
+- 정적분석 Job 2는 커스텀툴로 고정하며, 명령어 셋 안에 `analyze {build command}` 형태를 포함한다.
+- Coverity Job은 생성기가 만든 `coverity.yaml`을 사용해 `coverity scan` 명령으로 실행한다.
+- 스크립트 실행 명령은 가능하면 shell 전용 스크립트 대신 Python 스크립트 호출 형태를 사용한다.
+- JSON은 이 워크플로우 전체를 정의하지 않고, 각 스테이지에서 사용할 빌드 상세 설정만 제공한다.
+
+### 3. 최상위 JSON 구조
 
 ```json
 {
@@ -54,32 +69,39 @@ build_info_json/
   "name": "Sample App API",
   "planKey": "SAMPAPI",
   "description": "Sample App API build plan",
+  "language": "java",
+  "compiler": "maven",
   "repository": {
     "name": "sample-app-repo",
     "branch": "main"
   },
-  "stages": [
-    {
-      "name": "Build",
-      "jobs": [
-        {
-          "key": "BUILD",
-          "name": "Build Job",
-          "tasks": [
-            {
-              "type": "script",
-              "description": "Run Gradle build",
-              "inlineBody": "./gradlew clean build"
-            }
+  "requirements": {
+    "os": "linux",
+    "extraCapabilities": [
+      "cuda12.1"
+    ]
+  },
+  "build": {
+    "prepareCommand": "python scripts/prepare_build.py --tool maven",
+    "buildCommand": "python scripts/run_build.py --tool maven --goal package",
+    "staticAnalysis": {
+        "customTool": {
+          "commands": [
+            "python scripts/custom_tool.py init",
+            "custom-tool analyze {buildCommand}",
+            "python scripts/custom_tool.py publish"
           ]
         }
-      ]
+    },
+    "postBuildTrigger": {
+      "type": "plan",
+      "targetPlanKey": "POSTBUILD"
     }
-  ]
+  }
 }
 ```
 
-### 3. 필드 정의
+### 4. 필드 정의
 
 #### 최상위 필드
 
@@ -99,14 +121,26 @@ build_info_json/
   - 타입: `string`
   - 필수: 아니오
   - 설명: 플랜 설명
+- `language`
+  - 타입: `string`
+  - 필수: 예
+  - 설명: 빌드 대상 언어
+- `compiler`
+  - 타입: `string`
+  - 필수: 예
+  - 설명: 컴파일러 또는 빌드 도구 식별자
 - `repository`
   - 타입: `object`
   - 필수: 예
   - 설명: 소스 저장소 정보
-- `stages`
-  - 타입: `array`
+- `requirements`
+  - 타입: `object`
   - 필수: 예
-  - 설명: Bamboo 플랜의 단계 목록
+  - 설명: 빌드 Job에 적용할 agent capability 요구사항
+- `build`
+  - 타입: `object`
+  - 필수: 예
+  - 설명: 공통 워크플로우 내 상세 빌드 설정
 
 #### repository
 
@@ -119,68 +153,116 @@ build_info_json/
   - 필수: 예
   - 설명: 기본 브랜치
 
-#### stages[]
+#### requirements
 
-- `name`
+- `os`
   - 타입: `string`
   - 필수: 예
-  - 설명: 스테이지 이름
-- `jobs`
-  - 타입: `array`
-  - 필수: 예
-  - 설명: 스테이지에 속한 작업 목록
+  - 허용 초안 값: `windows`, `linux`
+  - 설명: 에이전트 OS capability 요구사항
+- `extraCapabilities`
+  - 타입: `array<string>`
+  - 필수: 아니오
+  - 설명: 프로젝트 특성에 따른 보조 capability 목록. 예: `cuda12.1`, `nuget`
 
-#### jobs[]
+#### build
 
-- `key`
+- `prepareCommand`
   - 타입: `string`
   - 필수: 예
-  - 설명: Bamboo Job 키
-- `name`
+  - 설명: 빌드 준비 스테이지에서 사용할 명령. 가능하면 Python 스크립트 호출 형태를 사용한다.
+- `buildCommand`
   - 타입: `string`
   - 필수: 예
-  - 설명: Job 이름
-- `tasks`
-  - 타입: `array`
+  - 설명: 빌드 스테이지에서 사용할 명령. 가능하면 Python 스크립트 호출 형태를 사용한다.
+- `staticAnalysis`
+  - 타입: `object`
   - 필수: 예
-  - 설명: Job에서 실행할 태스크 목록
+  - 설명: 정적분석 스테이지의 2개 병렬 Job에서 사용할 명령 집합
+- `postBuildTrigger`
+  - 타입: `object`
+  - 필수: 예
+  - 설명: 후속 작업 트리거 설정
 
-#### tasks[]
+#### staticAnalysis
+
+- `customTool`
+  - 타입: `object`
+  - 필수: 예
+  - 설명: 커스텀툴 실행 명령어 셋
+
+#### customTool
+
+- `commands`
+  - 타입: `array<string>`
+  - 필수: 예
+  - 설명: 커스텀툴 실행 순서대로 사용할 명령 목록. 가능하면 Python 스크립트 호출 형태를 사용한다.
+
+#### postBuildTrigger
 
 - `type`
   - 타입: `string`
   - 필수: 예
-  - 허용 초안 값: `script`
-  - 설명: 태스크 타입
-- `description`
+  - 허용 초안 값: `plan`
+- `targetPlanKey`
   - 타입: `string`
-  - 필수: 아니오
-  - 설명: 태스크 설명
-- `inlineBody`
-  - 타입: `string`
-  - 필수: `type=script`일 때 예
-  - 설명: 인라인 스크립트 본문
+  - 필수: 예
 
-### 4. 검증 규칙
+### 5. 검증 규칙
 
 - `buildId`는 동일 연도 디렉터리 내에서 유일해야 한다.
 - `planKey`는 전체 입력 집합에서 중복되지 않아야 한다.
-- `stages`는 최소 1개 이상이어야 한다.
-- 각 `stage.jobs`는 최소 1개 이상이어야 한다.
-- 각 `job.tasks`는 최소 1개 이상이어야 한다.
-- 초기 MVP에서는 `tasks[].type`으로 `script`만 지원한다.
+- `language`와 `compiler`는 지원 가능한 조합 목록에 포함되어야 한다.
+- `compiler`는 현재 `vs2013`, `vs2015`, `vs2017`, `vs2019`, `vs2022`, `vs2026`, `node.js`, `python`, `maven`, `keil`, `cmake`만 지원한다.
+- `requirements.os`는 `windows` 또는 `linux`만 허용한다.
+- `build.prepareCommand`, `build.buildCommand`는 비어 있으면 안 된다.
+- `build.staticAnalysis.customTool.commands`는 최소 1개 이상이어야 한다.
+- `build.staticAnalysis.customTool.commands` 중 하나는 `analyze {build command}` 패턴을 충족해야 한다.
+- 스크립트 명령은 가능하면 Python 실행 형태로 작성해야 한다.
+- `postBuildTrigger.type`은 초기 MVP에서 `plan`만 지원한다.
 - 연도는 JSON이 아니라 상위 디렉터리명에서 해석한다.
+- 스테이지 구조는 JSON이 아니라 공통 워크플로우 템플릿으로 고정한다.
 
-### 5. 내부 모델 매핑 초안
+### 6. 내부 모델 매핑 초안
 
 - 디렉터리명 `2026` -> 내부 모델 `year`
 - `buildId` -> 내부 모델 `buildId`
 - `name` -> 내부 모델 `name`
 - `planKey` -> 내부 모델 `planKey`
+- `language` -> 내부 모델 `language`
+- `compiler` -> 내부 모델 `compiler`
 - `repository` -> 내부 모델 `repository`
-- `stages[].jobs[].tasks[]` -> Bamboo Specs 단계/잡/태스크 모델
+- `requirements.os` -> OS capability requirement
+- `requirements.extraCapabilities[]` -> 추가 capability requirements
+- `build.buildCommand` -> Coverity용 `coverity.yaml`의 `build-command` 값
+- `build.staticAnalysis.customTool.commands` -> 커스텀툴 Job 명령 셋
+- `build.*` -> 공통 워크플로우 템플릿에 주입할 상세 설정
 
-### 6. 확장 포인트
+### 7. Capability 매핑 규칙
+
+- 입력 JSON의 `compiler`와 `requirements.extraCapabilities`는 사용자 친화적인 식별자를 사용한다.
+- 생성기는 이를 Bamboo capability key로 변환한다.
+
+#### compiler -> capability key
+
+- `vs2013` -> `system.builder.visualstudio.2013`
+- `vs2015` -> `system.builder.visualstudio.2015`
+- `vs2017` -> `system.builder.visualstudio.2017`
+- `vs2019` -> `system.builder.visualstudio.2019`
+- `vs2022` -> `system.builder.visualstudio.2022`
+- `vs2026` -> `system.builder.visualstudio.2026`
+- `node.js` -> `system.builder.nodejs`
+- `python` -> `system.builder.python`
+- `maven` -> `system.builder.mvn3.Maven 3`
+- `keil` -> `system.builder.keil`
+- `cmake` -> `system.builder.cmake`
+
+#### extra capability -> capability key
+
+- `cuda12.1` -> `system.cuda.12.1`
+- `nuget` -> `system.builder.nuget`
+
+### 7. 확장 포인트
 
 - `variables`
 - `triggers`
@@ -198,7 +280,12 @@ build_info_json/
 - 장점: 단일 파일만 봐도 연도를 알 수 있다.
 - 단점: 디렉터리 기준 정보와 중복되어 불일치 가능성이 생긴다.
 
-### 대안 2. 모든 빌드를 배열로 묶은 단일 JSON
+### 대안 2. JSON에 스테이지 정의까지 모두 포함
+
+- 장점: 플랜 구조를 데이터로 완전히 제어할 수 있다.
+- 단점: 모든 플랜이 동일 워크플로우를 사용해야 한다는 요구와 충돌하고 입력이 불필요하게 복잡해진다.
+
+### 대안 3. 모든 빌드를 배열로 묶은 단일 JSON
 
 - 장점: 파일 수가 줄어든다.
 - 단점: 빌드별 변경 추적과 개별 관리가 어려워진다.
@@ -214,8 +301,9 @@ build_info_json/
 ## 수용 기준
 
 - 연도는 디렉터리 구조로 관리된다는 규칙이 명시되어 있다.
+- 공통 워크플로우가 고정되고 JSON이 빌드 상세 정보만 담는다는 규칙이 명시되어 있다.
 - 최상위 필수 필드와 하위 객체 구조가 정의되어 있다.
-- MVP에서 지원할 최소 태스크 구조가 정의되어 있다.
+- Coverity와 커스텀툴 명령 구조가 정의되어 있다.
 - 검증 규칙과 확장 포인트가 정리되어 있다.
 - 검토 가능한 예시 JSON이 포함되어 있다.
 
@@ -223,7 +311,8 @@ build_info_json/
 
 - `repository` 구조를 어디까지 상세화할지 결정 필요
 - `planKey` 네이밍 규칙을 별도 제약으로 둘지 결정 필요
-- 초기 MVP에 `script` 외 태스크 타입을 포함할지 결정 필요
+- 지원 가능한 `language`와 `compiler` 조합 목록 확정 필요
+- 커스텀툴 명령어 셋에서 고정 명령과 사용자 입력 명령의 경계를 어디까지 둘지 결정 필요
 - 플랜 변수와 트리거를 1차 범위에 넣을지 결정 필요
 
 ## 다음 단계

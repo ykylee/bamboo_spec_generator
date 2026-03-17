@@ -2,7 +2,7 @@
 
 ## 개요
 
-현재 CRS를 Jira 등록 가능한 단위로 분해한 초안이다. 상위 에픽 1건과 하위 스토리 5건으로 구성한다.
+현재 CRS를 Jira 등록 가능한 단위로 분해한 초안이다. 상위 에픽 1건과 하위 스토리 6건으로 구성한다.
 
 ## 이슈 목록
 
@@ -12,6 +12,7 @@
 - [STORY-03 Bamboo Specs Java 코드 생성 기능 구현](./STORY-03-bamboo-specs-code-generation.md)
 - [STORY-04 빌드별 산출물 분리 및 등록 단위 구조 설계](./STORY-04-output-structure.md)
 - [STORY-05 Atlassian Base 코드 확보 및 저장소 관리 체계 정의](./STORY-05-base-code-management.md)
+- [STORY-06 공통 워크플로우 템플릿 및 빌드 상세 입력 구조 정의](./STORY-06-workflow-template-and-build-details.md)
 
 ## 분해 기준
 

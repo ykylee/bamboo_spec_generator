@@ -1,0 +1,6 @@
+capture:
+  build:
+    build-command: "python scripts/run_build.py --tool maven --goal package"
+  languages:
+    include:
+      - java
