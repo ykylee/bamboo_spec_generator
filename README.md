@@ -110,6 +110,7 @@ PYTHONPATH=. python3 -m unittest discover -s tests
 - [SRS](./docs/requirements/2026-03-17-bamboo-spec-generator-srs.md)
 - [초기 설계](./docs/designs/2026-03-17-initial-design.md)
 - [JSON 스키마 설계](./docs/designs/2026-03-17-json-schema-design.md)
+- [저장소 연결 설계](./docs/designs/2026-03-17-repository-linking-design.md)
 - [이슈 분해](./docs/requirements/issues/2026-03-17-issue-breakdown.md)
 
 ## 작업 흐름

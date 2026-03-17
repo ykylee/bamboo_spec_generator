@@ -10,7 +10,7 @@
 
 ## 요약
 
-이 문서는 Bamboo Specs 생성기에 입력으로 사용할 JSON 빌드 정의 스키마 초안을 제안한다. 연도 정보는 JSON 내부가 아니라 디렉터리 경로에서 관리하며, JSON은 개별 빌드 정의의 언어 및 빌드 상세 설정에 집중한다. 스테이지 워크플로우는 공통 템플릿으로 고정한다.
+이 문서는 Bamboo Specs 생성기에 입력으로 사용할 JSON 빌드 정의 스키마 초안을 제안한다. 연도 정보는 JSON 내부가 아니라 디렉터리 경로에서 관리하며, JSON은 개별 빌드 정의의 언어 및 빌드 상세 설정, Bitbucket 저장소 연결 정보에 집중한다. 스테이지 워크플로우는 공통 템플릿으로 고정한다.
 
 ## 배경
 
@@ -72,8 +72,15 @@ build_info_json/
   "language": "java",
   "compiler": "maven",
   "repository": {
-    "name": "sample-app-repo",
-    "branch": "main"
+    "provider": "bitbucket",
+    "projectKey": "SAMPLE",
+    "repoSlug": "sample-app-api",
+    "linkageMode": "linked",
+    "branches": [
+      "dev",
+      "release",
+      "master"
+    ]
   },
   "requirements": {
     "os": "linux",
@@ -132,7 +139,7 @@ build_info_json/
 - `repository`
   - 타입: `object`
   - 필수: 예
-  - 설명: 소스 저장소 정보
+  - 설명: Bitbucket 저장소 연결 정보
 - `requirements`
   - 타입: `object`
   - 필수: 예
@@ -144,14 +151,30 @@ build_info_json/
 
 #### repository
 
-- `name`
+- `provider`
+  - 타입: `string`
+  - 필수: 아니오
+  - 기본값: `bitbucket`
+  - 설명: 저장소 제공자 식별자
+- `projectKey`
   - 타입: `string`
   - 필수: 예
-  - 설명: 저장소 식별 이름
-- `branch`
+  - 설명: Bitbucket project key
+- `repoSlug`
   - 타입: `string`
   - 필수: 예
-  - 설명: 기본 브랜치
+  - 설명: Bitbucket repository slug
+- `linkageMode`
+  - 타입: `string`
+  - 필수: 아니오
+  - 기본값: `linked`
+  - 허용 초안 값: `linked`, `create_if_missing`
+  - 설명: Bamboo 저장소 연결 방식
+- `branches`
+  - 타입: `array<string>`
+  - 필수: 아니오
+  - 기본값: `["dev", "release", "master"]`
+  - 설명: 저장소 연결 및 트리거 생성 대상 브랜치 목록
 
 #### requirements
 
@@ -212,6 +235,11 @@ build_info_json/
 
 - `buildId`는 동일 연도 디렉터리 내에서 유일해야 한다.
 - `planKey`는 전체 입력 집합에서 중복되지 않아야 한다.
+- `repository.provider`는 생략 시 `bitbucket`으로 간주한다.
+- `repository.projectKey`, `repository.repoSlug`는 비어 있으면 안 된다.
+- `repository.linkageMode`는 `linked`, `create_if_missing`만 허용한다.
+- `repository.branches`는 생략 시 `dev`, `release`, `master`를 사용한다.
+- `repository.branches`가 제공되면 `dev`, `release`, `master`를 모두 포함해야 한다.
 - `language`와 `compiler`는 지원 가능한 조합 목록에 포함되어야 한다.
 - `compiler`는 현재 `vs2013`, `vs2015`, `vs2017`, `vs2019`, `vs2022`, `vs2026`, `node.js`, `python`, `maven`, `keil`, `cmake`만 지원한다.
 - `requirements.os`는 `windows` 또는 `linux`만 허용한다.
@@ -232,6 +260,9 @@ build_info_json/
 - `language` -> 내부 모델 `language`
 - `compiler` -> 내부 모델 `compiler`
 - `repository` -> 내부 모델 `repository`
+- `repository.projectKey` + `repository.repoSlug` -> 저장소 식별자
+- `repository.linkageMode` -> 저장소 연결 전략 선택값
+- `repository.branches[]` -> 브랜치별 연결 및 트리거 정의
 - `requirements.os` -> OS capability requirement
 - `requirements.extraCapabilities[]` -> 추가 capability requirements
 - `build.buildCommand` -> Coverity용 `coverity.yaml`의 `build-command` 값
