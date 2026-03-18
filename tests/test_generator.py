@@ -2,6 +2,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from dataclasses import replace
 import json
+import subprocess
 import unittest
 
 from src.bamboo_spec_generator import __version__
@@ -14,7 +15,17 @@ from src.bamboo_spec_generator.writer import write_specs_project
 
 
 class GeneratorFlowTest(unittest.TestCase):
-    EXPECTED_SOURCE_REVISION = "70ce5ed87ee42c082b186979db11d496b6f7a31f"
+    @staticmethod
+    def _expected_source_revision() -> str:
+        result = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            return "unknown"
+        return result.stdout.strip()
 
     def test_python_script_assets_exist_for_sample_builds(self) -> None:
         api_build = parse_build_definition(Path("build_info_json/2026/sample-app-api.json"))
@@ -127,6 +138,7 @@ class GeneratorFlowTest(unittest.TestCase):
             self.assertIn("<artifactId>bamboo-specs-parent</artifactId>", pom)
             self.assertIn("<artifactId>bamboo-specs</artifactId>", pom)
             self.assertIn("<mainClass>com.example.specs.generated.SpecsPublisher</mainClass>", pom)
+            self.assertIn("<cleanupDaemonThreads>false</cleanupDaemonThreads>", pom)
             self.assertIn("## 사전 점검", generated_readme)
             self.assertIn("## 빌드별 런타임 요구사항", generated_readme)
             self.assertIn("scripts/<buildId>/", generated_readme)
@@ -174,7 +186,7 @@ class GeneratorFlowTest(unittest.TestCase):
             self.assertEqual("sample-app-api", manifest["buildId"])
             self.assertTrue(manifest["generatedAtUtc"].endswith("Z"))
             self.assertEqual(__version__, manifest["generatorVersion"])
-            self.assertEqual(self.EXPECTED_SOURCE_REVISION, manifest["sourceRevision"])
+            self.assertEqual(self._expected_source_revision(), manifest["sourceRevision"])
             self.assertEqual("python3", manifest["pythonCommand"])
             self.assertEqual("services/sample-app-api", manifest["workingSubPath"])
             prepare_task = next(task for task in manifest["tasks"] if task["taskName"] == "prepare_build")
@@ -208,19 +220,19 @@ class GeneratorFlowTest(unittest.TestCase):
             scripts_index = json.loads(scripts_index_path.read_text(encoding="utf-8"))
             self.assertTrue(scripts_index["generatedAtUtc"].endswith("Z"))
             self.assertEqual(__version__, scripts_index["generatorVersion"])
-            self.assertEqual(self.EXPECTED_SOURCE_REVISION, scripts_index["sourceRevision"])
+            self.assertEqual(self._expected_source_revision(), scripts_index["sourceRevision"])
             self.assertEqual(64, len(scripts_index["indexSha256"]))
             sample_bundle = next(bundle for bundle in scripts_index["bundles"] if bundle["buildId"] == "sample-app-api")
             self.assertTrue(sample_bundle["generatedAtUtc"].endswith("Z"))
             self.assertEqual(__version__, sample_bundle["generatorVersion"])
-            self.assertEqual(self.EXPECTED_SOURCE_REVISION, sample_bundle["sourceRevision"])
+            self.assertEqual(self._expected_source_revision(), sample_bundle["sourceRevision"])
             self.assertEqual("scripts/sample-app-api", sample_bundle["bundlePath"])
             self.assertEqual("scripts/sample-app-api/manifest.json", sample_bundle["bundleManifest"])
             self.assertEqual(manifest["bundleContentSha256"], sample_bundle["bundleContentSha256"])
             self.assertEqual(manifest["bundleSha256"], sample_bundle["bundleSha256"])
             index_summary = scripts_index_summary_path.read_text(encoding="utf-8")
             self.assertIn(f"generatorVersion={__version__}", index_summary)
-            self.assertIn(f"sourceRevision={self.EXPECTED_SOURCE_REVISION}", index_summary)
+            self.assertIn(f"sourceRevision={self._expected_source_revision()}", index_summary)
             self.assertIn("indexSha256=", index_summary)
             self.assertIn("bundle.sample-app-api.path=scripts/sample-app-api", index_summary)
             self.assertIn("bundle.sample-app-api.contentSha256=", index_summary)

@@ -247,6 +247,7 @@ def generate_pom_xml(package_name: str) -> str:
         <version>3.5.0</version>
         <configuration>
           <mainClass>{package_name}.SpecsPublisher</mainClass>
+          <cleanupDaemonThreads>false</cleanupDaemonThreads>
         </configuration>
       </plugin>
     </plugins>

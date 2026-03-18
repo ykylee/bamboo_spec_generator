@@ -251,6 +251,8 @@ mvn -q -DskipTests compile
 
 생성 결과에는 `SpecsPublisher.java`가 포함됩니다. 환경변수를 설정한 뒤 Maven으로 publish 진입점을 실행할 수 있습니다.
 
+기본 생성 `pom.xml`에는 Bamboo Specs 내부 백그라운드 스레드와 `exec-maven-plugin` 종료 처리 충돌을 피하기 위해 `cleanupDaemonThreads=false`가 포함됩니다.
+
 필수 환경변수:
 
 - `BAMBOO_URL`: Bamboo 서버 URL

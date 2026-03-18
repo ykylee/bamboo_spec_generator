@@ -76,7 +76,8 @@ def write_specs_project(output_root: Path, builds: list[BuildDefinition]) -> lis
         "4. Repository Stored Specs로 사용할 경우 이 디렉터리를 Bamboo가 읽는 저장소 루트의 `bamboo-specs/`로 배치합니다.\n"
         "5. publish 전에는 `mvn -q exec:java -Dexec.args=\"--dry-run\"`으로 계획을 점검합니다.\n"
         "6. 플랜 목록만 보려면 `mvn -q exec:java -Dexec.args=\"--print-plans\"`를 사용합니다.\n"
-        "7. 실제 배포 시에는 `BAMBOO_URL`과 `BAMBOO_TOKEN_FILE`을 설정한 뒤 `mvn -q exec:java`를 사용합니다.\n",
+        "7. `pom.xml`에는 Bamboo Specs 종료 스레드와 `exec-maven-plugin` 충돌을 피하기 위해 `cleanupDaemonThreads=false`가 기본 설정됩니다.\n"
+        "8. 실제 배포 시에는 `BAMBOO_URL`과 `BAMBOO_TOKEN_FILE`을 설정한 뒤 `mvn -q exec:java`를 사용합니다.\n",
         encoding="utf-8",
     )
     written_files.append(readme_path)
