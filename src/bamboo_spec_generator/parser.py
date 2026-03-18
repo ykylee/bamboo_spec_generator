@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 from .model import (
     BuildConfigDefinition,
@@ -18,11 +19,7 @@ def discover_input_files(input_root: Path) -> list[Path]:
     return sorted(path for path in input_root.glob("*/*.json") if path.is_file())
 
 
-def parse_build_definition(path: Path) -> BuildDefinition:
-    year = path.parent.name
-    with path.open("r", encoding="utf-8") as handle:
-        raw = json.load(handle)
-
+def parse_build_definition_payload(raw: dict[str, Any], *, year: str) -> BuildDefinition:
     repository_raw = raw["repository"]
     repository = RepositoryDefinition(
         provider=repository_raw.get("provider", "bitbucket"),
@@ -73,3 +70,10 @@ def parse_build_definition(path: Path) -> BuildDefinition:
         requirements=requirements,
         build=build_config,
     )
+
+
+def parse_build_definition(path: Path) -> BuildDefinition:
+    year = path.parent.name
+    with path.open("r", encoding="utf-8") as handle:
+        raw = json.load(handle)
+    return parse_build_definition_payload(raw, year=year)
