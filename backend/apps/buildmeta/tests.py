@@ -7,7 +7,8 @@ from unittest.mock import Mock, patch
 from django.core.management import CommandError, call_command
 from django.test import SimpleTestCase, TestCase
 
-from apps.buildmeta.models import BuildExecution, BuildPlan, BuildVersion, Project
+from apps.buildmeta.models import BuildExecution, BuildPlan, BuildPlanDefinition, BuildVersion, Project
+from apps.buildmeta.selectors.definitions import get_active_definition_by_plan_key
 from apps.buildmeta.services.executions import finish_execution, start_execution
 
 
@@ -51,6 +52,79 @@ class ExecutionServiceTest(TestCase):
         self.assertTrue(finish_payload["success"])
         version = BuildVersion.objects.get(pk=finish_payload["buildVersionId"])
         self.assertTrue(version.latest_success)
+
+    def test_same_commit_on_different_branches_creates_distinct_versions(self) -> None:
+        dev_payload = start_execution(
+            plan_key="SAMPAPI",
+            branch_kind=BuildVersion.BRANCH_KIND_DEV,
+            commit_hash="abcdef123456",
+            build_number="101",
+        )
+        release_payload = start_execution(
+            plan_key="SAMPAPI",
+            branch_kind=BuildVersion.BRANCH_KIND_RELEASE,
+            commit_hash="abcdef123456",
+            build_number="102",
+        )
+
+        self.assertEqual("v0.0.1", dev_payload["version"])
+        self.assertEqual("v0.1.0", release_payload["version"])
+        self.assertEqual(2, BuildVersion.objects.count())
+
+    def test_rebuilding_older_version_does_not_move_latest_pointer_backwards(self) -> None:
+        first_payload = start_execution(
+            plan_key="SAMPAPI",
+            branch_kind=BuildVersion.BRANCH_KIND_DEV,
+            commit_hash="commit-a",
+            build_number="101",
+        )
+        second_payload = start_execution(
+            plan_key="SAMPAPI",
+            branch_kind=BuildVersion.BRANCH_KIND_DEV,
+            commit_hash="commit-b",
+            build_number="102",
+        )
+
+        finish_execution(
+            execution_id=second_payload["buildExecutionId"],
+            success=True,
+            result_status="successful",
+        )
+        finish_execution(
+            execution_id=first_payload["buildExecutionId"],
+            success=True,
+            result_status="successful",
+        )
+
+        self.plan.refresh_from_db()
+        self.assertEqual("v0.0.2", self.plan.latest_version.version_text)
+
+
+class DefinitionSelectorTest(TestCase):
+    def setUp(self) -> None:
+        self.project = Project.objects.create(
+            jira_project_key="SAMPLE",
+            bitbucket_project_key="SAMPLE",
+            representative_repo_slug="sample-app-api",
+        )
+        self.plan = BuildPlan.objects.create(build_id="sample-app-api", plan_key="SAMPAPI")
+
+    def test_active_definition_uses_explicit_year_from_active_record(self) -> None:
+        BuildPlanDefinition.objects.create(
+            build_plan=self.plan,
+            project=self.project,
+            year="2026",
+            source_kind=BuildPlanDefinition.SOURCE_KIND_JSON,
+            definition_hash="sha256:abc123",
+            is_active=True,
+            definition_json={"buildId": "sample-app-api", "planKey": "SAMPAPI"},
+        )
+
+        payload = get_active_definition_by_plan_key("SAMPAPI")
+
+        self.assertIsNotNone(payload)
+        assert payload is not None
+        self.assertEqual("2026", payload["year"])
 
 
 class InitDevDbCommandTest(SimpleTestCase):

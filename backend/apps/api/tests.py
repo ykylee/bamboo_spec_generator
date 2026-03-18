@@ -32,6 +32,7 @@ class ApiSmokeTest(TestCase):
         definition = BuildPlanDefinition.objects.create(
             build_plan=self.plan,
             project=self.project,
+            year="2026",
             source_kind=BuildPlanDefinition.SOURCE_KIND_JSON,
             definition_hash="sha256:abc123",
             is_active=True,
@@ -74,8 +75,6 @@ class ApiSmokeTest(TestCase):
                 },
             },
         )
-        self.plan.active_definition = definition
-        self.plan.save(update_fields=["active_definition", "updated_at"])
         self.auth_headers = {"HTTP_AUTHORIZATION": "Bearer test-token"}
 
     def test_active_definition_endpoint(self) -> None:
@@ -84,6 +83,7 @@ class ApiSmokeTest(TestCase):
         self.assertEqual(200, response.status_code)
         payload = response.json()
         self.assertEqual("SAMPAPI", payload["planKey"])
+        self.assertEqual("2026", payload["year"])
         self.assertEqual("sample-app-api", payload["definition"]["buildId"])
 
     def test_prepare_context_endpoint(self) -> None:
