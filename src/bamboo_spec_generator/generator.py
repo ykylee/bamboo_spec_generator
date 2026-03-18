@@ -1,10 +1,8 @@
 from __future__ import annotations
 
-import base64
-
 from .model import BuildDefinition
 
-BAMBOO_SPECS_VERSION = "11.0.8"
+BAMBOO_SPECS_VERSION = "11.0.2"
 
 
 def to_java_class_name(build_id: str) -> str:
@@ -17,6 +15,7 @@ def generate_plan_java(build: BuildDefinition, package_name: str) -> str:
     project_key = _project_key(build.year)
     linked_repository_name = _linked_repository_name(build)
     python_scripts = generate_python_scripts(build)
+    python_command = _python_command(build)
 
     return f"""package {package_name};
 
@@ -35,6 +34,13 @@ public class {class_name} {{
     private static final String PLAN_KEY = "{build.plan_key}";
     private static final String YEAR = "{build.year}";
     private static final String LINKED_REPOSITORY = "{linked_repository_name}";
+    private static final String PYTHON_COMMAND = "{python_command}";
+    private static final String SCRIPT_DIRECTORY = ".bamboo-specs";
+    private static final String PREPARE_BUILD_SCRIPT = {_java_text_block(python_scripts["prepare_build.py"], 4)};
+    private static final String RUN_BUILD_SCRIPT = {_java_text_block(python_scripts["run_build.py"], 4)};
+    private static final String RUN_COVERITY_SCRIPT = {_java_text_block(python_scripts["run_coverity.py"], 4)};
+    private static final String RUN_CUSTOM_ANALYSIS_SCRIPT = {_java_text_block(python_scripts["run_custom_analysis.py"], 4)};
+    private static final String TRIGGER_FOLLOW_UP_SCRIPT = {_java_text_block(python_scripts["trigger_follow_up.py"], 4)};
 
     public Plan plan() {{
         return createPlan();
@@ -62,7 +68,7 @@ public class {class_name} {{
 {_requirements_chain(build, 4)}
                 .tasks(
                     new VcsCheckoutTask().addCheckoutOfDefaultRepository(),
-{_script_task(build, python_scripts["prepare_build.py"], 20)}
+                    pythonScriptTask("prepare_build.py", PREPARE_BUILD_SCRIPT)
                 ));
     }}
 
@@ -72,7 +78,7 @@ public class {class_name} {{
 {_requirements_chain(build, 4)}
                 .tasks(
                     new VcsCheckoutTask().addCheckoutOfDefaultRepository(),
-{_script_task(build, python_scripts["run_build.py"], 20)}
+                    pythonScriptTask("run_build.py", RUN_BUILD_SCRIPT)
                 ));
     }}
 
@@ -83,13 +89,13 @@ public class {class_name} {{
 {_requirements_chain(build, 5)}
                     .tasks(
                         new VcsCheckoutTask().addCheckoutOfDefaultRepository(),
-{_script_task(build, python_scripts["run_coverity.py"], 24)}
+                        pythonScriptTask("run_coverity.py", RUN_COVERITY_SCRIPT)
                     ),
                 new Job("Custom Analysis", "CUST")
 {_requirements_chain(build, 5)}
                     .tasks(
                         new VcsCheckoutTask().addCheckoutOfDefaultRepository(),
-{_script_task(build, python_scripts["run_custom_analysis.py"], 24)}
+                        pythonScriptTask("run_custom_analysis.py", RUN_CUSTOM_ANALYSIS_SCRIPT)
                     )
             );
     }}
@@ -98,9 +104,17 @@ public class {class_name} {{
         return new Stage("Trigger Follow-up")
             .jobs(new Job("Trigger Job", "TRIG")
                 .tasks(
-{_script_task(build, python_scripts["trigger_follow_up.py"], 20)}
+                    pythonScriptTask("trigger_follow_up.py", TRIGGER_FOLLOW_UP_SCRIPT)
                 ));
     }}
+
+    private ScriptTask pythonScriptTask(String scriptName, String scriptBody) {{
+        return new ScriptTask()
+            .inlineBody(pythonWrapperCommand(scriptName, scriptBody))
+            .interpreterShell();
+    }}
+
+{_python_wrapper_command_method(build)}
 }}
 """
 
@@ -555,20 +569,37 @@ def _runtime_python_capability_key() -> str:
     return "system.builder.python"
 
 
-def _script_task(build: BuildDefinition, python_script: str, indent_size: int) -> str:
-    indent = " " * indent_size
-    command = _escape_java(_python_inline_command(build, python_script))
-    return (
-        f"{indent}new ScriptTask()\n"
-        f'{indent}    .inlineBody("{command}")\n'
-        f"{indent}    .interpreterShell()"
-    )
+def _python_command(build: BuildDefinition) -> str:
+    return "python" if build.requirements.os.lower() == "windows" else "python3"
 
 
-def _python_inline_command(build: BuildDefinition, python_script: str) -> str:
-    python_command = "python" if build.requirements.os.lower() == "windows" else "python3"
-    encoded_script = base64.b64encode(python_script.encode("utf-8")).decode("ascii")
-    return f'{python_command} -c "import base64;exec(base64.b64decode(\'{encoded_script}\').decode(\'utf-8\'))"'
+def _python_wrapper_command_method(build: BuildDefinition) -> str:
+    if build.requirements.os.lower() == "windows":
+        return """    private String pythonWrapperCommand(String scriptName, String scriptBody) {
+        return String.join("\\r\\n",
+            "@echo off",
+            "setlocal",
+            "powershell -NoProfile -Command ^",
+            "  \\"$scriptDir = '" + SCRIPT_DIRECTORY + "'; ^",
+            "   if (-not (Test-Path $scriptDir)) { New-Item -ItemType Directory -Path $scriptDir | Out-Null }; ^",
+            "   $path = Join-Path $scriptDir '" + scriptName + "'; ^",
+            "   $script = @'",
+            scriptBody,
+            "'@; ^",
+            "   Set-Content -Path $path -Value $script -Encoding UTF8; ^",
+            "   & " + PYTHON_COMMAND + " $path; ^",
+            "   exit $LASTEXITCODE\\"");
+    }"""
+
+    return """    private String pythonWrapperCommand(String scriptName, String scriptBody) {
+        return String.join("\\n",
+            "set -eu",
+            "mkdir -p " + SCRIPT_DIRECTORY,
+            "cat <<'__BAMBOO_SPEC_PY__' > " + SCRIPT_DIRECTORY + "/" + scriptName,
+            scriptBody,
+            "__BAMBOO_SPEC_PY__",
+            PYTHON_COMMAND + " " + SCRIPT_DIRECTORY + "/" + scriptName);
+    }"""
 
 
 def _normalize_os(value: str) -> str:
@@ -621,3 +652,9 @@ def _escape_java(value: str) -> str:
 
 def _escape_yaml(value: str) -> str:
     return value.replace("\\", "\\\\").replace('"', '\\"')
+
+
+def _java_text_block(value: str, indent_size: int) -> str:
+    indent = " " * indent_size
+    escaped = value.replace('"""', '\\"""').rstrip("\n")
+    return f'"""\n{escaped}\n{indent}"""'

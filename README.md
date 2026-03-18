@@ -219,6 +219,52 @@ mvn -q -DskipTests compile
 - `BAMBOO_URL`: Bamboo 서버 URL
 - `BAMBOO_TOKEN_FILE`: Bamboo 토큰 파일 경로. 생략 시 `.credentials`
 
+토큰 파일 형식:
+
+- `FileTokenCredentials`를 사용하므로 파일은 일반 텍스트 토큰만 두는 것이 아니라 Java properties 형식이어야 합니다.
+- 최소 형식은 `token=<personal-access-token>` 한 줄입니다.
+
+실제 publish 전 선행조건:
+
+- Bamboo 서버 버전과 생성된 `pom.xml`의 Bamboo Specs 버전이 일치하거나 호환되어야 합니다.
+- 샘플 JSON처럼 `linked` 저장소를 참조하는 경우 Bamboo에 같은 이름의 Linked Repository가 미리 있어야 합니다.
+- 샘플 입력 기준 필요한 저장소 이름은 `SAMPLE/sample-app-api`, `SAMPLE/sample-app-web`, `SAMPLE/sample-app-mfc` 입니다.
+- `BAMBOO_URL`은 Bamboo context path를 포함한 URL을 사용해야 합니다. 예를 들어 `/bamboo`로 서비스 중이면 `https://host.example.com/bamboo` 형태여야 합니다.
+
+Linked Repository 확인 방법:
+
+```bash
+curl --silent --user 'admin:password' \
+  'https://atlassian.ddn777.synology.me/bamboo/rest/api/latest/repository?searchTerm=SAMPLE/'
+```
+
+응답의 `searchResults`에 필요한 저장소 이름이 모두 있으면 됩니다.
+
+없을 때 등록 방법:
+
+1. Bamboo 관리자 화면에서 `Administration` -> `Linked repositories` -> `Add repository` 로 이동합니다.
+2. 저장소 타입으로 `Git`을 선택합니다.
+3. 아래 값을 저장소마다 각각 입력합니다.
+
+- Name: `SAMPLE/sample-app-api`
+- Name: `SAMPLE/sample-app-web`
+- Name: `SAMPLE/sample-app-mfc`
+- Repository URL: 실제 Git 저장소 URL
+- Authentication type: 저장소 환경에 맞는 값
+- Web repository: 필요 없으면 `None`
+
+테스트 환경에서는 위 3개 이름을 가진 Git Linked Repository를 먼저 만든 뒤 publish를 진행했습니다.
+
+프로젝트가 아직 없다면 먼저 생성:
+
+```bash
+curl --silent --user 'admin:password' \
+  --header 'Accept: application/json' \
+  --header 'Content-Type: application/json' \
+  --data '{"key":"SAMPLE","name":"Sample"}' \
+  'https://atlassian.ddn777.synology.me/bamboo/rest/api/latest/project'
+```
+
 예:
 
 ```bash
@@ -229,6 +275,28 @@ export BAMBOO_URL=https://bamboo.example.com
 export BAMBOO_TOKEN_FILE=/path/to/.credentials
 mvn -q exec:java
 ```
+
+실제 검증한 순차 실행 예:
+
+```bash
+python3 -m src.bamboo_spec_generator.cli --output-root bamboo-specs
+cd bamboo-specs
+mvn -q -DskipTests compile
+printf '%s\n' 'token=<personal-access-token>' > .credentials
+chmod 600 .credentials
+export BAMBOO_URL=https://atlassian.ddn777.synology.me/bamboo
+export BAMBOO_TOKEN_FILE=.credentials
+mvn -q exec:java
+```
+
+실행 결과 확인 예:
+
+```bash
+curl --silent --user 'admin:password' \
+  'https://atlassian.ddn777.synology.me/bamboo/rest/api/latest/project/Y2026?expand=plans'
+```
+
+위 조회에서 샘플 기준으로 `Y2026-SAMPAPI`, `Y2026-SAMPMFC`, `Y2026-SAMPWEB` 플랜이 보이면 publish가 완료된 것입니다.
 
 Windows `cmd` 기준:
 
@@ -249,6 +317,7 @@ Repository Stored Specs로 사용할 경우에는 생성된 `bamboo-specs/` 디�
 
 - Bamboo 서버 버전이 생성된 `pom.xml`의 Bamboo Specs 버전과 호환되는지 확인
 - Bamboo Linked Repository 이름이 `projectKey/repoSlug` 규칙과 일치하는지 확인
+- Personal Access Token 파일이 `token=...` 형식인지 확인
 - 대상 에이전트에 `system.builder.python` capability가 등록되어 있는지 확인
 - 빌드 명령이 사용하는 `mvn`, `npm`, `nuget`, `msbuild` 같은 도구가 에이전트에 설치되어 있는지 확인
 - 정적 분석/후속 단계가 사용하는 `coverity`, `custom-tool`, `trigger-plan` 명령이 에이전트에서 실행 가능한지 확인
