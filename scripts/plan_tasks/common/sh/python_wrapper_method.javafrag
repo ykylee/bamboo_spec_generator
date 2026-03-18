@@ -1,0 +1,9 @@
+    private String pythonWrapperCommand(String scriptName, String scriptBody) {
+        return String.join("\n",
+            "set -eu",
+            "mkdir -p " + SCRIPT_DIRECTORY,
+            "cat <<'__BAMBOO_SPEC_PY__' > " + SCRIPT_DIRECTORY + "/" + scriptName,
+            scriptBody,
+            "__BAMBOO_SPEC_PY__",
+            PYTHON_COMMAND + " " + SCRIPT_DIRECTORY + "/" + scriptName);
+    }

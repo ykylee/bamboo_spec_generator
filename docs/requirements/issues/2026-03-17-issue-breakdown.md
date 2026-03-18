@@ -18,6 +18,7 @@
 - [STORY-09 브랜치별 연결 및 트리거 구성 생성](./STORY-09-branch-trigger-mapping.md)
 - [STORY-10 MSBuild 플랜용 Directory.Build.targets 사전 생성 지원](./STORY-10-msbuild-directory-build-targets-override.md)
 - [STORY-11 빌드 작업 하위 경로 지정 지원](./STORY-11-build-working-subpath-support.md)
+- [STORY-12 플랜 스크립트 자산 분리 및 환경별 커스터마이징 관리](./STORY-12-plan-script-asset-management.md)
 
 ## 분해 기준
 

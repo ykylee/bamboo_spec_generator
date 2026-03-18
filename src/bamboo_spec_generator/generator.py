@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from .java_assets import load_python_wrapper_method
 from .model import BuildDefinition
+from .script_renderer import render_python_scripts
 
 BAMBOO_SPECS_VERSION = "11.0.2"
 
@@ -16,6 +18,7 @@ def generate_plan_java(build: BuildDefinition, package_name: str) -> str:
     linked_repository_name = _linked_repository_name(build)
     python_scripts = generate_python_scripts(build)
     python_command = _python_command(build)
+    python_wrapper_method = load_python_wrapper_method(build)
 
     return f"""package {package_name};
 
@@ -114,7 +117,7 @@ public class {class_name} {{
             .interpreterShell();
     }}
 
-{_python_wrapper_command_method(build)}
+{python_wrapper_method}
 }}
 """
 
@@ -244,6 +247,7 @@ def generate_pom_xml(package_name: str) -> str:
         <version>3.5.0</version>
         <configuration>
           <mainClass>{package_name}.SpecsPublisher</mainClass>
+          <cleanupDaemonThreads>false</cleanupDaemonThreads>
         </configuration>
       </plugin>
     </plugins>
@@ -259,279 +263,7 @@ def generate_pom_xml(package_name: str) -> str:
 
 
 def generate_python_scripts(build: BuildDefinition) -> dict[str, str]:
-    custom_tool_commands = _render_custom_tool_commands(build)
-    custom_tool_command_lines = ",\n        ".join(repr(command) for command in custom_tool_commands)
-    prepare_build_script = _generate_prepare_build_script(build)
-    run_build_script = _generate_run_build_script(build)
-    coverity_config = generate_coverity_yaml(build)
-    run_custom_analysis_script = _generate_run_custom_analysis_script(build, custom_tool_command_lines)
-
-    return {
-        "prepare_build.py": prepare_build_script,
-        "run_build.py": run_build_script,
-        "run_coverity.py": f"""#!/usr/bin/env python3
-from __future__ import annotations
-
-from pathlib import Path
-import subprocess
-import tempfile
-
-
-WORKING_DIRECTORY = Path({build.build.sub_path!r})
-CONFIG_CONTENT = {coverity_config!r}
-
-
-def main() -> int:
-    with tempfile.NamedTemporaryFile("w", encoding="utf-8", suffix=".yaml", delete=False) as config_file:
-        config_file.write(CONFIG_CONTENT)
-        config_path = Path(config_file.name)
-
-    try:
-        command = ["coverity", "scan", "--config", str(config_path)]
-        return subprocess.run(command, cwd=WORKING_DIRECTORY, check=False).returncode
-    finally:
-        if config_path.exists():
-            config_path.unlink()
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())
-""",
-        "run_custom_analysis.py": run_custom_analysis_script,
-        "trigger_follow_up.py": f"""#!/usr/bin/env python3
-from __future__ import annotations
-
-import subprocess
-
-
-def main() -> int:
-    command = ["trigger-plan", "{build.build.post_build_trigger.target_plan_key}"]
-    return subprocess.run(command, check=False).returncode
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())
-""",
-    }
-
-
-def _render_custom_tool_commands(build: BuildDefinition) -> list[str]:
-    rendered: list[str] = []
-    for command in build.build.static_analysis.custom_tool_commands:
-        rendered.append(command.replace("{buildCommand}", build.build.build_command))
-    return rendered
-
-
-def _generate_prepare_build_script(build: BuildDefinition) -> str:
-    if not _uses_msbuild(build):
-        return f"""#!/usr/bin/env python3
-from __future__ import annotations
-
-from pathlib import Path
-import os
-import shlex
-import subprocess
-
-
-WORKING_DIRECTORY = Path({build.build.sub_path!r})
-
-
-def parse_command(command: str) -> list[str]:
-    return shlex.split(command, posix=os.name != "nt")
-
-
-def main() -> int:
-    command = {build.build.prepare_command!r}
-    return subprocess.run(parse_command(command), cwd=WORKING_DIRECTORY, check=False).returncode
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())
-"""
-
-    return f"""#!/usr/bin/env python3
-from __future__ import annotations
-
-{_msbuild_script_support(build)}
-
-
-def main() -> int:
-    command = {build.build.prepare_command!r}
-    return run_command(command)
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())
-"""
-
-
-def _generate_run_build_script(build: BuildDefinition) -> str:
-    if not _uses_msbuild(build):
-        return f"""#!/usr/bin/env python3
-from __future__ import annotations
-
-from pathlib import Path
-import os
-import shlex
-import subprocess
-
-
-WORKING_DIRECTORY = Path({build.build.sub_path!r})
-
-
-def parse_command(command: str) -> list[str]:
-    return shlex.split(command, posix=os.name != "nt")
-
-
-def main() -> int:
-    command = {build.build.build_command!r}
-    return subprocess.run(parse_command(command), cwd=WORKING_DIRECTORY, check=False).returncode
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())
-"""
-
-    return f"""#!/usr/bin/env python3
-from __future__ import annotations
-
-{_msbuild_script_support(build)}
-
-
-def main() -> int:
-    command = {build.build.build_command!r}
-    ensure_directory_build_targets()
-    return run_command(command)
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())
-"""
-
-
-def _generate_run_custom_analysis_script(build: BuildDefinition, custom_tool_command_lines: str) -> str:
-    if not _uses_msbuild(build):
-        return f"""#!/usr/bin/env python3
-from __future__ import annotations
-
-from pathlib import Path
-import os
-import shlex
-import subprocess
-
-
-WORKING_DIRECTORY = Path({build.build.sub_path!r})
-
-
-COMMANDS = [
-        {custom_tool_command_lines}
-]
-
-
-def parse_command(command: str) -> list[str]:
-    return shlex.split(command, posix=os.name != "nt")
-
-
-def main() -> int:
-    for command in COMMANDS:
-        result = subprocess.run(parse_command(command), cwd=WORKING_DIRECTORY, check=False)
-        if result.returncode != 0:
-            return result.returncode
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())
-"""
-
-    return f"""#!/usr/bin/env python3
-from __future__ import annotations
-
-{_msbuild_script_support(build)}
-
-
-COMMANDS = [
-        {custom_tool_command_lines}
-]
-
-
-def main() -> int:
-    ensure_directory_build_targets()
-    for command in COMMANDS:
-        result = run_command(command)
-        if result.returncode != 0:
-            return result.returncode
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())
-"""
-
-
-def _uses_msbuild(build: BuildDefinition) -> bool:
-    return build.compiler.startswith("vs") or "--tool msbuild" in build.build.build_command
-
-
-def _compiler_env_var(compiler: str) -> str:
-    if compiler.startswith("vs"):
-        return compiler.upper() + "_ENV"
-    return "MSBUILD_ENV"
-
-
-def _msbuild_script_support(build: BuildDefinition) -> str:
-    env_var_name = _compiler_env_var(build.compiler)
-    return f"""import os
-from pathlib import Path
-import shlex
-import subprocess
-
-
-WORKING_DIRECTORY = Path({build.build.sub_path!r})
-
-
-DIRECTORY_BUILD_TARGETS = \"\"\"<Project>
-  <PropertyGroup>
-    <Optimization>Disabled</Optimization>
-    <WholeProgramOptimization>false</WholeProgramOptimization>
-    <LinkTimeCodeGeneration>Default</LinkTimeCodeGeneration>
-  </PropertyGroup>
-  <ItemDefinitionGroup>
-    <ClCompile>
-      <Optimization>Disabled</Optimization>
-      <WholeProgramOptimization>false</WholeProgramOptimization>
-    </ClCompile>
-    <Link>
-      <LinkTimeCodeGeneration>Default</LinkTimeCodeGeneration>
-    </Link>
-  </ItemDefinitionGroup>
-</Project>
-\"\"\"
-
-
-def parse_command(command: str) -> list[str]:
-    return shlex.split(command, posix=os.name != "nt")
-
-
-def ensure_directory_build_targets() -> None:
-    WORKING_DIRECTORY.mkdir(parents=True, exist_ok=True)
-    (WORKING_DIRECTORY / "Directory.Build.targets").write_text(DIRECTORY_BUILD_TARGETS, encoding="utf-8")
-
-
-def build_wrapped_command(command: str) -> list[str]:
-    if os.name != "nt":
-        return parse_command(command)
-
-    env_var_name = "{env_var_name}"
-    vcvars_path = os.environ.get(env_var_name)
-    if not vcvars_path:
-        raise RuntimeError(f"Missing required environment variable: {{env_var_name}}")
-    return ["cmd.exe", "/d", "/s", "/c", f'call "{{vcvars_path}}" && {{command}}']
-
-
-def run_command(command: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(build_wrapped_command(command), cwd=WORKING_DIRECTORY, check=False)
-"""
+    return render_python_scripts(build)
 
 
 def _coverity_language(language: str) -> str:
@@ -571,36 +303,6 @@ def _runtime_python_capability_key() -> str:
 
 def _python_command(build: BuildDefinition) -> str:
     return "python" if build.requirements.os.lower() == "windows" else "python3"
-
-
-def _python_wrapper_command_method(build: BuildDefinition) -> str:
-    if build.requirements.os.lower() == "windows":
-        return """    private String pythonWrapperCommand(String scriptName, String scriptBody) {
-        return String.join("\\r\\n",
-            "@echo off",
-            "setlocal",
-            "powershell -NoProfile -Command ^",
-            "  \\"$scriptDir = '" + SCRIPT_DIRECTORY + "'; ^",
-            "   if (-not (Test-Path $scriptDir)) { New-Item -ItemType Directory -Path $scriptDir | Out-Null }; ^",
-            "   $path = Join-Path $scriptDir '" + scriptName + "'; ^",
-            "   $script = @'",
-            scriptBody,
-            "'@; ^",
-            "   Set-Content -Path $path -Value $script -Encoding UTF8; ^",
-            "   & " + PYTHON_COMMAND + " $path; ^",
-            "   exit $LASTEXITCODE\\"");
-    }"""
-
-    return """    private String pythonWrapperCommand(String scriptName, String scriptBody) {
-        return String.join("\\n",
-            "set -eu",
-            "mkdir -p " + SCRIPT_DIRECTORY,
-            "cat <<'__BAMBOO_SPEC_PY__' > " + SCRIPT_DIRECTORY + "/" + scriptName,
-            scriptBody,
-            "__BAMBOO_SPEC_PY__",
-            PYTHON_COMMAND + " " + SCRIPT_DIRECTORY + "/" + scriptName);
-    }"""
-
 
 def _normalize_os(value: str) -> str:
     mapping = {

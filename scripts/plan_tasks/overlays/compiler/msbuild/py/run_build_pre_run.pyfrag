@@ -1,0 +1,2 @@
+    ensure_directory_build_targets()
+    return run_command(command)
