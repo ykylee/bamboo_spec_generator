@@ -9,6 +9,7 @@ from .model import (
     PostBuildTriggerDefinition,
     RepositoryDefinition,
     RequirementsDefinition,
+    RuntimeRequirementsDefinition,
     StaticAnalysisDefinition,
 )
 
@@ -40,6 +41,12 @@ def parse_build_definition(path: Path) -> BuildDefinition:
         custom_tool_commands=list(raw["build"]["staticAnalysis"]["customTool"]["commands"]),
     )
 
+    runtime_requirements_raw = raw["build"].get("runtimeRequirements", {})
+    runtime_requirements = RuntimeRequirementsDefinition(
+        commands=list(runtime_requirements_raw.get("commands", [])),
+        env_vars=list(runtime_requirements_raw.get("envVars", [])),
+    )
+
     post_build_trigger = PostBuildTriggerDefinition(
         type=raw["build"]["postBuildTrigger"]["type"],
         target_plan_key=raw["build"]["postBuildTrigger"]["targetPlanKey"],
@@ -50,6 +57,7 @@ def parse_build_definition(path: Path) -> BuildDefinition:
         prepare_command=raw["build"]["prepareCommand"],
         build_command=raw["build"]["buildCommand"],
         static_analysis=static_analysis,
+        runtime_requirements=runtime_requirements,
         post_build_trigger=post_build_trigger,
     )
 
