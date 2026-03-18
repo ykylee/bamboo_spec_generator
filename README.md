@@ -8,7 +8,9 @@
 
 - 입력 JSON 파싱, 검증, 내부 모델 변환, 산출물 생성 흐름이 구현되어 있습니다.
 - 입력 루트 기본값은 `build_info_json/`, 출력 루트 기본값은 `bamboo-specs/`입니다.
-- 생성 결과에는 Bamboo Specs Java 소스, `pom.xml`, 빌드별 Coverity 설정이 포함되며, Task 실행 로직은 Specs의 `ScriptTask.inlineBody(...)`에 직접 포함됩니다.
+- 생성 결과에는 Bamboo Specs Java 소스, `pom.xml`, 빌드별 Coverity 설정, 빌드별 렌더링 스크립트와 OS별 실행 보조 자산이 포함되며, Task 실행 로직은 Specs의 `ScriptTask.inlineBody(...)`에 직접 포함됩니다.
+- Python 기반 Task 스크립트 원본은 `scripts/plan_tasks/common/py/` 아래의 자산 파일로 분리되어 있으며, 생성 시 빌드 정의에 맞게 렌더링됩니다.
+- OS별 Python wrapper도 `scripts/plan_tasks/common/sh/`, `scripts/plan_tasks/common/bat/` 자산으로 분리되어 있습니다.
 - 테스트는 `unittest` 기반으로 일부 포함되어 있습니다.
 - 실제 Bamboo 서버 import 및 실행까지는 아직 검증되지 않았습니다.
 
@@ -16,6 +18,7 @@
 
 - 입력 JSON: `build_info_json/<year>/<buildId>.json`
 - 생성기 코드: `src/bamboo_spec_generator/`
+- 스크립트 자산: `scripts/plan_tasks/`
 - 테스트: `tests/`
 - 문서: `docs/`
 - 생성 결과 기본 경로: `bamboo-specs/`
@@ -89,6 +92,22 @@ MSBuild 기반 플랜은 생성된 inline Python 코드에서 실제 MSBuild 호
 
 입력 JSON의 `runtimeRequirements`는 Bamboo capability로 직접 강제하기 어려운 런타임 전제 조건을 명시적으로 남기기 위한 블록입니다. 예를 들어 `coverity`, `custom-tool`, `trigger-plan`, `VS2022_ENV` 같은 항목을 각 빌드 단위로 기록합니다.
 
+## 스크립트 자산 관리
+
+플랜 Task 스크립트의 Python 원본은 저장소에서 직접 편집 가능한 자산 파일로 관리합니다.
+
+- 공통 Python 템플릿: `scripts/plan_tasks/common/py/`
+- OS별 wrapper 자산: `scripts/plan_tasks/common/sh/`, `scripts/plan_tasks/common/bat/`
+- 공통 실행 프래그먼트: `scripts/plan_tasks/fragments/py/`
+- 환경별 오버레이: `scripts/plan_tasks/overlays/`
+  - compiler별 오버레이: `scripts/plan_tasks/overlays/compiler/`
+  - task별 launcher 오버레이: `scripts/plan_tasks/overlays/task/`
+- 자산 선택: `src/bamboo_spec_generator/script_assets.py`
+- 자산 렌더링: `src/bamboo_spec_generator/script_renderer.py`
+- Java wrapper 자산 선택: `src/bamboo_spec_generator/java_assets.py`
+
+현재는 공통 템플릿에 프래그먼트와 오버레이를 조합한 뒤, 빌드 정의 값으로 렌더링해 최종 결과를 Java `ScriptTask.inlineBody(...)`에 넣는 방식입니다. 즉 실행 모델은 유지하면서 스크립트 원본 관리 구조를 먼저 분리했습니다.
+
 ## 구현 구조
 
 생성기 코드는 `src/bamboo_spec_generator/` 아래에 있습니다.
@@ -97,7 +116,10 @@ MSBuild 기반 플랜은 생성된 inline Python 코드에서 실제 MSBuild 호
 - `parser.py`: JSON 입력 탐색 및 파싱
 - `validator.py`: 입력 검증
 - `model.py`: 내부 데이터 모델
-- `generator.py`: Java Specs inline 스크립트와 Coverity 설정 생성
+- `script_assets.py`: Task 스크립트 자산 선택 및 로딩
+- `script_renderer.py`: Task 스크립트 렌더링
+- `java_assets.py`: OS별 Java wrapper 자산 선택
+- `generator.py`: Java Specs 코드와 Coverity 설정 생성
 - `writer.py`: 출력 파일 기록
 
 ## 요구 환경
@@ -186,13 +208,28 @@ bamboo-specs/
 ├── pom.xml
 ├── coverity/
 │   └── <buildId>/coverity.yaml
+├── scripts/
+│   ├── index.json
+│   ├── index-summary.txt
+│   ├── compare-report.txt
+│   ├── compare-report.json
+│   └── <buildId>/
+│       ├── README.md
+│       ├── manifest.json
+│       ├── bundle-summary.txt
+│       ├── prepare_build.py
+│       ├── prepare_build.sh or prepare_build.bat
+│       ├── run_build.py
+│       ├── run_coverity.py
+│       ├── run_custom_analysis.py
+│       └── trigger_follow_up.py
 └── src/main/java/com/example/specs/generated/
     ├── AllPlansRegistry.java
     ├── SpecsPublisher.java
     └── <BuildId>PlanSpecs.java
 ```
 
-이 출력 디렉터리는 Bamboo Repository Stored Specs로 올리거나, Maven 기반 Java Specs 프로젝트로 수동 배포하는 용도로 사용할 수 있습니다.
+이 출력 디렉터리는 Bamboo Repository Stored Specs로 올리거나, Maven 기반 Java Specs 프로젝트로 수동 배포하는 용도로 사용할 수 있습니다. `scripts/<buildId>/` 아래 파일은 생성 시점에 렌더링된 최종 스크립트와 OS별 실행 보조 자산이므로, Java inline body와 함께 검토용 산출물로 활용할 수 있습니다. 각 빌드 디렉터리의 `README.md`에는 task별 파일 매핑과 런타임 요구사항이 정리되고, `manifest.json`에는 같은 정보를 구조화된 형태로 기록합니다. 또한 각 task가 어떤 자산 템플릿과 오버레이에서 생성되었는지, 렌더링 결과 체크섬이 무엇인지, 언제 어떤 생성기 버전과 git revision으로 만들어졌는지도 함께 포함합니다. `bundle-summary.txt`에는 같은 내용을 diff 친화적인 평문 형식과 bundle fingerprint로 기록합니다. 루트의 `scripts/index.json`과 `scripts/index-summary.txt`에는 전체 build bundle 목록과 fingerprint 인덱스가 기록되고, `scripts/compare-report.txt`와 `scripts/compare-report.json`에는 이전 생성본과 비교한 added/changed/removed/unchanged 상태가 content checksum 기준으로 정리됩니다. bundle이 `changed`인 경우에는 어떤 task의 Python 스크립트 또는 launcher가 바뀌었는지, 어떤 asset source 경로가 달라졌는지, build 수준 런타임 요구사항이 바뀌었는지도 세부 항목으로 함께 기록됩니다.
 
 ## 생성 결과 검증
 
@@ -348,6 +385,9 @@ python -m unittest discover -s tests
 - [초기 설계](./docs/designs/2026-03-17-initial-design.md)
 - [JSON 스키마 설계](./docs/designs/2026-03-17-json-schema-design.md)
 - [저장소 연결 설계](./docs/designs/2026-03-17-repository-linking-design.md)
+- [플랜 스크립트 관리 CRS](./docs/requirements/2026-03-18-plan-script-management-crs.md)
+- [플랜 스크립트 관리 설계](./docs/designs/2026-03-18-plan-script-management-design.md)
+- [플랜 스크립트 구현 계획](./docs/designs/2026-03-18-plan-script-management-implementation-plan.md)
 - [이슈 분해](./docs/requirements/issues/2026-03-17-issue-breakdown.md)
 
 ## 작업 흐름

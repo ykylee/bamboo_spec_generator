@@ -1,0 +1,15 @@
+    private String pythonWrapperCommand(String scriptName, String scriptBody) {
+        return String.join("\r\n",
+            "@echo off",
+            "setlocal",
+            "powershell -NoProfile -Command ^",
+            "  \"$scriptDir = '" + SCRIPT_DIRECTORY + "'; ^",
+            "   if (-not (Test-Path $scriptDir)) { New-Item -ItemType Directory -Path $scriptDir | Out-Null }; ^",
+            "   $path = Join-Path $scriptDir '" + scriptName + "'; ^",
+            "   $script = @'",
+            scriptBody,
+            "'@; ^",
+            "   Set-Content -Path $path -Value $script -Encoding UTF8; ^",
+            "   & " + PYTHON_COMMAND + " $path; ^",
+            "   exit $LASTEXITCODE\"");
+    }
