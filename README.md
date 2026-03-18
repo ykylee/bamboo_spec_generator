@@ -13,17 +13,18 @@
 - OS별 Python wrapper도 `scripts/plan_tasks/common/sh/`, `scripts/plan_tasks/common/bat/` 자산으로 분리되어 있습니다.
 - 테스트는 `unittest` 기반으로 일부 포함되어 있습니다.
 - 실제 Bamboo 서버 import 및 실행까지는 아직 검증되지 않았습니다.
-- Django/Ninja 기반 운영 백엔드 스캐폴딩이 추가되었지만, 현재 환경에서는 패키지 미설치 상태라 실행 검증은 아직 하지 않았습니다.
+- Django/Ninja 기반 운영 백엔드 스캐폴딩, migration, 기본 API/UI, SQLite/PostgreSQL 스위치, 개발용 DB 초기화 명령이 추가되었습니다.
+- `backend/manage.py check`, `migrate`, Django 테스트 기준의 기본 동작은 검증되었습니다.
 
 ## 아직 미구현인 범위
 
-- DB 기반 빌드 정의 조회 및 저장
-- 빌드 결과, 버전, 실패 위치, 정적분석 결과의 DB 저장
-- 동일 커밋 재빌드 시 기존 버전 레코드 갱신 로직
+- JSON 정의의 운영 DB 자동 적재/동기화
+- Bamboo 준비 스테이지와 운영 API의 실제 변수 주입 연동
+- Bamboo 실행 결과, 버전, 실패 위치, 정적분석 결과의 end-to-end 적재
 - Bitbucket 브랜치별 Bamboo 트리거 생성
 - `repository.linkageMode=create_if_missing`의 실질적 생성 동작
 
-현재는 PostgreSQL 스키마 초안과 `psql` 기반 연결/스키마 적용 진입점만 추가되어 있으며, 애플리케이션의 실제 DB 읽기/쓰기 기능은 아직 구현되지 않았습니다.
+현재 운영 백엔드는 스캐폴딩과 기본 기능이 구현되었지만, 운영 데이터 적재/조회 흐름은 아직 확장 중입니다.
 
 ## 저장소 구조
 
@@ -139,12 +140,14 @@ MSBuild 기반 플랜은 생성된 inline Python 코드에서 실제 MSBuild 호
 - `generator.py`: Java Specs 코드와 Coverity 설정 생성
 - `writer.py`: 출력 파일 기록
 
-현재 구현에는 DB 접근 계층이나 메타데이터 저장 계층은 포함되어 있지 않습니다.
+현재 구현에는 생성기 쪽 API 클라이언트와 Django 기반 메타데이터 계층 초안이 포함되어 있습니다.
 
-현재 추가된 PostgreSQL 지원은 다음 두 가지 관리 명령으로 제한됩니다.
+현재 추가된 CLI/백엔드 관리 명령은 다음과 같습니다.
 
 - `--db-check`: 환경변수 기준 PostgreSQL 연결 확인
 - `--db-init-schema`: `docs/designs/sql/build_metadata_schema.sql` 스키마 적용
+- `python3 manage.py init_dev_db`: SQLite 개발 DB 초기화
+- `python3 manage.py init_postgres_db --force`: PostgreSQL schema 초기화
 
 둘 다 Python DB 드라이버 대신 외부 `psql` 명령을 사용합니다.
 
@@ -169,6 +172,8 @@ MSBuild 기반 플랜은 생성된 inline Python 코드에서 실제 MSBuild 호
 - Django
 - django-ninja
 - psycopg
+
+백엔드 환경 변수 예시는 `backend/.env.example`에 정리되어 있습니다.
 
 권장 확인 명령:
 
@@ -255,6 +260,54 @@ python3 manage.py migrate
 python3 manage.py runserver
 ```
 
+기본 `local` 설정은 `SQLite`를 사용하므로, 별도 DB 정보 없이도 바로 시작할 수 있습니다.
+
+SQLite로 명시 실행:
+
+```bash
+cd backend
+export BAMBOO_DB_ENGINE=sqlite
+python3 manage.py migrate
+python3 manage.py runserver
+```
+
+SQLite 개발 DB 초기화:
+
+```bash
+cd backend
+export BAMBOO_DB_ENGINE=sqlite
+python3 manage.py init_dev_db
+```
+
+PostgreSQL로 전환:
+
+```bash
+cd backend
+export BAMBOO_DB_ENGINE=postgresql
+export BAMBOO_DB_HOST=127.0.0.1
+export BAMBOO_DB_PORT=5432
+export BAMBOO_DB_USER=postgres
+export BAMBOO_DB_PASSWORD=replace-me
+export BAMBOO_DB_NAME=bamboo_meta
+export BAMBOO_DB_SSLMODE=disable
+python3 manage.py migrate
+python3 manage.py runserver
+```
+
+PostgreSQL 개발 DB 초기화:
+
+```bash
+cd backend
+export BAMBOO_DB_ENGINE=postgresql
+export BAMBOO_DB_HOST=127.0.0.1
+export BAMBOO_DB_PORT=5432
+export BAMBOO_DB_USER=postgres
+export BAMBOO_DB_PASSWORD=replace-me
+export BAMBOO_DB_NAME=bamboo_meta
+export BAMBOO_DB_SSLMODE=disable
+python3 manage.py init_postgres_db --force
+```
+
 운영 백엔드 테스트 실행:
 
 ```bash
@@ -264,7 +317,10 @@ DJANGO_SETTINGS_MODULE=config.settings.test python3 manage.py test apps.api apps
 
 주의:
 
-- 기본 Django 설정은 PostgreSQL을 사용하므로 `manage.py migrate` 실행 시 `BAMBOO_DB_*` 환경변수가 맞아야 합니다.
+- `config.settings.local`은 기본적으로 SQLite를 사용합니다.
+- `BAMBOO_DB_ENGINE=postgresql`로 바꾸면 PostgreSQL 연결로 전환됩니다.
+- `init_dev_db`는 안전하게 SQLite에서만 동작하며, PostgreSQL에서는 실행을 거부합니다.
+- `init_postgres_db --force`는 PostgreSQL의 대상 schema를 삭제 후 재생성하므로 개발 환경에서만 사용해야 합니다.
 - 테스트 설정 `config.settings.test`는 SQLite를 사용하므로 로컬 PostgreSQL 자격증명 없이도 백엔드 기본 동작을 검증할 수 있습니다.
 
 Windows `cmd` 기준:

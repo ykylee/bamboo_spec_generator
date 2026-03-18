@@ -635,13 +635,16 @@ erDiagram
 - `model.py`: 공통 내부 모델
 - `generator.py`: Java Specs 생성
 - `script_assets.py`, `script_renderer.py`: 자산 선택/렌더링
+- `api_client.py`: 운영 API 활성 정의 조회 클라이언트
+- `backend/`: Django 백엔드 스캐폴딩, ORM 모델, migration, Admin, Ninja API, 기본 조회 UI
+- `backend` 설정: SQLite/PostgreSQL 스위치와 개발용 DB 초기화 명령
 
 현재 미구현 항목:
 
 - DB loader
-- DB 저장소 계층
-- 버전/실행 이력 갱신 로직
-- 준비 스테이지 DB 변수 주입 로직
+- JSON 적재/동기화 자동화
+- 준비 스테이지 DB 변수의 실제 Bamboo 연동
+- 운영 데이터의 end-to-end 수집/적재 흐름
 
 ## 11. 마이그레이션 설계
 
@@ -661,7 +664,7 @@ erDiagram
 
 ## 13. DB 구현 초안
 
-현재 미구현 범위다.
+부분 구현 범위다.
 
 ### DBMS 가정
 
@@ -714,7 +717,7 @@ erDiagram
 
 ## 14. 운영 백엔드/API/조회 UI 설계
 
-현재 미구현 범위다.
+부분 구현 범위다.
 
 ### 운영 백엔드 방향
 

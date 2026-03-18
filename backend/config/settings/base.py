@@ -9,6 +9,33 @@ SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", "insecure-local-dev-key")
 DEBUG = os.environ.get("DJANGO_DEBUG", "false").lower() == "true"
 ALLOWED_HOSTS = [host for host in os.environ.get("DJANGO_ALLOWED_HOSTS", "*").split(",") if host]
 
+
+def build_database_config(default_engine: str = "postgresql") -> dict:
+    engine = os.environ.get("BAMBOO_DB_ENGINE", default_engine).lower()
+    if engine == "sqlite":
+        sqlite_name = os.environ.get("BAMBOO_DB_SQLITE_NAME", "db.sqlite3")
+        return {
+            "default": {
+                "ENGINE": "django.db.backends.sqlite3",
+                "NAME": BASE_DIR / sqlite_name,
+            }
+        }
+    if engine == "postgresql":
+        return {
+            "default": {
+                "ENGINE": "django.db.backends.postgresql",
+                "NAME": os.environ.get("BAMBOO_DB_NAME", "bamboo_meta"),
+                "USER": os.environ.get("BAMBOO_DB_USER", "postgres"),
+                "PASSWORD": os.environ.get("BAMBOO_DB_PASSWORD", ""),
+                "HOST": os.environ.get("BAMBOO_DB_HOST", "127.0.0.1"),
+                "PORT": os.environ.get("BAMBOO_DB_PORT", "5432"),
+                "OPTIONS": {
+                    "sslmode": os.environ.get("BAMBOO_DB_SSLMODE", "prefer"),
+                },
+            }
+        }
+    raise ValueError(f"Unsupported BAMBOO_DB_ENGINE: {engine}")
+
 INSTALLED_APPS = [
     "django.contrib.admin",
     "django.contrib.auth",
@@ -51,19 +78,7 @@ TEMPLATES = [
 WSGI_APPLICATION = "config.wsgi.application"
 ASGI_APPLICATION = "config.asgi.application"
 
-DATABASES = {
-    "default": {
-        "ENGINE": "django.db.backends.postgresql",
-        "NAME": os.environ.get("BAMBOO_DB_NAME", "bamboo_meta"),
-        "USER": os.environ.get("BAMBOO_DB_USER", "postgres"),
-        "PASSWORD": os.environ.get("BAMBOO_DB_PASSWORD", ""),
-        "HOST": os.environ.get("BAMBOO_DB_HOST", "127.0.0.1"),
-        "PORT": os.environ.get("BAMBOO_DB_PORT", "5432"),
-        "OPTIONS": {
-            "sslmode": os.environ.get("BAMBOO_DB_SSLMODE", "prefer"),
-        },
-    }
-}
+DATABASES = build_database_config()
 
 LANGUAGE_CODE = "ko-kr"
 TIME_ZONE = "UTC"
