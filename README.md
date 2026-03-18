@@ -189,6 +189,22 @@ mvn -version
 python3 -m pip install -r requirements-backend.txt
 ```
 
+처음 작업하는 로컬 환경 권장 순서:
+
+```bash
+python3 -m venv .venv
+. .venv/bin/activate
+python -m pip install -r requirements-backend.txt
+cp backend/.env.example backend/.env
+set -a
+. backend/.env
+set +a
+python backend/manage.py migrate
+python backend/manage.py check
+```
+
+현재 `backend/manage.py`는 `backend/.env`를 자동으로 읽지 않으므로, 실행 전에 셸에서 직접 환경변수를 로드해야 합니다.
+
 Windows `cmd` 기준:
 
 ```bat
