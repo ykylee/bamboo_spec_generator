@@ -255,6 +255,18 @@ python3 manage.py migrate
 python3 manage.py runserver
 ```
 
+운영 백엔드 테스트 실행:
+
+```bash
+cd backend
+DJANGO_SETTINGS_MODULE=config.settings.test python3 manage.py test apps.api apps.buildmeta
+```
+
+주의:
+
+- 기본 Django 설정은 PostgreSQL을 사용하므로 `manage.py migrate` 실행 시 `BAMBOO_DB_*` 환경변수가 맞아야 합니다.
+- 테스트 설정 `config.settings.test`는 SQLite를 사용하므로 로컬 PostgreSQL 자격증명 없이도 백엔드 기본 동작을 검증할 수 있습니다.
+
 Windows `cmd` 기준:
 
 ```bat
