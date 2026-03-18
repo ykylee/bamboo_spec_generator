@@ -73,6 +73,8 @@
 - `runtimeRequirements.envVars`: 에이전트에 있어야 하는 환경변수 목록
 - `postBuildTrigger`: 후속 플랜 트리거 설정
 
+JSON 입력 모드에서 연도는 JSON 본문 필드가 아니라 `build_info_json/<year>/...` 경로의 디렉터리명에서 해석합니다. 반대로 운영 백엔드의 DB 참조 모드에서는 같은 정보를 파일 경로에서 복원할 수 없으므로, `BuildPlanDefinition.year` 같은 별도 필드로 저장하고 API 응답에서도 이 값을 함께 전달해야 합니다.
+
 중요한 점은 `prepareCommand`와 `buildCommand`가 생성기가 내부적으로 쓰는 스크립트 경로가 아니라, 실제 프로젝트에서 수행할 원본 준비/빌드 명령이라는 점입니다.
 
 예제 파일:
@@ -151,11 +153,15 @@ MSBuild 기반 플랜은 생성된 inline Python 코드에서 실제 MSBuild 호
 
 둘 다 Python DB 드라이버 대신 외부 `psql` 명령을 사용합니다.
 
+현재 `BuildPlanDefinition.year`는 DB 참조 모드의 명시적 메타데이터입니다. 기존 로컬 DB가 이 필드 없이 만들어졌다면 자동 백필 대신 DB 초기화 후 재적재를 기준으로 운영합니다.
+
 운영 백엔드 방향으로는 다음 구조가 추가되었습니다.
 
 - `backend/`: Django 기반 운영 백엔드 스캐폴딩
 - `src/bamboo_spec_generator/api_client.py`: 생성기에서 운영 API를 호출하기 위한 클라이언트
 - `--api-plan-key`: 운영 API에서 활성 빌드 정의를 읽어 생성하는 CLI 진입점
+
+운영 API의 활성 빌드 정의 응답은 `definition` JSON 본문과 별도로 `year` 필드를 포함해야 하며, 생성기는 이 값을 내부 `BuildDefinition.year`로 사용합니다.
 
 ## 요구 환경
 

@@ -144,10 +144,7 @@ class BuildVersion(TimestampedModel):
     class Meta:
         constraints = [
             models.UniqueConstraint(fields=["build_plan", "version_text"], name="uq_build_version_text"),
-            models.UniqueConstraint(
-                fields=["build_plan", "branch_kind", "commit_hash"],
-                name="uq_build_version_branch_commit",
-            ),
+            models.UniqueConstraint(fields=["build_plan", "commit_hash"], name="uq_build_version_commit"),
             models.UniqueConstraint(
                 fields=["build_plan"],
                 condition=Q(is_latest=True),
@@ -156,7 +153,7 @@ class BuildVersion(TimestampedModel):
         ]
         indexes = [
             models.Index(fields=["build_plan", "is_latest"], name="ix_build_version_latest"),
-            models.Index(fields=["build_plan", "branch_kind", "commit_hash"], name="ix_build_version_branch_commit"),
+            models.Index(fields=["build_plan", "commit_hash"], name="ix_build_version_commit"),
         ]
 
 

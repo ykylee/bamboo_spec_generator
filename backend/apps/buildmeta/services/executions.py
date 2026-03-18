@@ -36,9 +36,8 @@ def start_execution(
     plan = BuildPlan.objects.select_for_update().select_related("latest_version").get(plan_key=plan_key)
     version = BuildVersion.objects.filter(
         build_plan=plan,
-        branch_kind=branch_kind,
         commit_hash=commit_hash,
-    ).first()
+    ).order_by("-major", "-minor", "-patch", "-created_at").first()
     reused_existing_version = version is not None
     if version is None:
         major, minor, patch = _next_version_numbers(plan.latest_version, branch_kind)

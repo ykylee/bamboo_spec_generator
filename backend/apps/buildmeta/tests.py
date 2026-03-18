@@ -53,7 +53,7 @@ class ExecutionServiceTest(TestCase):
         version = BuildVersion.objects.get(pk=finish_payload["buildVersionId"])
         self.assertTrue(version.latest_success)
 
-    def test_same_commit_on_different_branches_creates_distinct_versions(self) -> None:
+    def test_same_commit_on_different_branches_reuses_single_version(self) -> None:
         dev_payload = start_execution(
             plan_key="SAMPAPI",
             branch_kind=BuildVersion.BRANCH_KIND_DEV,
@@ -68,8 +68,9 @@ class ExecutionServiceTest(TestCase):
         )
 
         self.assertEqual("v0.0.1", dev_payload["version"])
-        self.assertEqual("v0.1.0", release_payload["version"])
-        self.assertEqual(2, BuildVersion.objects.count())
+        self.assertEqual("v0.0.1", release_payload["version"])
+        self.assertTrue(release_payload["reusedExistingVersion"])
+        self.assertEqual(1, BuildVersion.objects.count())
 
     def test_rebuilding_older_version_does_not_move_latest_pointer_backwards(self) -> None:
         first_payload = start_execution(
