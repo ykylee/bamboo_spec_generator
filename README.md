@@ -2,7 +2,7 @@
 
 `bamboo_spec_generator`는 연도별 JSON 빌드 정의를 읽어 Bamboo Specs Java 코드를 생성하는 로컬 실행형 샘플 생성기입니다. 여러 빌드 플랜을 하나의 `bamboo-specs/` Maven 프로젝트 형태로 만들고, 이를 Bamboo Repository Stored Specs 또는 수동 Java Specs 배포 흐름에서 사용할 수 있도록 하는 것을 목표로 합니다.
 
-현재 저장소에는 요구사항 문서, 설계 문서, JSON 스키마 초안, Python 기반 초기 생성기 구현이 포함되어 있습니다.
+현재 저장소에는 요구사항 문서, 설계 문서, Python 기반 생성기 구현, 스크립트 자산, 샘플 입력 JSON, 일부 테스트가 포함되어 있습니다.
 
 ## 현재 상태
 
@@ -13,11 +13,24 @@
 - OS별 Python wrapper도 `scripts/plan_tasks/common/sh/`, `scripts/plan_tasks/common/bat/` 자산으로 분리되어 있습니다.
 - 테스트는 `unittest` 기반으로 일부 포함되어 있습니다.
 - 실제 Bamboo 서버 import 및 실행까지는 아직 검증되지 않았습니다.
+- Django/Ninja 기반 운영 백엔드 스캐폴딩이 추가되었지만, 현재 환경에서는 패키지 미설치 상태라 실행 검증은 아직 하지 않았습니다.
+
+## 아직 미구현인 범위
+
+- DB 기반 빌드 정의 조회 및 저장
+- 빌드 결과, 버전, 실패 위치, 정적분석 결과의 DB 저장
+- 동일 커밋 재빌드 시 기존 버전 레코드 갱신 로직
+- Bitbucket 브랜치별 Bamboo 트리거 생성
+- `repository.linkageMode=create_if_missing`의 실질적 생성 동작
+
+현재는 PostgreSQL 스키마 초안과 `psql` 기반 연결/스키마 적용 진입점만 추가되어 있으며, 애플리케이션의 실제 DB 읽기/쓰기 기능은 아직 구현되지 않았습니다.
 
 ## 저장소 구조
 
 - 입력 JSON: `build_info_json/<year>/<buildId>.json`
 - 생성기 코드: `src/bamboo_spec_generator/`
+- 운영 백엔드: `backend/`
+- 백엔드 의존성: `requirements-backend.txt`
 - 스크립트 자산: `scripts/plan_tasks/`
 - 테스트: `tests/`
 - 문서: `docs/`
@@ -73,6 +86,8 @@
 - `sample-app-web`: Linux 에이전트에서 `npm`으로 빌드하는 Node.js 웹 애플리케이션
 - `sample-app-mfc`: Windows 에이전트에서 `nuget restore` 후 `msbuild`를 수행하는 Visual Studio 2022 기반 MFC 애플리케이션
 
+현재 validator 기준으로 `build.runtimeRequirements.commands`와 `build.runtimeRequirements.envVars`는 필수입니다.
+
 ## Capability 처리
 
 입력 JSON은 사용자 친화적인 compiler/capability 이름을 사용하고, 생성기 내부에서 Bamboo capability key로 변환합니다.
@@ -91,6 +106,8 @@ MSBuild 기반 플랜은 생성된 inline Python 코드에서 실제 MSBuild 호
 모든 생성 플랜은 작업 실행을 위해 Bamboo 에이전트에 Python 실행 환경이 있다고 가정하며, 생성된 Specs에는 `system.builder.python` requirement가 함께 포함됩니다.
 
 입력 JSON의 `runtimeRequirements`는 Bamboo capability로 직접 강제하기 어려운 런타임 전제 조건을 명시적으로 남기기 위한 블록입니다. 예를 들어 `coverity`, `custom-tool`, `trigger-plan`, `VS2022_ENV` 같은 항목을 각 빌드 단위로 기록합니다.
+
+`repository.branches`와 `repository.linkageMode`는 현재 입력/검증에는 반영되어 있지만, 실제 Java Specs 생성에서는 브랜치별 트리거와 `create_if_missing` 분기 처리까지는 구현되지 않았습니다.
 
 ## 스크립트 자산 관리
 
@@ -122,6 +139,21 @@ MSBuild 기반 플랜은 생성된 inline Python 코드에서 실제 MSBuild 호
 - `generator.py`: Java Specs 코드와 Coverity 설정 생성
 - `writer.py`: 출력 파일 기록
 
+현재 구현에는 DB 접근 계층이나 메타데이터 저장 계층은 포함되어 있지 않습니다.
+
+현재 추가된 PostgreSQL 지원은 다음 두 가지 관리 명령으로 제한됩니다.
+
+- `--db-check`: 환경변수 기준 PostgreSQL 연결 확인
+- `--db-init-schema`: `docs/designs/sql/build_metadata_schema.sql` 스키마 적용
+
+둘 다 Python DB 드라이버 대신 외부 `psql` 명령을 사용합니다.
+
+운영 백엔드 방향으로는 다음 구조가 추가되었습니다.
+
+- `backend/`: Django 기반 운영 백엔드 스캐폴딩
+- `src/bamboo_spec_generator/api_client.py`: 생성기에서 운영 API를 호출하기 위한 클라이언트
+- `--api-plan-key`: 운영 API에서 활성 빌드 정의를 읽어 생성하는 CLI 진입점
+
 ## 요구 환경
 
 로컬에서 생성기를 실행하고 생성 결과를 검토하려면 다음 도구가 필요합니다.
@@ -131,12 +163,25 @@ MSBuild 기반 플랜은 생성된 inline Python 코드에서 실제 MSBuild 호
 - Maven 3.9 이상
 - Bamboo 에이전트에 등록된 Python capability (`system.builder.python`)
 
+운영 백엔드를 실행하려면 추가로 다음이 필요합니다.
+
+- PostgreSQL
+- Django
+- django-ninja
+- psycopg
+
 권장 확인 명령:
 
 ```bash
 python3 --version
 java -version
 mvn -version
+```
+
+운영 백엔드 의존성 설치:
+
+```bash
+python3 -m pip install -r requirements-backend.txt
 ```
 
 Windows `cmd` 기준:
@@ -168,6 +213,46 @@ set VS2022_ENV=C:\Program Files\Microsoft Visual Studio\2022\BuildTools\Common7\
 
 ```bash
 PYTHONPATH=. python3 -m src.bamboo_spec_generator.cli
+```
+
+운영 API에서 활성 정의를 읽어 생성:
+
+```bash
+export BAMBOO_API_BASE_URL=http://127.0.0.1:8000
+export BAMBOO_API_TOKEN=replace-me
+PYTHONPATH=. python3 -m src.bamboo_spec_generator.cli --api-plan-key SAMPAPI
+```
+
+PostgreSQL 연결 확인:
+
+```bash
+export BAMBOO_DB_HOST=127.0.0.1
+export BAMBOO_DB_PORT=5432
+export BAMBOO_DB_USER=postgres
+export BAMBOO_DB_PASSWORD=postgres
+export BAMBOO_DB_NAME=bamboo_meta
+export BAMBOO_DB_SSLMODE=disable
+PYTHONPATH=. python3 -m src.bamboo_spec_generator.cli --db-check
+```
+
+PostgreSQL 스키마 적용:
+
+```bash
+export BAMBOO_DB_HOST=127.0.0.1
+export BAMBOO_DB_PORT=5432
+export BAMBOO_DB_USER=postgres
+export BAMBOO_DB_PASSWORD=postgres
+export BAMBOO_DB_NAME=bamboo_meta
+export BAMBOO_DB_SSLMODE=disable
+PYTHONPATH=. python3 -m src.bamboo_spec_generator.cli --db-init-schema
+```
+
+운영 백엔드 개발 서버 실행:
+
+```bash
+cd backend
+python3 manage.py migrate
+python3 manage.py runserver
 ```
 
 Windows `cmd` 기준:
@@ -382,15 +467,11 @@ python -m unittest discover -s tests
 
 핵심 문서:
 
-- [CRS](./docs/requirements/2026-03-17-bamboo-spec-generator-crs.md)
-- [SRS](./docs/requirements/2026-03-17-bamboo-spec-generator-srs.md)
-- [초기 설계](./docs/designs/2026-03-17-initial-design.md)
-- [JSON 스키마 설계](./docs/designs/2026-03-17-json-schema-design.md)
-- [저장소 연결 설계](./docs/designs/2026-03-17-repository-linking-design.md)
-- [플랜 스크립트 관리 CRS](./docs/requirements/2026-03-18-plan-script-management-crs.md)
-- [플랜 스크립트 관리 설계](./docs/designs/2026-03-18-plan-script-management-design.md)
-- [플랜 스크립트 구현 계획](./docs/designs/2026-03-18-plan-script-management-implementation-plan.md)
-- [이슈 분해](./docs/requirements/issues/2026-03-17-issue-breakdown.md)
+- [CRS](./docs/requirements/CRS.md)
+- [SRS](./docs/requirements/SRS.md)
+- [SAD](./docs/designs/SAD.md)
+- [Design](./docs/designs/Design.md)
+- [이슈 분해](./docs/requirements/issues/BREAKDOWN.md)
 
 ## 작업 흐름
 

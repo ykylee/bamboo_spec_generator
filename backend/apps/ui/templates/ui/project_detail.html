@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8">
+    <title>Project Detail</title>
+  </head>
+  <body>
+    {% if project %}
+    <h1>{{ project.jiraProjectKey }}</h1>
+    <p>Bitbucket: {{ project.bitbucketProjectKey }}</p>
+    <p>Representative Repo: {{ project.representativeRepoSlug }}</p>
+    <h2>Repositories</h2>
+    <ul>
+      {% for repository in project.repositories %}
+      <li>{{ repository.repoSlug }}{% if repository.isRepresentative %} (대표){% endif %}</li>
+      {% endfor %}
+    </ul>
+    <h2>Builds</h2>
+    <ul>
+      {% for build in project.builds %}
+      <li>{{ build.buildName }} / {{ build.buildType }} / {{ build.planKey }}</li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <h1>프로젝트를 찾을 수 없습니다.</h1>
+    {% endif %}
+  </body>
+</html>

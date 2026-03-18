@@ -4,6 +4,15 @@
 
 - Story
 
+## 구현 상태
+
+- 구현됨
+- MSBuild 기반 스크립트 자산과 pre-run overlay를 통해 `Directory.Build.targets` 생성과 Visual Studio 환경 변수 로드가 반영되어 있다.
+
+## 우선순위
+
+- 유지
+
 ## 요약
 
 MSBuild 기반 Bamboo 플랜은 MSBuild가 수행되는 각 단계 실행 전에 `Directory.Build.targets` 파일을 생성해 최적화 관련 옵션을 무력화할 수 있어야 하며, Visual Studio 환경 설정 경로는 `VS2022_ENV` 같은 에이전트 환경변수를 통해 관리할 수 있어야 한다.

@@ -4,6 +4,21 @@
 
 - Story
 
+## 구현 상태
+
+- 부분 구현
+- `projectKey/repoSlug` 기반 linked repository 이름 생성은 구현되었다.
+- 미등록 저장소 대응과 `create_if_missing` 실질 동작은 아직 미구현이다.
+
+## 우선순위
+
+- 높음
+
+## 다음 구현 포인트
+
+- `linkageMode=create_if_missing`일 때 생성 결과에 남길 메타데이터 형식 확정
+- 생성기에서 `linked`와 `create_if_missing`를 실제로 분기 처리
+
 ## 요약
 
 Bitbucket 저장소를 Bamboo 플랜에 연결하는 방식과 Bamboo 미등록 저장소 대응 전략을 설계한다.
