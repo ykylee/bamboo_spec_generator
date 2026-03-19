@@ -84,6 +84,24 @@ class ExecutionServiceTest(TestCase):
         self.assertTrue(release_payload["reusedExistingVersion"])
         self.assertEqual(1, BuildVersion.objects.count())
 
+    def test_same_build_number_reuses_existing_execution(self) -> None:
+        first_payload = start_execution(
+            plan_key="SAMPAPI",
+            branch_kind=BuildVersion.BRANCH_KIND_DEV,
+            commit_hash="abcdef123456",
+            build_number="101",
+        )
+        second_payload = start_execution(
+            plan_key="SAMPAPI",
+            branch_kind=BuildVersion.BRANCH_KIND_DEV,
+            commit_hash="abcdef123456",
+            build_number="101",
+        )
+
+        self.assertEqual(first_payload["buildExecutionId"], second_payload["buildExecutionId"])
+        self.assertEqual(1, BuildExecution.objects.count())
+        self.assertTrue(second_payload["reusedExistingVersion"])
+
     def test_rebuilding_older_version_does_not_move_latest_pointer_backwards(self) -> None:
         first_payload = start_execution(
             plan_key="SAMPAPI",

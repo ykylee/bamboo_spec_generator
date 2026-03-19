@@ -6,6 +6,7 @@ import subprocess
 
 
 def main() -> int:
+    start_execution_if_configured()
     command = ["trigger-plan", {{TARGET_PLAN_KEY}}]
     result = subprocess.run(command, check=False)
     finish_execution_if_configured(

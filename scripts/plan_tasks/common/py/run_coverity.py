@@ -12,6 +12,7 @@ CONFIG_CONTENT = {{COVERITY_CONFIG}}
 
 
 def main() -> int:
+    start_execution_if_configured()
     with tempfile.NamedTemporaryFile("w", encoding="utf-8", suffix=".yaml", delete=False) as config_file:
         config_file.write(CONFIG_CONTENT)
         config_path = Path(config_file.name)

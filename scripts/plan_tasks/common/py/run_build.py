@@ -5,6 +5,7 @@ from __future__ import annotations
 
 
 def main() -> int:
+    start_execution_if_configured()
     command = {{BUILD_COMMAND}}
 {{PRE_RUN}}
     result = run_command(command)

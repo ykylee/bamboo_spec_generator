@@ -34,6 +34,27 @@ def start_execution(
     started_at: datetime | None = None,
 ) -> dict:
     plan = BuildPlan.objects.select_for_update().select_related("latest_version").get(plan_key=plan_key)
+    existing_execution = (
+        BuildExecution.objects.select_related("build_version")
+        .filter(build_plan=plan, build_number=build_number)
+        .order_by("-created_at")
+        .first()
+    )
+    if existing_execution is not None:
+        if existing_execution.commit_hash != commit_hash:
+            raise ValueError(
+                f"Build number '{build_number}' for plan '{plan_key}' is already associated with a different commit."
+            )
+        version = existing_execution.build_version
+        version.latest_execution = existing_execution
+        version.save(update_fields=["latest_execution", "updated_at"])
+        return {
+            "buildVersionId": str(version.id),
+            "buildExecutionId": str(existing_execution.id),
+            "version": version.version_text,
+            "reusedExistingVersion": True,
+        }
+
     version = BuildVersion.objects.filter(
         build_plan=plan,
         commit_hash=commit_hash,

@@ -10,6 +10,7 @@ COMMANDS = [
 
 
 def main() -> int:
+    start_execution_if_configured()
 {{PRE_RUN}}
     for command in COMMANDS:
         result = run_command(command)
