@@ -43,6 +43,7 @@ def project_list(request):
             "missingRepresentativeRepos": sum(
                 1 for project in all_projects if not project["representativeRepoSlug"]
             ),
+            "generationReadyProjects": sum(1 for project in all_projects if project["generationReady"]),
         },
         "attentionProjects": attention_projects[:5],
         "failedBuilds": list_latest_failed_builds(),

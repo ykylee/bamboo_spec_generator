@@ -16,6 +16,11 @@
   <div class="chip-row">
     <span class="chip">{{ project.bitbucketProjectKey }}</span>
     <span class="chip chip--neutral">{{ project.representativeRepoSlug|default:"대표 저장소 미지정" }}</span>
+    {% if project.generation.generationReady %}
+    <span class="chip chip--success">Specs 생성 가능</span>
+    {% else %}
+    <span class="chip chip--warning">Specs 준비 필요</span>
+    {% endif %}
     <a class="chip chip--neutral" href="{% url 'project-list' %}{% if request.GET.urlencode %}?{{ request.GET.urlencode }}{% endif %}">목록으로</a>
   </div>
 </section>
@@ -31,9 +36,38 @@
     <p class="stat-card__value">{{ project.builds|length }}</p>
     <p class="stat-card__meta">현재 조회 가능한 빌드 플랜 수</p>
   </article>
+  <article class="stat-card">
+    <span class="stat-card__label">Active Definitions</span>
+    <p class="stat-card__value">{{ project.generation.activeDefinitionCount }}</p>
+    <p class="stat-card__meta">활성 빌드 정의가 연결된 빌드 수</p>
+  </article>
 </section>
 
 <section class="detail-grid">
+  <article class="panel">
+    <div class="panel__header">
+      <h2 class="panel__title">Specs 생성 준비도</h2>
+    </div>
+    <ul class="meta-list">
+      <li>
+        <strong>생성 가능 여부</strong>
+        {% if project.generation.generationReady %}가능{% else %}준비 필요{% endif %}
+      </li>
+      <li>
+        <strong>활성 정의 연결 수</strong>
+        {{ project.generation.activeDefinitionCount }} / {{ project.generation.totalBuildCount }}
+      </li>
+      <li>
+        <strong>준비 이슈</strong>
+        {% if project.generation.generationReadinessIssues %}
+          {{ project.generation.generationReadinessIssues|join:", " }}
+        {% else %}
+          없음
+        {% endif %}
+      </li>
+    </ul>
+  </article>
+
   <article class="panel">
     <div class="panel__header">
       <h2 class="panel__title">프로젝트 메타데이터</h2>
@@ -92,8 +126,22 @@
           <h3 class="build-item__name">{{ build.buildName }}</h3>
           <span class="chip">{{ build.planKey }}</span>
         </div>
+        <div class="chip-row stack-top">
+          {% if build.generationReady %}
+          <span class="chip chip--success">활성 정의 있음</span>
+          {% else %}
+          <span class="chip chip--warning">활성 정의 없음</span>
+          {% endif %}
+          {% if build.activeDefinitionYear %}
+          <span class="chip chip--neutral">Year {{ build.activeDefinitionYear }}</span>
+          {% endif %}
+          {% if build.latestVersion %}
+          <span class="chip chip--neutral">Latest {{ build.latestVersion }}</span>
+          {% endif %}
+        </div>
         <p class="build-item__meta">Build Type: {{ build.buildType|default:"미지정" }}</p>
         <p class="build-item__meta">Runtime Stack: {{ build.runtimeStack|default:"미지정" }}</p>
+        <p class="build-item__meta">Build ID: {{ build.buildId }}</p>
       </li>
       {% empty %}
       <li class="empty-state">

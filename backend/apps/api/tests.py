@@ -215,3 +215,91 @@ class ApiSmokeTest(TestCase):
         list_response = self.client.get("/api/v1/build-plans/SAMPAPI/executions", **self.auth_headers)
         list_payload = list_response.json()
         self.assertEqual("coverity", list_payload[0]["staticAnalysisResults"][0]["toolName"])
+
+    def test_project_list_and_detail_include_generation_readiness(self) -> None:
+        response = self.client.get("/api/v1/projects/", **self.auth_headers)
+
+        self.assertEqual(200, response.status_code)
+        payload = response.json()
+        self.assertEqual(1, len(payload))
+        self.assertTrue(payload[0]["generationReady"])
+        self.assertEqual(1, payload[0]["activeDefinitionCount"])
+
+        detail_response = self.client.get("/api/v1/projects/SAMPLE", **self.auth_headers)
+        self.assertEqual(200, detail_response.status_code)
+        detail_payload = detail_response.json()
+        self.assertTrue(detail_payload["generation"]["generationReady"])
+        self.assertEqual("2026", detail_payload["builds"][0]["activeDefinitionYear"])
+
+    def test_project_create_endpoint_registers_project_with_builds(self) -> None:
+        response = self.client.post(
+            "/api/v1/projects/",
+            data=json.dumps(
+                {
+                    "jiraProjectKey": "NEWPROJ",
+                    "bitbucketProjectKey": "NEWPROJ",
+                    "representativeRepoSlug": "new-service",
+                    "repositories": [
+                        {
+                            "repoSlug": "new-service",
+                            "coverityProject": "new-service",
+                            "coverityStream": "new-service-dev",
+                            "isRepresentative": True,
+                        }
+                    ],
+                    "builds": [
+                        {
+                            "buildName": "api",
+                            "buildType": "python",
+                            "runtimeStack": "python3.12",
+                            "buildId": "new-service-api",
+                            "planKey": "NEWSVCAPI",
+                        }
+                    ],
+                }
+            ),
+            content_type="application/json",
+            **self.auth_headers,
+        )
+
+        self.assertEqual(200, response.status_code)
+        payload = response.json()
+        self.assertEqual("NEWPROJ", payload["jiraProjectKey"])
+        self.assertFalse(payload["generation"]["generationReady"])
+        self.assertEqual(["활성 정의 없음 1"], payload["generation"]["generationReadinessIssues"])
+
+    def test_project_update_endpoint_updates_metadata_and_links(self) -> None:
+        response = self.client.put(
+            "/api/v1/projects/SAMPLE",
+            data=json.dumps(
+                {
+                    "bitbucketProjectKey": "SAMPLE2",
+                    "representativeRepoSlug": "sample-app-api",
+                    "repositories": [
+                        {
+                            "repoSlug": "sample-app-api",
+                            "coverityProject": "sample-app",
+                            "coverityStream": "sample-app-release",
+                            "isRepresentative": True,
+                        }
+                    ],
+                    "builds": [
+                        {
+                            "buildName": "backend-api",
+                            "buildType": "java",
+                            "runtimeStack": "java17",
+                            "buildId": "sample-app-api",
+                            "planKey": "SAMPAPI",
+                        }
+                    ],
+                }
+            ),
+            content_type="application/json",
+            **self.auth_headers,
+        )
+
+        self.assertEqual(200, response.status_code)
+        payload = response.json()
+        self.assertEqual("SAMPLE2", payload["bitbucketProjectKey"])
+        self.assertEqual("backend-api", payload["builds"][0]["buildName"])
+        self.assertEqual("sample-app-release", payload["repositories"][0]["coverityStream"])

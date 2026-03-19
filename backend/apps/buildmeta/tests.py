@@ -21,7 +21,7 @@ from apps.buildmeta.models import (
     ProjectRepository,
 )
 from apps.buildmeta.selectors.definitions import get_active_definition_by_plan_key
-from apps.buildmeta.services import load_definition_import_records, sync_definition_records
+from apps.buildmeta.services import create_project, load_definition_import_records, sync_definition_records, update_project
 from apps.buildmeta.services.executions import finish_execution, record_static_analysis_results, start_execution
 
 
@@ -599,3 +599,98 @@ class InitPostgresDbCommandTest(SimpleTestCase):
         cursor_mock.execute.assert_any_call('CREATE SCHEMA "public"')
         connection_mock.close.assert_called_once()
         call_command_mock.assert_called_once_with("migrate", database="default", interactive=False, verbosity=0)
+
+
+class ProjectServiceTest(TestCase):
+    def test_create_project_marks_generation_not_ready_without_active_definitions(self) -> None:
+        payload = create_project(
+            {
+                "jiraProjectKey": "OPS",
+                "bitbucketProjectKey": "OPS",
+                "representativeRepoSlug": "ops-api",
+                "repositories": [
+                    {
+                        "repoSlug": "ops-api",
+                        "coverityProject": "ops-api",
+                        "coverityStream": "ops-api-dev",
+                        "isRepresentative": True,
+                    }
+                ],
+                "builds": [
+                    {
+                        "buildName": "API",
+                        "buildType": "python",
+                        "runtimeStack": "python3.12",
+                        "buildId": "ops-api",
+                        "planKey": "OPSAPI",
+                    }
+                ],
+            }
+        )
+
+        self.assertEqual("OPS", payload["jiraProjectKey"])
+        self.assertFalse(payload["generation"]["generationReady"])
+        self.assertEqual(["활성 정의 없음 1"], payload["generation"]["generationReadinessIssues"])
+        self.assertEqual(1, Project.objects.count())
+        self.assertEqual(1, BuildPlan.objects.count())
+        self.assertEqual(1, ProjectBuild.objects.count())
+
+    def test_create_project_rejects_duplicate_representative_repositories(self) -> None:
+        with self.assertRaisesMessage(ValueError, "Only one representative repository can be provided per request."):
+            create_project(
+                {
+                    "jiraProjectKey": "OPS",
+                    "bitbucketProjectKey": "OPS",
+                    "repositories": [
+                        {"repoSlug": "ops-api", "isRepresentative": True},
+                        {"repoSlug": "ops-web", "isRepresentative": True},
+                    ],
+                    "builds": [],
+                }
+            )
+
+    def test_update_project_keeps_existing_representative_repo_when_not_explicitly_changed(self) -> None:
+        project = Project.objects.create(
+            jira_project_key="OPS",
+            bitbucket_project_key="OPS",
+            representative_repo_slug="ops-api",
+        )
+        ProjectRepository.objects.create(
+            project=project,
+            repo_slug="ops-api",
+            is_representative=True,
+        )
+
+        payload = update_project(
+            "OPS",
+            {
+                "bitbucketProjectKey": "OPS-NEW",
+                "representativeRepoSlug": "",
+                "repositories": [
+                    {
+                        "repoSlug": "ops-api",
+                        "coverityProject": "ops-api",
+                        "coverityStream": "ops-api-release",
+                        "isRepresentative": False,
+                    }
+                ],
+                "builds": [],
+            },
+        )
+
+        assert payload is not None
+        self.assertEqual("OPS-NEW", payload["bitbucketProjectKey"])
+        self.assertEqual("ops-api", payload["representativeRepoSlug"])
+
+    def test_update_project_returns_none_for_missing_project(self) -> None:
+        payload = update_project(
+            "MISSING",
+            {
+                "bitbucketProjectKey": "MISS",
+                "representativeRepoSlug": "",
+                "repositories": [],
+                "builds": [],
+            },
+        )
+
+        self.assertIsNone(payload)

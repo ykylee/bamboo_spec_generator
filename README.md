@@ -14,7 +14,8 @@
 - 테스트는 `unittest` 기반으로 일부 포함되어 있습니다.
 - 실제 Bamboo 서버 import 및 실행까지는 아직 검증되지 않았습니다.
 - Django/Ninja 기반 운영 백엔드 스캐폴딩, migration, 기본 API/UI, SQLite/PostgreSQL 스위치, 개발용 DB 초기화 명령이 추가되었습니다.
-- 조회용 웹 UI는 Django 템플릿 기반으로 프로젝트 목록/상세 화면을 제공하며, 현재는 읽기 전용 운영 콘솔 성격입니다.
+- 운영 API는 프로젝트 목록/상세 조회 외에 프로젝트 등록/수정 upsert를 지원하며, 프로젝트별 Specs 생성 준비도와 활성 정의 연결 상태를 함께 반환합니다.
+- 조회용 웹 UI는 Django 템플릿 기반으로 프로젝트 목록/상세 화면을 제공하며, 현재는 읽기 전용 운영 콘솔 성격이지만 프로젝트별 Specs 생성 준비도를 함께 보여줍니다.
 - `backend/manage.py check`, `migrate`, Django 테스트 기준의 기본 동작은 검증되었습니다.
 
 ## 아직 미구현인 범위
@@ -22,6 +23,7 @@
 - Bamboo 준비 스테이지와 운영 API의 실제 변수 주입 연동
 - Bamboo 실행 결과, 버전, 실패 위치, 정적분석 결과의 end-to-end 적재
 - `repository.applicationLink` 운영값을 DB/API/환경설정과 연동하는 흐름
+- 등록된 프로젝트에서 직접 Specs 생성 요청과 Bamboo 플랜 등록까지 이어지는 end-to-end 운영 흐름
 
 현재 운영 백엔드는 스캐폴딩과 기본 기능이 구현되었지만, 운영 데이터 적재/조회 흐름은 아직 확장 중입니다.
 
@@ -170,6 +172,18 @@ MSBuild 기반 플랜은 생성된 inline Python 코드에서 실제 MSBuild 호
 - `/`: 프로젝트 목록
 - `/projects/<jiraProjectKey>/`: 프로젝트 상세
 
+현재 운영 API 엔드포인트는 다음과 같습니다.
+
+- `GET /api/v1/projects/`: 프로젝트 목록 및 Specs 생성 준비도 조회
+- `POST /api/v1/projects/`: 프로젝트 등록
+- `GET /api/v1/projects/<jiraProjectKey>`: 프로젝트 상세 및 빌드별 활성 정의 상태 조회
+- `PUT /api/v1/projects/<jiraProjectKey>`: 프로젝트 메타데이터 및 연결 정보 갱신
+- `GET /api/v1/build-plans/<planKey>/active-definition`: 활성 빌드 정의 조회
+- `GET /api/v1/build-plans/<planKey>/prepare-context`: 준비 스테이지 변수 조회
+- `GET /api/v1/build-plans/<planKey>/executions`: 빌드 실행 이력 조회
+
+UI 스크린샷 확인은 컨테이너에 시스템 Chrome이나 X server가 없을 수 있으므로, Playwright 전용 Firefox와 헤드리스 모드 기준으로 실행한다. 저장소에는 이를 위한 보조 스크립트 `scripts/capture_ui_screenshot.py`를 포함한다.
+
 운영 API의 활성 빌드 정의 응답은 `definition` JSON 본문과 별도로 `year` 필드를 포함해야 하며, 생성기는 이 값을 내부 `BuildDefinition.year`로 사용합니다.
 
 ## 요구 환경
@@ -257,6 +271,13 @@ PYTHONPATH=. python3 -m src.bamboo_spec_generator.cli
 export BAMBOO_API_BASE_URL=http://127.0.0.1:8000
 export BAMBOO_API_TOKEN=replace-me
 PYTHONPATH=. python3 -m src.bamboo_spec_generator.cli --api-plan-key SAMPAPI
+```
+
+UI 스크린샷 캡처:
+
+```bash
+python3 scripts/capture_ui_screenshot.py http://127.0.0.1:8000/ --output output/playwright/project-list.png
+python3 scripts/capture_ui_screenshot.py http://127.0.0.1:8000/projects/SAMPLE/ --output output/playwright/project-detail-sample.png
 ```
 
 PostgreSQL 연결 확인:

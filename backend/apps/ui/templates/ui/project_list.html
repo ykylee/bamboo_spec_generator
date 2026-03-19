@@ -33,6 +33,11 @@
     <p class="stat-card__value">{{ summary.missingRepresentativeRepos }}</p>
     <p class="stat-card__meta">대표 저장소가 비어 있는 프로젝트 수</p>
   </article>
+  <article class="stat-card">
+    <span class="stat-card__label">Specs Ready</span>
+    <p class="stat-card__value">{{ summary.generationReadyProjects }}</p>
+    <p class="stat-card__meta">현재 기준으로 Specs 생성 준비가 된 프로젝트 수</p>
+  </article>
 </section>
 
 <section class="section-grid">
@@ -70,6 +75,12 @@
           </td>
           <td>
             <div class="chip-row">
+              {% if project.generationReady %}
+              <span class="chip chip--success">Specs 생성 가능</span>
+              {% else %}
+              <span class="chip chip--warning">Specs 준비 필요</span>
+              {% endif %}
+              <span class="chip chip--neutral">정의 {{ project.activeDefinitionCount }}/{{ project.buildCount }}</span>
               {% if project.warningTags %}
                 {% for warning in project.warningTags %}
                 <span class="chip chip--warning">{{ warning }}</span>
@@ -127,6 +138,13 @@
         {% for project in attentionProjects %}
         <li>
           <strong>{{ project.jiraProjectKey }}</strong>
+          <div class="stack-top">
+            {% if project.generationReady %}
+            <span class="chip chip--success">Specs 생성 가능</span>
+            {% else %}
+            <span class="chip chip--warning">활성 정의 {{ project.activeDefinitionCount }}/{{ project.buildCount }}</span>
+            {% endif %}
+          </div>
           <div class="chip-row stack-top">
             {% for warning in project.metadataWarningTags %}
             <span class="chip chip--warning">{{ warning }}</span>
