@@ -4,6 +4,7 @@ from ninja import Router
 from ninja.errors import HttpError
 
 from apps.buildmeta.selectors.definitions import get_active_definition_by_plan_key, get_prepare_context_by_plan_key
+from apps.buildmeta.selectors.executions import list_executions_by_plan_key
 
 
 router = Router(tags=["build-plans"])
@@ -22,4 +23,12 @@ def get_prepare_context(request, plan_key: str) -> dict:
     payload = get_prepare_context_by_plan_key(plan_key)
     if payload is None:
         raise HttpError(404, f"Prepare context for '{plan_key}' was not found.")
+    return payload
+
+
+@router.get("/{plan_key}/executions")
+def get_executions(request, plan_key: str) -> list[dict]:
+    payload = list_executions_by_plan_key(plan_key)
+    if payload is None:
+        raise HttpError(404, f"Build plan '{plan_key}' was not found.")
     return payload

@@ -105,10 +105,11 @@
 
 - 시스템은 `repository.projectKey`, `repository.repoSlug`로 Bitbucket 저장소를 식별해야 한다.
 - 시스템은 `linked`, `create_if_missing` 연결 모드를 지원해야 한다.
-  - 현재 구현은 입력 검증만 수행하고 생성 단계에서는 `linkedRepositories(...)` 형태로만 출력한다.
+  - 현재 구현은 `linkedRepositories(...)`와 plan-local `BitbucketServerRepository` 생성을 모두 지원한다.
+- 시스템은 `create_if_missing`일 때 `repository.applicationLink`를 통해 Bamboo Application Link 이름을 제공받아야 한다.
 - 시스템은 기본 브랜치 `dev`, `release`, `master`를 적용해야 한다.
 - 시스템은 세 브랜치 각각에 대해 일관된 순서와 규칙으로 트리거 구성을 생성해야 한다.
-  - 현재 미구현
+  - 현재 Java Specs 생성에서는 `repositoryBranches(...)`, `planBranchManagement(...)`, `BitbucketServerTrigger`를 생성한다.
 
 ### FR-08 작업 하위 경로
 
@@ -135,7 +136,7 @@
 - 시스템은 현재 JSON으로 관리하는 빌드 정의를 DB에 적재할 수 있어야 한다.
 - 시스템은 빌드 정의 스냅샷과 활성 정의를 구분해 관리할 수 있어야 한다.
 - 시스템은 초기 전환 단계에서 JSON과 DB를 병행 검증하거나 순차 전환할 수 있어야 한다.
-  - 현재 ORM 모델, migration, 활성 정의 구조는 구현되었지만 JSON 적재/동기화 경로는 미구현
+  - 현재 ORM 모델, migration, 활성 정의 구조와 관리 명령 기반 JSON 적재 경로는 구현되었지만 자동 동기화 경로는 미구현
 
 ### FR-12 프로젝트/저장소 메타데이터 조회 및 변수화
 

@@ -9,6 +9,7 @@ class RepositoryDefinition:
     project_key: str
     repo_slug: str
     linkage_mode: str
+    application_link: str | None
     branches: list[str]
 
 

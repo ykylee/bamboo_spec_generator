@@ -18,11 +18,9 @@
 
 ## 아직 미구현인 범위
 
-- JSON 정의의 운영 DB 자동 적재/동기화
 - Bamboo 준비 스테이지와 운영 API의 실제 변수 주입 연동
 - Bamboo 실행 결과, 버전, 실패 위치, 정적분석 결과의 end-to-end 적재
-- Bitbucket 브랜치별 Bamboo 트리거 생성
-- `repository.linkageMode=create_if_missing`의 실질적 생성 동작
+- `repository.applicationLink` 운영값을 DB/API/환경설정과 연동하는 흐름
 
 현재 운영 백엔드는 스캐폴딩과 기본 기능이 구현되었지만, 운영 데이터 적재/조회 흐름은 아직 확장 중입니다.
 
@@ -110,7 +108,7 @@ MSBuild 기반 플랜은 생성된 inline Python 코드에서 실제 MSBuild 호
 
 입력 JSON의 `runtimeRequirements`는 Bamboo capability로 직접 강제하기 어려운 런타임 전제 조건을 명시적으로 남기기 위한 블록입니다. 예를 들어 `coverity`, `custom-tool`, `trigger-plan`, `VS2022_ENV` 같은 항목을 각 빌드 단위로 기록합니다.
 
-`repository.branches`와 `repository.linkageMode`는 현재 입력/검증에는 반영되어 있지만, 실제 Java Specs 생성에서는 브랜치별 트리거와 `create_if_missing` 분기 처리까지는 구현되지 않았습니다.
+`repository.branches`, `repository.linkageMode`, `repository.applicationLink`는 실제 Java Specs 생성에도 반영됩니다. `linked`는 linked repository를 참조하고, `create_if_missing`는 plan-local `BitbucketServerRepository`를 생성합니다. 브랜치별 트리거 정책과 branch management도 함께 생성됩니다.
 
 ## 스크립트 자산 관리
 
@@ -150,6 +148,8 @@ MSBuild 기반 플랜은 생성된 inline Python 코드에서 실제 MSBuild 호
 - `--db-init-schema`: `docs/designs/sql/build_metadata_schema.sql` 스키마 적용
 - `python3 manage.py init_dev_db`: SQLite 개발 DB 초기화
 - `python3 manage.py init_postgres_db --force`: PostgreSQL schema 초기화
+- `python3 manage.py import_build_definitions --input-root ../build_info_json`: JSON 빌드 정의를 운영 DB에 적재
+- `python3 manage.py sync_build_definitions --input-root ../build_info_json --deactivate-missing`: JSON 빌드 정의를 운영 DB와 반복 동기화
 
 둘 다 Python DB 드라이버 대신 외부 `psql` 명령을 사용합니다.
 

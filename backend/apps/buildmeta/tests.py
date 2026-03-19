@@ -1,14 +1,26 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from textwrap import dedent
 from unittest.mock import Mock, patch
 
 from django.core.management import CommandError, call_command
 from django.test import SimpleTestCase, TestCase
 
-from apps.buildmeta.models import BuildExecution, BuildPlan, BuildPlanDefinition, BuildVersion, Project
+from apps.buildmeta.models import (
+    BuildDefinitionHistory,
+    BuildExecution,
+    BuildPlan,
+    BuildPlanDefinition,
+    BuildVersion,
+    Project,
+    ProjectBuild,
+    ProjectRepository,
+)
 from apps.buildmeta.selectors.definitions import get_active_definition_by_plan_key
+from apps.buildmeta.services import load_definition_import_records, sync_definition_records
 from apps.buildmeta.services.executions import finish_execution, start_execution
 
 
@@ -126,6 +138,298 @@ class DefinitionSelectorTest(TestCase):
         self.assertIsNotNone(payload)
         assert payload is not None
         self.assertEqual("2026", payload["year"])
+
+
+class ImportBuildDefinitionsCommandTest(TestCase):
+    def test_import_build_definitions_creates_active_definition_graph(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            input_root = Path(temp_dir) / "build_info_json"
+            year_root = input_root / "2026"
+            year_root.mkdir(parents=True, exist_ok=True)
+            definition_path = year_root / "sample-app-api.json"
+            definition_path.write_text(
+                dedent(
+                    """
+                    {
+                      "buildId": "sample-app-api",
+                      "name": "Sample App API",
+                      "planKey": "SAMPAPI",
+                      "description": "Sample App API build plan",
+                      "language": "java",
+                      "compiler": "maven",
+                      "repository": {
+                        "provider": "bitbucket",
+                        "projectKey": "SAMPLE",
+                        "repoSlug": "sample-app-api",
+                        "linkageMode": "create_if_missing",
+                        "applicationLink": "BITBUCKET_DC",
+                        "branches": ["dev", "release", "master"]
+                      },
+                      "requirements": {
+                        "os": "linux",
+                        "extraCapabilities": []
+                      },
+                      "build": {
+                        "subPath": "services/sample-app-api",
+                        "prepareCommand": "mvn -B dependency:go-offline",
+                        "buildCommand": "mvn -B clean package",
+                        "staticAnalysis": {
+                          "customTool": {
+                            "commands": ["custom-tool analyze {buildCommand}"]
+                          }
+                        },
+                        "runtimeRequirements": {
+                          "commands": ["mvn", "coverity", "custom-tool", "trigger-plan"],
+                          "envVars": ["PATH", "JAVA_HOME"]
+                        },
+                        "postBuildTrigger": {
+                          "type": "plan",
+                          "targetPlanKey": "POSTBUILD"
+                        }
+                      }
+                    }
+                    """
+                ).strip()
+                + "\n",
+                encoding="utf-8",
+            )
+
+            call_command("import_build_definitions", input_root=str(input_root), verbosity=0)
+
+        self.assertEqual(1, Project.objects.count())
+        self.assertEqual(1, ProjectRepository.objects.count())
+        self.assertEqual(1, BuildPlan.objects.count())
+        self.assertEqual(1, ProjectBuild.objects.count())
+        self.assertEqual(1, BuildPlanDefinition.objects.count())
+
+        definition = BuildPlanDefinition.objects.get()
+        self.assertTrue(definition.is_active)
+        self.assertEqual("2026", definition.year)
+        self.assertEqual("create_if_missing", definition.definition_json["repository"]["linkageMode"])
+        self.assertEqual("BITBUCKET_DC", definition.definition_json["repository"]["applicationLink"])
+
+        project = Project.objects.get()
+        self.assertEqual("SAMPLE", project.jira_project_key)
+        self.assertEqual("sample-app-api", project.representative_repo_slug)
+
+    def test_reimport_build_definitions_creates_new_active_snapshot(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            input_root = Path(temp_dir) / "build_info_json"
+            year_root = input_root / "2026"
+            year_root.mkdir(parents=True, exist_ok=True)
+            definition_path = year_root / "sample-app-api.json"
+
+            definition_path.write_text(
+                json.dumps(
+                    {
+                        "buildId": "sample-app-api",
+                        "name": "Sample App API",
+                        "planKey": "SAMPAPI",
+                        "description": "v1",
+                        "language": "java",
+                        "compiler": "maven",
+                        "repository": {
+                            "provider": "bitbucket",
+                            "projectKey": "SAMPLE",
+                            "repoSlug": "sample-app-api",
+                            "linkageMode": "linked",
+                            "branches": ["dev", "release", "master"],
+                        },
+                        "requirements": {"os": "linux", "extraCapabilities": []},
+                        "build": {
+                            "subPath": "services/sample-app-api",
+                            "prepareCommand": "mvn -B dependency:go-offline",
+                            "buildCommand": "mvn -B clean package",
+                            "staticAnalysis": {"customTool": {"commands": ["custom-tool analyze {buildCommand}"]}},
+                            "runtimeRequirements": {
+                                "commands": ["mvn", "coverity", "custom-tool", "trigger-plan"],
+                                "envVars": ["PATH", "JAVA_HOME"],
+                            },
+                            "postBuildTrigger": {"type": "plan", "targetPlanKey": "POSTBUILD"},
+                        },
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            call_command("import_build_definitions", input_root=str(input_root), verbosity=0)
+
+            definition_path.write_text(
+                json.dumps(
+                    {
+                        "buildId": "sample-app-api",
+                        "name": "Sample App API",
+                        "planKey": "SAMPAPI",
+                        "description": "v2",
+                        "language": "java",
+                        "compiler": "maven",
+                        "repository": {
+                            "provider": "bitbucket",
+                            "projectKey": "SAMPLE",
+                            "repoSlug": "sample-app-api",
+                            "linkageMode": "linked",
+                            "branches": ["dev", "release", "master"],
+                        },
+                        "requirements": {"os": "linux", "extraCapabilities": []},
+                        "build": {
+                            "subPath": "services/sample-app-api",
+                            "prepareCommand": "mvn -B -U dependency:go-offline",
+                            "buildCommand": "mvn -B clean package",
+                            "staticAnalysis": {"customTool": {"commands": ["custom-tool analyze {buildCommand}"]}},
+                            "runtimeRequirements": {
+                                "commands": ["mvn", "coverity", "custom-tool", "trigger-plan"],
+                                "envVars": ["PATH", "JAVA_HOME"],
+                            },
+                            "postBuildTrigger": {"type": "plan", "targetPlanKey": "POSTBUILD"},
+                        },
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            call_command("import_build_definitions", input_root=str(input_root), verbosity=0)
+
+        self.assertEqual(2, BuildPlanDefinition.objects.count())
+        self.assertEqual(1, BuildPlanDefinition.objects.filter(is_active=True).count())
+        self.assertEqual(2, BuildDefinitionHistory.objects.count())
+        active_definition = BuildPlanDefinition.objects.get(is_active=True)
+        self.assertEqual("mvn -B -U dependency:go-offline", active_definition.definition_json["build"]["prepareCommand"])
+
+    def test_sync_definition_records_keeps_identical_active_snapshot_without_history_churn(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            input_root = Path(temp_dir) / "build_info_json"
+            year_root = input_root / "2026"
+            year_root.mkdir(parents=True, exist_ok=True)
+            definition_path = year_root / "sample-app-api.json"
+            definition_path.write_text(
+                json.dumps(
+                    {
+                        "buildId": "sample-app-api",
+                        "name": "Sample App API",
+                        "planKey": "SAMPAPI",
+                        "description": "v1",
+                        "language": "java",
+                        "compiler": "maven",
+                        "repository": {
+                            "provider": "bitbucket",
+                            "projectKey": "SAMPLE",
+                            "repoSlug": "sample-app-api",
+                            "linkageMode": "linked",
+                            "branches": ["dev", "release", "master"],
+                        },
+                        "requirements": {"os": "linux", "extraCapabilities": []},
+                        "build": {
+                            "subPath": "services/sample-app-api",
+                            "prepareCommand": "mvn -B dependency:go-offline",
+                            "buildCommand": "mvn -B clean package",
+                            "staticAnalysis": {"customTool": {"commands": ["custom-tool analyze {buildCommand}"]}},
+                            "runtimeRequirements": {
+                                "commands": ["mvn", "coverity", "custom-tool", "trigger-plan"],
+                                "envVars": ["PATH", "JAVA_HOME"],
+                            },
+                            "postBuildTrigger": {"type": "plan", "targetPlanKey": "POSTBUILD"},
+                        },
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            summary1 = sync_definition_records(load_definition_import_records(input_root))
+            summary2 = sync_definition_records(load_definition_import_records(input_root))
+
+        self.assertEqual({"importedCount": 1, "activatedCount": 1, "unchangedCount": 0, "deactivatedCount": 0}, summary1)
+        self.assertEqual({"importedCount": 1, "activatedCount": 0, "unchangedCount": 1, "deactivatedCount": 0}, summary2)
+        self.assertEqual(1, BuildPlanDefinition.objects.count())
+        self.assertEqual(1, BuildPlanDefinition.objects.filter(is_active=True).count())
+        self.assertEqual(1, BuildDefinitionHistory.objects.filter(change_type="sync").count())
+
+    def test_sync_build_definitions_command_deactivates_missing_plans(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            input_root = Path(temp_dir) / "build_info_json"
+            year_root = input_root / "2026"
+            year_root.mkdir(parents=True, exist_ok=True)
+
+            api_definition = {
+                "buildId": "sample-app-api",
+                "name": "Sample App API",
+                "planKey": "SAMPAPI",
+                "description": "API",
+                "language": "java",
+                "compiler": "maven",
+                "repository": {
+                    "provider": "bitbucket",
+                    "projectKey": "SAMPLE",
+                    "repoSlug": "sample-app-api",
+                    "linkageMode": "linked",
+                    "branches": ["dev", "release", "master"],
+                },
+                "requirements": {"os": "linux", "extraCapabilities": []},
+                "build": {
+                    "subPath": "services/sample-app-api",
+                    "prepareCommand": "mvn -B dependency:go-offline",
+                    "buildCommand": "mvn -B clean package",
+                    "staticAnalysis": {"customTool": {"commands": ["custom-tool analyze {buildCommand}"]}},
+                    "runtimeRequirements": {
+                        "commands": ["mvn", "coverity", "custom-tool", "trigger-plan"],
+                        "envVars": ["PATH", "JAVA_HOME"],
+                    },
+                    "postBuildTrigger": {"type": "plan", "targetPlanKey": "POSTBUILD"},
+                },
+            }
+            web_definition = {
+                "buildId": "sample-app-web",
+                "name": "Sample App Web",
+                "planKey": "SAMPWEB",
+                "description": "WEB",
+                "language": "node.js",
+                "compiler": "node.js",
+                "repository": {
+                    "provider": "bitbucket",
+                    "projectKey": "SAMPLE",
+                    "repoSlug": "sample-app-web",
+                    "linkageMode": "linked",
+                    "branches": ["dev", "release", "master"],
+                },
+                "requirements": {"os": "linux", "extraCapabilities": []},
+                "build": {
+                    "subPath": "services/sample-app-web",
+                    "prepareCommand": "npm ci",
+                    "buildCommand": "npm run build",
+                    "staticAnalysis": {"customTool": {"commands": ["custom-tool analyze {buildCommand}"]}},
+                    "runtimeRequirements": {
+                        "commands": ["npm", "coverity", "custom-tool", "trigger-plan"],
+                        "envVars": ["PATH", "NODE_HOME"],
+                    },
+                    "postBuildTrigger": {"type": "plan", "targetPlanKey": "POSTBUILD"},
+                },
+            }
+
+            (year_root / "sample-app-api.json").write_text(
+                json.dumps(api_definition, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+            )
+            (year_root / "sample-app-web.json").write_text(
+                json.dumps(web_definition, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+            )
+
+            call_command("sync_build_definitions", input_root=str(input_root), verbosity=0)
+            (year_root / "sample-app-web.json").unlink()
+            call_command("sync_build_definitions", input_root=str(input_root), verbosity=0, deactivate_missing=True)
+
+        self.assertEqual(2, BuildPlan.objects.count())
+        self.assertEqual(2, BuildPlanDefinition.objects.count())
+        self.assertEqual(1, BuildPlanDefinition.objects.filter(is_active=True).count())
+        self.assertTrue(BuildPlanDefinition.objects.get(build_plan__plan_key="SAMPAPI").is_active)
+        self.assertFalse(BuildPlanDefinition.objects.get(build_plan__plan_key="SAMPWEB").is_active)
+        self.assertEqual(1, BuildDefinitionHistory.objects.filter(change_type="deactivate").count())
 
 
 class InitDevDbCommandTest(SimpleTestCase):

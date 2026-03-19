@@ -73,6 +73,11 @@ def validate_build_definitions(build_definitions: list[BuildDefinition]) -> None
             raise ValidationError(
                 f"Build '{build.build_id}' repository.linkageMode '{build.repository.linkage_mode}' is not supported."
             )
+        if build.repository.linkage_mode == "create_if_missing":
+            if build.repository.application_link is None or not build.repository.application_link.strip():
+                raise ValidationError(
+                    f"Build '{build.build_id}' must define repository.applicationLink when linkageMode is create_if_missing."
+                )
         if not DEFAULT_REPOSITORY_BRANCHES.issubset(set(build.repository.branches)):
             raise ValidationError(
                 f"Build '{build.build_id}' repository.branches must include dev, release, and master."

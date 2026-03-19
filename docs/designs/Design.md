@@ -16,7 +16,7 @@
 
 - 1~5장은 현재 구현과 직접 연결되는 상세 설계다.
 - 6~12장은 향후 DB 및 운영 메타데이터 확장을 위한 상세 설계다.
-- 저장소 연결의 `branches`와 `create_if_missing`는 현재 입력/검증에는 반영되어 있지만, 실제 Bamboo 트리거 생성과 미등록 저장소 처리 로직은 아직 구현되지 않았다.
+- 저장소 연결의 `branches`, `create_if_missing`, `applicationLink`는 현재 Java Specs 생성까지 반영된다. 남은 범위는 운영 환경별 application link 값 공급과 세부 운영 정책 확정이다.
 
 ## 1. 입력 JSON 설계
 
@@ -41,6 +41,7 @@
     "projectKey": "SAMPLE",
     "repoSlug": "sample-app-api",
     "linkageMode": "linked",
+    "applicationLink": "BITBUCKET_SERVER",
     "branches": ["dev", "release", "master"]
   },
   "requirements": {
@@ -74,6 +75,7 @@
 
 - `buildId`, `planKey`, `language`, `compiler`, `repository`, `requirements`, `build`는 필수다.
 - `repository.branches`는 생략 시 `dev`, `release`, `master`를 기본값으로 사용한다.
+- `repository.applicationLink`는 `create_if_missing`일 때 필수이며 Bamboo Application Link 이름을 의미한다.
 - `build.subPath`는 저장소 내부 상대경로여야 한다.
 - `staticAnalysis.customTool.commands`에는 `analyze {buildCommand}` 패턴이 포함되어야 한다.
 - `build.runtimeRequirements.commands`와 `build.runtimeRequirements.envVars`는 현재 구현 기준 필수다.
@@ -86,6 +88,7 @@
 - `projectKey`
 - `repoSlug`
 - `linkageMode`
+- `applicationLink`
 - `branches`
 
 ### 연결 모드
@@ -93,15 +96,15 @@
 - `linked`
   - Bamboo에 사전 등록된 linked repository 참조
 - `create_if_missing`
-  - 후속 등록이 가능하도록 식별 정보를 생성물에 남김
-  - 현재 미구현
+  - Bamboo plan-local Bitbucket repository를 생성한다.
+  - `applicationLink`를 통해 Bamboo의 Bitbucket Application Link 이름을 참조한다.
 
 ### 브랜치 정책
 
 - 기본 브랜치는 `dev`, `release`, `master`
 - 생성 순서는 `dev=1`, `release=2`, `master=3`
 - `release`는 초기 범위에서 단일 브랜치명
-- 현재 구현은 브랜치 유효성 검증만 수행하고 실제 트리거 생성은 하지 않는다.
+- 현재 구현은 `repositoryBranches(...)`, `planBranchManagement(...)`, `BitbucketServerTrigger` 생성까지 수행한다.
 
 ## 3. 공통 워크플로우 및 작업 하위 경로 설계
 
