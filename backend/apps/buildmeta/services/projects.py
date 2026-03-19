@@ -43,6 +43,8 @@ def _save_project(existing_jira_project_key: str | None, data: dict) -> dict:
 
         repository_map = _upsert_repositories(project, data["repositories"])
         _upsert_builds(project, data["builds"], repository_map)
+        _prune_removed_builds(project, data["builds"])
+        _prune_removed_repositories(project, data["repositories"])
 
     payload = get_project_detail(project.jira_project_key)
     if payload is None:
@@ -65,7 +67,10 @@ def _resolve_representative_repo_slug(data: dict, current_value: str = "") -> st
     representative_repositories = [repo["repoSlug"].strip() for repo in data["repositories"] if repo["isRepresentative"]]
     if representative_repositories:
         return representative_repositories[0]
-    return current_value
+    repository_slugs = {repo["repoSlug"].strip() for repo in data["repositories"]}
+    if current_value and current_value in repository_slugs:
+        return current_value
+    return ""
 
 
 def _validate_repositories(repositories: list[dict]) -> None:
@@ -113,6 +118,7 @@ def _validate_builds(builds: list[dict], repositories: list[dict]) -> None:
 
 def _upsert_repositories(project: Project, repositories: list[dict]) -> dict[str, ProjectRepository]:
     repository_map: dict[str, ProjectRepository] = {}
+    ProjectRepository.objects.filter(project=project, is_representative=True).update(is_representative=False)
     for repository in repositories:
         project_repository, _ = ProjectRepository.objects.update_or_create(
             project=project,
@@ -151,3 +157,19 @@ def _upsert_builds(project: Project, builds: list[dict], repository_map: dict[st
         project_build.build_type = build["buildType"].strip()
         project_build.runtime_stack = build["runtimeStack"].strip()
         project_build.save()
+
+
+def _prune_removed_builds(project: Project, builds: list[dict]) -> None:
+    incoming_plan_keys = {build["planKey"].strip() for build in builds}
+    stale_builds = ProjectBuild.objects.filter(project=project)
+    if incoming_plan_keys:
+        stale_builds = stale_builds.exclude(build_plan__plan_key__in=incoming_plan_keys)
+    stale_builds.delete()
+
+
+def _prune_removed_repositories(project: Project, repositories: list[dict]) -> None:
+    incoming_repo_slugs = {repository["repoSlug"].strip() for repository in repositories}
+    stale_repositories = ProjectRepository.objects.filter(project=project)
+    if incoming_repo_slugs:
+        stale_repositories = stale_repositories.exclude(repo_slug__in=incoming_repo_slugs)
+    stale_repositories.delete()

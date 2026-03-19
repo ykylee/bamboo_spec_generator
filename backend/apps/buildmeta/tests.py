@@ -684,6 +684,112 @@ class ProjectServiceTest(TestCase):
         self.assertEqual("OPS-NEW", payload["bitbucketProjectKey"])
         self.assertEqual("ops-api", payload["representativeRepoSlug"])
 
+    def test_update_project_removes_omitted_repositories_and_builds(self) -> None:
+        project = Project.objects.create(
+            jira_project_key="OPS",
+            bitbucket_project_key="OPS",
+            representative_repo_slug="ops-api",
+        )
+        api_repository = ProjectRepository.objects.create(
+            project=project,
+            repo_slug="ops-api",
+            is_representative=True,
+        )
+        web_repository = ProjectRepository.objects.create(
+            project=project,
+            repo_slug="ops-web",
+            is_representative=False,
+        )
+        api_plan = BuildPlan.objects.create(build_id="ops-api", plan_key="OPSAPI")
+        web_plan = BuildPlan.objects.create(build_id="ops-web", plan_key="OPSWEB")
+        ProjectBuild.objects.create(
+            project=project,
+            repository=api_repository,
+            build_plan=api_plan,
+            build_name="API",
+            build_type="python",
+            runtime_stack="python3.12",
+        )
+        ProjectBuild.objects.create(
+            project=project,
+            repository=web_repository,
+            build_plan=web_plan,
+            build_name="Web",
+            build_type="node",
+            runtime_stack="node20",
+        )
+
+        payload = update_project(
+            "OPS",
+            {
+                "bitbucketProjectKey": "OPS",
+                "representativeRepoSlug": "ops-api",
+                "repositories": [
+                    {
+                        "repoSlug": "ops-api",
+                        "coverityProject": "ops-api",
+                        "coverityStream": "ops-api-release",
+                        "isRepresentative": True,
+                    }
+                ],
+                "builds": [
+                    {
+                        "buildName": "API",
+                        "buildType": "python",
+                        "runtimeStack": "python3.12",
+                        "buildId": "ops-api",
+                        "planKey": "OPSAPI",
+                        "repositorySlug": "ops-api",
+                    }
+                ],
+            },
+        )
+
+        assert payload is not None
+        self.assertEqual(["ops-api"], [repository["repoSlug"] for repository in payload["repositories"]])
+        self.assertEqual(["OPSAPI"], [build["planKey"] for build in payload["builds"]])
+        self.assertEqual(1, ProjectRepository.objects.filter(project=project).count())
+        self.assertEqual(1, ProjectBuild.objects.filter(project=project).count())
+        self.assertFalse(ProjectRepository.objects.filter(project=project, repo_slug="ops-web").exists())
+        self.assertFalse(ProjectBuild.objects.filter(project=project, build_plan__plan_key="OPSWEB").exists())
+
+    def test_update_project_clears_representative_repo_when_removed_from_payload(self) -> None:
+        project = Project.objects.create(
+            jira_project_key="OPS",
+            bitbucket_project_key="OPS",
+            representative_repo_slug="ops-api",
+        )
+        ProjectRepository.objects.create(
+            project=project,
+            repo_slug="ops-api",
+            is_representative=True,
+        )
+        ProjectRepository.objects.create(
+            project=project,
+            repo_slug="ops-worker",
+            is_representative=False,
+        )
+
+        payload = update_project(
+            "OPS",
+            {
+                "bitbucketProjectKey": "OPS",
+                "representativeRepoSlug": "",
+                "repositories": [
+                    {
+                        "repoSlug": "ops-worker",
+                        "coverityProject": "",
+                        "coverityStream": "",
+                        "isRepresentative": False,
+                    }
+                ],
+                "builds": [],
+            },
+        )
+
+        assert payload is not None
+        self.assertEqual("", payload["representativeRepoSlug"])
+
     def test_update_project_returns_none_for_missing_project(self) -> None:
         payload = update_project(
             "MISSING",

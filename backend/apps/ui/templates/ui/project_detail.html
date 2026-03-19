@@ -13,6 +13,17 @@
   <p class="hero__body">
     Bitbucket 프로젝트, 대표 저장소, 연결된 빌드 플랜 구성을 운영 메타데이터 기준으로 조회합니다. 관리 콘솔 스타일의 상세 패널로 재구성한 화면입니다.
   </p>
+  <div class="hero__actions">
+    <button
+      class="action-button"
+      type="button"
+      data-toggle-edit
+      aria-expanded="{% if editOpen %}true{% else %}false{% endif %}"
+      aria-controls="project-edit-panel"
+    >
+      프로젝트 수정
+    </button>
+  </div>
   <div class="chip-row">
     <span class="chip">{{ project.bitbucketProjectKey }}</span>
     <span class="chip chip--neutral">{{ project.representativeRepoSlug|default:"대표 저장소 미지정" }}</span>
@@ -24,6 +35,213 @@
     <a class="chip chip--neutral" href="{% url 'project-list' %}{% if request.GET.urlencode %}?{{ request.GET.urlencode }}{% endif %}">목록으로</a>
   </div>
 </section>
+
+<section
+  class="registration-layout{% if not editOpen %} registration-layout--collapsed{% endif %}"
+  id="project-edit-panel"
+  {% if not editOpen %}hidden{% endif %}
+>
+  <article class="panel registration-panel">
+    <div class="panel__header">
+      <h2 class="panel__title">프로젝트 수정</h2>
+      <span class="badge">Update Metadata</span>
+    </div>
+    <p class="panel__body">
+      프로젝트 기본 메타데이터와 저장소-빌드 연결 정보를 같은 구조로 수정할 수 있습니다. 저장하지 않은 항목은 현재 프로젝트 구성에서 제거됩니다.
+    </p>
+    {% if editError %}
+    <div class="form-alert form-alert--error">{{ editError }}</div>
+    {% endif %}
+    {% if editForm.non_field_errors %}
+    <div class="form-alert form-alert--error">{{ editForm.non_field_errors }}</div>
+    {% endif %}
+
+    <datalist id="jira-project-key-options">
+      {% for item in registrationSuggestions.jiraProjectKeys %}
+      <option value="{{ item }}"></option>
+      {% endfor %}
+    </datalist>
+    <datalist id="bitbucket-project-key-options">
+      {% for item in registrationSuggestions.bitbucketProjectKeys %}
+      <option value="{{ item }}"></option>
+      {% endfor %}
+    </datalist>
+    <datalist id="repository-slug-options">
+      {% for item in registrationSuggestions.repositorySlugs %}
+      <option value="{{ item }}"></option>
+      {% endfor %}
+    </datalist>
+    <datalist id="coverity-project-options">
+      {% for item in registrationSuggestions.coverityProjects %}
+      <option value="{{ item }}"></option>
+      {% endfor %}
+    </datalist>
+    <datalist id="coverity-stream-options">
+      {% for item in registrationSuggestions.coverityStreams %}
+      <option value="{{ item }}"></option>
+      {% endfor %}
+    </datalist>
+
+    <form class="project-form" method="post" action="{% url 'project-detail' project.jiraProjectKey %}">
+      {% csrf_token %}
+      <div class="project-form__grid">
+        <label class="project-form__field">
+          <span class="project-form__label">Jira Project Key</span>
+          <input type="text" name="jira_project_key" value="{{ project.jiraProjectKey }}" readonly>
+        </label>
+        <label class="project-form__field">
+          <span class="project-form__label">Bitbucket Project Key</span>
+          {{ editForm.bitbucket_project_key }}
+          {% if editForm.bitbucket_project_key.errors %}<span class="project-form__error">{{ editForm.bitbucket_project_key.errors|join:", " }}</span>{% endif %}
+        </label>
+        <label class="project-form__field">
+          <span class="project-form__label">대표 저장소</span>
+          {{ editForm.representative_repo_slug }}
+          {% if editForm.representative_repo_slug.errors %}<span class="project-form__error">{{ editForm.representative_repo_slug.errors|join:", " }}</span>{% endif %}
+        </label>
+      </div>
+
+      <section class="repeater-section">
+        <div class="repeater-section__header">
+          <h3 class="repeater-section__title">저장소</h3>
+          <button class="action-button action-button--ghost" type="button" data-add-repository>저장소 추가</button>
+        </div>
+        <div class="repeater-stack" data-repository-stack>
+          {% for repository in repositoryRows %}
+          <div class="repeater-card" data-repository-row>
+            <div class="repeater-card__grid">
+              <label class="project-form__field">
+                <span class="project-form__label">저장소 Slug</span>
+                <input type="text" name="repo_slug" value="{{ repository.repoSlug }}" placeholder="sample-app-api" list="repository-slug-options">
+              </label>
+              <label class="project-form__field">
+                <span class="project-form__label">Coverity Project</span>
+                <input type="text" name="coverity_project" value="{{ repository.coverityProject }}" placeholder="optional" list="coverity-project-options">
+              </label>
+              <label class="project-form__field">
+                <span class="project-form__label">Coverity Stream</span>
+                <input type="text" name="coverity_stream" value="{{ repository.coverityStream }}" placeholder="optional" list="coverity-stream-options">
+              </label>
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+      </section>
+
+      <section class="repeater-section">
+        <div class="repeater-section__header">
+          <h3 class="repeater-section__title">빌드</h3>
+          <button class="action-button action-button--ghost" type="button" data-add-build>빌드 추가</button>
+        </div>
+        <div class="repeater-stack" data-build-stack>
+          {% for build in buildRows %}
+          <div class="repeater-card" data-build-row>
+            <div class="repeater-card__grid repeater-card__grid--build">
+              <label class="project-form__field">
+                <span class="project-form__label">빌드 이름</span>
+                <input type="text" name="build_name" value="{{ build.buildName }}" placeholder="Operations API">
+              </label>
+              <label class="project-form__field">
+                <span class="project-form__label">Build Type</span>
+                <input type="text" name="build_type" value="{{ build.buildType }}" placeholder="python">
+              </label>
+              <label class="project-form__field">
+                <span class="project-form__label">Runtime Stack</span>
+                <input type="text" name="runtime_stack" value="{{ build.runtimeStack }}" placeholder="python3.12">
+              </label>
+              <label class="project-form__field">
+                <span class="project-form__label">Build ID</span>
+                <input type="text" name="build_id" value="{{ build.buildId }}" placeholder="ops-api">
+              </label>
+              <label class="project-form__field">
+                <span class="project-form__label">Plan Key</span>
+                <input type="text" name="plan_key" value="{{ build.planKey }}" placeholder="OPSAPI">
+              </label>
+              <label class="project-form__field">
+                <span class="project-form__label">연결 저장소 Slug</span>
+                <input type="text" name="build_repository_slug" value="{{ build.repositorySlug }}" placeholder="ops-api" list="repository-slug-options">
+              </label>
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+      </section>
+      <div class="project-form__actions">
+        <button class="action-button" type="submit">수정 저장</button>
+      </div>
+    </form>
+  </article>
+
+  <aside class="panel registration-hints">
+    <div class="panel__header">
+      <h2 class="panel__title">수정 가이드</h2>
+    </div>
+    <ul class="meta-list">
+      <li>
+        <strong>대표 저장소</strong>
+        저장소 목록에 포함된 slug만 지정해야 합니다.
+      </li>
+      <li>
+        <strong>빌드 정리 기준</strong>
+        저장 후 폼에서 빠진 저장소와 빌드는 프로젝트 구성에서 제거됩니다.
+      </li>
+      <li>
+        <strong>입력 후보</strong>
+        기존 프로젝트 키, 저장소 slug, Coverity 메타데이터를 자동 후보로 제안합니다.
+      </li>
+    </ul>
+  </aside>
+</section>
+
+<template id="repository-row-template">
+  <div class="repeater-card" data-repository-row>
+    <div class="repeater-card__grid">
+      <label class="project-form__field">
+        <span class="project-form__label">저장소 Slug</span>
+        <input type="text" name="repo_slug" placeholder="sample-app-api" list="repository-slug-options">
+      </label>
+      <label class="project-form__field">
+        <span class="project-form__label">Coverity Project</span>
+        <input type="text" name="coverity_project" placeholder="optional" list="coverity-project-options">
+      </label>
+      <label class="project-form__field">
+        <span class="project-form__label">Coverity Stream</span>
+        <input type="text" name="coverity_stream" placeholder="optional" list="coverity-stream-options">
+      </label>
+    </div>
+  </div>
+</template>
+
+<template id="build-row-template">
+  <div class="repeater-card" data-build-row>
+    <div class="repeater-card__grid repeater-card__grid--build">
+      <label class="project-form__field">
+        <span class="project-form__label">빌드 이름</span>
+        <input type="text" name="build_name" placeholder="Operations API">
+      </label>
+      <label class="project-form__field">
+        <span class="project-form__label">Build Type</span>
+        <input type="text" name="build_type" placeholder="python">
+      </label>
+      <label class="project-form__field">
+        <span class="project-form__label">Runtime Stack</span>
+        <input type="text" name="runtime_stack" placeholder="python3.12">
+      </label>
+      <label class="project-form__field">
+        <span class="project-form__label">Build ID</span>
+        <input type="text" name="build_id" placeholder="ops-api">
+      </label>
+      <label class="project-form__field">
+        <span class="project-form__label">Plan Key</span>
+        <input type="text" name="plan_key" placeholder="OPSAPI">
+      </label>
+      <label class="project-form__field">
+        <span class="project-form__label">연결 저장소 Slug</span>
+        <input type="text" name="build_repository_slug" placeholder="ops-api" list="repository-slug-options">
+      </label>
+    </div>
+  </div>
+</template>
 
 <section class="stat-grid">
   <article class="stat-card">
@@ -84,6 +302,10 @@
       <li>
         <strong>Representative Repository</strong>
         {{ project.representativeRepoSlug|default:"대표 저장소 미지정" }}
+      </li>
+      <li>
+        <strong>Last Updated</strong>
+        {{ project.updatedAt|date:"Y-m-d H:i" }}
       </li>
     </ul>
   </article>
@@ -153,6 +375,45 @@
     </ul>
   </article>
 </section>
+
+<script>
+  (function () {
+    const editPanel = document.getElementById("project-edit-panel");
+    const toggleEditButton = document.querySelector("[data-toggle-edit]");
+    const repositoryTemplate = document.getElementById("repository-row-template");
+    const buildTemplate = document.getElementById("build-row-template");
+    const repositoryStack = document.querySelector("[data-repository-stack]");
+    const buildStack = document.querySelector("[data-build-stack]");
+    const addRepositoryButton = document.querySelector("[data-add-repository]");
+    const addBuildButton = document.querySelector("[data-add-build]");
+
+    if (editPanel && toggleEditButton) {
+      toggleEditButton.addEventListener("click", function () {
+        const isHidden = editPanel.hasAttribute("hidden");
+        if (isHidden) {
+          editPanel.removeAttribute("hidden");
+          toggleEditButton.setAttribute("aria-expanded", "true");
+          editPanel.scrollIntoView({ behavior: "smooth", block: "start" });
+        } else {
+          editPanel.setAttribute("hidden", "");
+          toggleEditButton.setAttribute("aria-expanded", "false");
+        }
+      });
+    }
+
+    if (repositoryTemplate && repositoryStack && addRepositoryButton) {
+      addRepositoryButton.addEventListener("click", function () {
+        repositoryStack.appendChild(repositoryTemplate.content.cloneNode(true));
+      });
+    }
+
+    if (buildTemplate && buildStack && addBuildButton) {
+      addBuildButton.addEventListener("click", function () {
+        buildStack.appendChild(buildTemplate.content.cloneNode(true));
+      });
+    }
+  }());
+</script>
 {% else %}
 <section class="empty-state">
   <h1 class="empty-state__title">프로젝트를 찾을 수 없습니다.</h1>

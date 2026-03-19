@@ -93,6 +93,7 @@ def get_project_detail(jira_project_key: str) -> dict | None:
         "jiraProjectKey": project.jira_project_key,
         "bitbucketProjectKey": project.bitbucket_project_key,
         "representativeRepoSlug": project.representative_repo_slug,
+        "updatedAt": project.updated_at,
         "generation": generation_status,
         "repositories": [
             {

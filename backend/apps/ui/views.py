@@ -6,7 +6,7 @@ from django.shortcuts import redirect, render
 from apps.buildmeta.models import Project, ProjectRepository
 from apps.buildmeta.selectors.executions import list_latest_failed_builds
 from apps.buildmeta.selectors.projects import get_project_detail, list_project_summaries
-from apps.buildmeta.services import create_project
+from apps.buildmeta.services import create_project, update_project
 
 from .forms import ProjectRegistrationForm
 
@@ -83,7 +83,42 @@ def project_list(request):
 
 
 def project_detail(request, jira_project_key: str):
-    return render(request, "ui/project_detail.html", {"project": get_project_detail(jira_project_key)})
+    project = get_project_detail(jira_project_key)
+    if project is None:
+        return render(request, "ui/project_detail.html", {"project": None})
+
+    edit_form = ProjectRegistrationForm(initial=_build_form_initial(project))
+    edit_error = ""
+    repository_rows = project["repositories"] or [_blank_repository_row()]
+    build_rows = project["builds"] or [_blank_build_row()]
+    edit_open = request.GET.get("edit", "").lower() in {"1", "true", "open"}
+
+    if request.method == "POST":
+        edit_form = ProjectRegistrationForm(request.POST)
+        repository_rows = _extract_repository_rows(request.POST)
+        build_rows = _extract_build_rows(request.POST)
+        edit_open = True
+        if edit_form.is_valid():
+            try:
+                payload = _build_project_payload(edit_form, repository_rows, build_rows)
+                project = update_project(jira_project_key, payload)
+            except ValueError as exc:
+                edit_error = str(exc)
+            else:
+                if project is None:
+                    return render(request, "ui/project_detail.html", {"project": None})
+                return redirect("project-detail", jira_project_key=project["jiraProjectKey"])
+
+    context = {
+        "project": project,
+        "editForm": edit_form,
+        "editError": edit_error,
+        "repositoryRows": repository_rows,
+        "buildRows": build_rows,
+        "editOpen": edit_open,
+        "registrationSuggestions": _build_registration_suggestions(),
+    }
+    return render(request, "ui/project_detail.html", context)
 
 
 def _build_pagination_base_query(request) -> str:
@@ -228,4 +263,12 @@ def _build_registration_suggestions() -> dict:
             .values_list("coverity_stream", flat=True)
             .distinct()
         ),
+    }
+
+
+def _build_form_initial(project: dict) -> dict:
+    return {
+        "jira_project_key": project["jiraProjectKey"],
+        "bitbucket_project_key": project["bitbucketProjectKey"],
+        "representative_repo_slug": project["representativeRepoSlug"],
     }

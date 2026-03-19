@@ -62,6 +62,14 @@ class ProjectViewTest(TestCase):
         self.assertContains(response, "가능")
         self.assertContains(response, "Year 2026")
         self.assertContains(response, "Repository: sample-app-api")
+        self.assertContains(response, "프로젝트 수정")
+        self.assertContains(response, 'id="project-edit-panel"', html=False)
+        self.assertContains(response, 'name="jira_project_key"', html=False)
+        self.assertContains(response, 'value="SAMPLE"', html=False)
+        self.assertContains(response, 'name="repo_slug"', html=False)
+        self.assertContains(response, 'value="sample-app-api"', html=False)
+        self.assertContains(response, 'id="project-edit-panel"', html=False)
+        self.assertContains(response, "hidden", html=False)
 
     def test_project_registration_from_main_page_redirects_to_detail(self) -> None:
         response = self.client.post(
@@ -134,3 +142,74 @@ class ProjectViewTest(TestCase):
         self.assertEqual(200, response.status_code)
         self.assertContains(response, "저장소 목록에 없습니다", html=False)
         self.assertNotContains(response, 'id="project-registration-panel" hidden', html=False)
+
+    def test_project_detail_update_replaces_existing_project_configuration(self) -> None:
+        extra_repository = ProjectRepository.objects.create(
+            project=self.project,
+            repo_slug="sample-app-web",
+            coverity_project="sample-app-web",
+            coverity_stream="sample-app-web-dev",
+            is_representative=False,
+        )
+        extra_plan = BuildPlan.objects.create(build_id="sample-app-web", plan_key="SAMPWEB")
+        ProjectBuild.objects.create(
+            project=self.project,
+            repository=extra_repository,
+            build_plan=extra_plan,
+            build_name="Sample Web",
+            build_type="node",
+            runtime_stack="node20",
+        )
+
+        response = self.client.post(
+            "/projects/SAMPLE/",
+            data={
+                "jira_project_key": "SAMPLE",
+                "bitbucket_project_key": "SAMPLE-NEW",
+                "representative_repo_slug": "sample-app-web",
+                "repo_slug": ["sample-app-web"],
+                "coverity_project": ["sample-app-web"],
+                "coverity_stream": ["sample-app-web-release"],
+                "build_name": ["Sample Web"],
+                "build_type": ["node"],
+                "runtime_stack": ["node22"],
+                "build_id": ["sample-app-web"],
+                "plan_key": ["SAMPWEB"],
+                "build_repository_slug": ["sample-app-web"],
+            },
+        )
+
+        self.assertEqual(302, response.status_code)
+        self.assertEqual("/projects/SAMPLE/", response["Location"])
+        self.project.refresh_from_db()
+        self.assertEqual("SAMPLE-NEW", self.project.bitbucket_project_key)
+        self.assertEqual("sample-app-web", self.project.representative_repo_slug)
+        self.assertEqual(1, ProjectRepository.objects.filter(project=self.project).count())
+        self.assertEqual(1, ProjectBuild.objects.filter(project=self.project).count())
+        self.assertTrue(ProjectRepository.objects.filter(project=self.project, repo_slug="sample-app-web").exists())
+        self.assertFalse(ProjectRepository.objects.filter(project=self.project, repo_slug="sample-app-api").exists())
+        self.assertTrue(ProjectBuild.objects.filter(project=self.project, build_plan__plan_key="SAMPWEB").exists())
+        self.assertFalse(ProjectBuild.objects.filter(project=self.project, build_plan__plan_key="SAMPAPI").exists())
+
+    def test_project_detail_update_reopens_panel_on_validation_error(self) -> None:
+        response = self.client.post(
+            "/projects/SAMPLE/",
+            data={
+                "jira_project_key": "SAMPLE",
+                "bitbucket_project_key": "SAMPLE",
+                "representative_repo_slug": "missing-repo",
+                "repo_slug": ["sample-app-api"],
+                "coverity_project": ["sample-app-api"],
+                "coverity_stream": ["sample-app-api-dev"],
+                "build_name": ["Sample API"],
+                "build_type": ["maven"],
+                "runtime_stack": ["java"],
+                "build_id": ["sample-app-api"],
+                "plan_key": ["SAMPAPI"],
+                "build_repository_slug": ["sample-app-api"],
+            },
+        )
+
+        self.assertEqual(200, response.status_code)
+        self.assertContains(response, "대표 저장소는 등록한 저장소 목록 중 하나여야 합니다.", html=False)
+        self.assertNotContains(response, 'id="project-edit-panel" hidden', html=False)
