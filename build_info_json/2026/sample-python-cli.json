@@ -1,0 +1,53 @@
+{
+  "buildId": "sample-python-cli",
+  "name": "Sample Python CLI",
+  "planKey": "SAMPPYB",
+  "description": "Sample Python CLI build plan",
+  "language": "python",
+  "compiler": "python",
+  "repository": {
+    "provider": "bitbucket",
+    "projectKey": "PYCLI",
+    "repoSlug": "sample-python-cli",
+    "linkageMode": "linked",
+    "branches": [
+      "dev",
+      "release",
+      "master"
+    ]
+  },
+  "requirements": {
+    "os": "linux",
+    "extraCapabilities": []
+  },
+  "build": {
+    "subPath": "tools/sample-python-cli",
+    "prepareCommand": "python3 -m pip install -e .",
+    "buildCommand": "python3 -m unittest discover -s tests",
+    "staticAnalysis": {
+      "customTool": {
+        "commands": [
+          "python3 scripts/custom_tool.py init --cli",
+          "custom-tool analyze {buildCommand}",
+          "python3 scripts/custom_tool.py publish --cli"
+        ]
+      }
+    },
+    "runtimeRequirements": {
+      "commands": [
+        "python3",
+        "pip",
+        "coverity",
+        "custom-tool",
+        "trigger-plan"
+      ],
+      "envVars": [
+        "PATH"
+      ]
+    },
+    "postBuildTrigger": {
+      "type": "plan",
+      "targetPlanKey": "POSTPYB"
+    }
+  }
+}

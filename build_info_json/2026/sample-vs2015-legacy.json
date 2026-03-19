@@ -1,0 +1,57 @@
+{
+  "buildId": "sample-vs2015-legacy",
+  "name": "Sample VS2015 Legacy",
+  "planKey": "SAMPV15",
+  "description": "Sample VS2015 Legacy build plan",
+  "language": "cpp",
+  "compiler": "vs2015",
+  "repository": {
+    "provider": "bitbucket",
+    "projectKey": "VSN15",
+    "repoSlug": "sample-vs2015-legacy",
+    "linkageMode": "linked",
+    "branches": [
+      "dev",
+      "release",
+      "master"
+    ]
+  },
+  "requirements": {
+    "os": "windows",
+    "extraCapabilities": [
+      "nuget"
+    ]
+  },
+  "build": {
+    "subPath": "legacy/sample-vs2015-legacy",
+    "prepareCommand": "nuget restore SampleVs2015Legacy.sln",
+    "buildCommand": "msbuild SampleVs2015Legacy.sln /p:Configuration=Release /p:Platform=Win32",
+    "staticAnalysis": {
+      "customTool": {
+        "commands": [
+          "python scripts/custom_tool.py init --legacy-windows",
+          "custom-tool analyze {buildCommand}",
+          "python scripts/custom_tool.py publish --legacy-windows"
+        ]
+      }
+    },
+    "runtimeRequirements": {
+      "commands": [
+        "python",
+        "nuget",
+        "msbuild",
+        "coverity",
+        "custom-tool",
+        "trigger-plan"
+      ],
+      "envVars": [
+        "PATH",
+        "VS2015_ENV"
+      ]
+    },
+    "postBuildTrigger": {
+      "type": "plan",
+      "targetPlanKey": "POSTV15"
+    }
+  }
+}

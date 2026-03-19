@@ -1,0 +1,54 @@
+{
+  "buildId": "sample-firmware-keil",
+  "name": "Sample Firmware Keil",
+  "planKey": "SAMPKEL",
+  "description": "Sample Firmware Keil build plan",
+  "language": "cpp",
+  "compiler": "keil",
+  "repository": {
+    "provider": "bitbucket",
+    "projectKey": "KEILFW",
+    "repoSlug": "sample-firmware-keil",
+    "linkageMode": "linked",
+    "branches": [
+      "dev",
+      "release",
+      "master"
+    ]
+  },
+  "requirements": {
+    "os": "windows",
+    "extraCapabilities": []
+  },
+  "build": {
+    "subPath": "firmware/sample-firmware-keil",
+    "prepareCommand": "python scripts/prepare_keil_workspace.py",
+    "buildCommand": "UV4.exe -b SampleFirmware.uvprojx -j0",
+    "staticAnalysis": {
+      "customTool": {
+        "commands": [
+          "python scripts/custom_tool.py init --embedded",
+          "custom-tool analyze {buildCommand}",
+          "python scripts/custom_tool.py publish --embedded"
+        ]
+      }
+    },
+    "runtimeRequirements": {
+      "commands": [
+        "python",
+        "UV4.exe",
+        "coverity",
+        "custom-tool",
+        "trigger-plan"
+      ],
+      "envVars": [
+        "PATH",
+        "KEIL_ROOT"
+      ]
+    },
+    "postBuildTrigger": {
+      "type": "plan",
+      "targetPlanKey": "POSTKEL"
+    }
+  }
+}

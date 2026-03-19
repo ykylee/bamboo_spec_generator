@@ -1,28 +1,116 @@
-<!doctype html>
-<html lang="ko">
-  <head>
-    <meta charset="utf-8">
-    <title>Project Detail</title>
-  </head>
-  <body>
-    {% if project %}
-    <h1>{{ project.jiraProjectKey }}</h1>
-    <p>Bitbucket: {{ project.bitbucketProjectKey }}</p>
-    <p>Representative Repo: {{ project.representativeRepoSlug }}</p>
-    <h2>Repositories</h2>
-    <ul>
+{% extends "ui/base.html" %}
+
+{% block title %}
+{% if project %}{{ project.jiraProjectKey }} | Bamboo Spec Generator{% else %}프로젝트 없음 | Bamboo Spec Generator{% endif %}
+{% endblock %}
+{% block page_heading %}{% if project %}{{ project.jiraProjectKey }} 상세{% else %}프로젝트 상세{% endif %}{% endblock %}
+
+{% block content %}
+{% if project %}
+<section class="hero">
+  <p class="hero__eyebrow">Project Detail</p>
+  <h1 class="hero__title">{{ project.jiraProjectKey }}</h1>
+  <p class="hero__body">
+    Bitbucket 프로젝트, 대표 저장소, 연결된 빌드 플랜 구성을 운영 메타데이터 기준으로 조회합니다. 관리 콘솔 스타일의 상세 패널로 재구성한 화면입니다.
+  </p>
+  <div class="chip-row">
+    <span class="chip">{{ project.bitbucketProjectKey }}</span>
+    <span class="chip chip--neutral">{{ project.representativeRepoSlug|default:"대표 저장소 미지정" }}</span>
+    <a class="chip chip--neutral" href="{% url 'project-list' %}{% if request.GET.urlencode %}?{{ request.GET.urlencode }}{% endif %}">목록으로</a>
+  </div>
+</section>
+
+<section class="stat-grid">
+  <article class="stat-card">
+    <span class="stat-card__label">Repositories</span>
+    <p class="stat-card__value">{{ project.repositories|length }}</p>
+    <p class="stat-card__meta">프로젝트에 연결된 저장소 수</p>
+  </article>
+  <article class="stat-card">
+    <span class="stat-card__label">Build Plans</span>
+    <p class="stat-card__value">{{ project.builds|length }}</p>
+    <p class="stat-card__meta">현재 조회 가능한 빌드 플랜 수</p>
+  </article>
+</section>
+
+<section class="detail-grid">
+  <article class="panel">
+    <div class="panel__header">
+      <h2 class="panel__title">프로젝트 메타데이터</h2>
+    </div>
+    <ul class="meta-list">
+      <li>
+        <strong>Jira Project Key</strong>
+        {{ project.jiraProjectKey }}
+      </li>
+      <li>
+        <strong>Bitbucket Project Key</strong>
+        {{ project.bitbucketProjectKey }}
+      </li>
+      <li>
+        <strong>Representative Repository</strong>
+        {{ project.representativeRepoSlug|default:"대표 저장소 미지정" }}
+      </li>
+    </ul>
+  </article>
+
+  <article class="panel">
+    <div class="panel__header">
+      <h2 class="panel__title">저장소</h2>
+      <span class="badge">{{ project.repositories|length }}개</span>
+    </div>
+    <ul class="repo-list">
       {% for repository in project.repositories %}
-      <li>{{ repository.repoSlug }}{% if repository.isRepresentative %} (대표){% endif %}</li>
+      <li class="repo-item">
+        <div class="repo-item__top">
+          <h3 class="repo-item__name">{{ repository.repoSlug }}</h3>
+          {% if repository.isRepresentative %}
+          <span class="chip chip--success">대표 저장소</span>
+          {% endif %}
+        </div>
+        <p class="repo-item__meta">Coverity Project: {{ repository.coverityProject|default:"미지정" }}</p>
+        <p class="repo-item__meta">Coverity Stream: {{ repository.coverityStream|default:"미지정" }}</p>
+      </li>
+      {% empty %}
+      <li class="empty-state">
+        <h3 class="empty-state__title">저장소 정보가 없습니다.</h3>
+        <p class="empty-state__body">이 프로젝트에 연결된 저장소 메타데이터가 아직 적재되지 않았습니다.</p>
+      </li>
       {% endfor %}
     </ul>
-    <h2>Builds</h2>
-    <ul>
+  </article>
+
+  <article class="panel">
+    <div class="panel__header">
+      <h2 class="panel__title">빌드 플랜</h2>
+      <span class="badge">{{ project.builds|length }}개</span>
+    </div>
+    <ul class="build-list">
       {% for build in project.builds %}
-      <li>{{ build.buildName }} / {{ build.buildType }} / {{ build.planKey }}</li>
+      <li class="build-item">
+        <div class="build-item__top">
+          <h3 class="build-item__name">{{ build.buildName }}</h3>
+          <span class="chip">{{ build.planKey }}</span>
+        </div>
+        <p class="build-item__meta">Build Type: {{ build.buildType|default:"미지정" }}</p>
+        <p class="build-item__meta">Runtime Stack: {{ build.runtimeStack|default:"미지정" }}</p>
+      </li>
+      {% empty %}
+      <li class="empty-state">
+        <h3 class="empty-state__title">빌드 플랜 정보가 없습니다.</h3>
+        <p class="empty-state__body">프로젝트에 연결된 빌드 정의를 적재하면 이 영역에 목록이 표시됩니다.</p>
+      </li>
       {% endfor %}
     </ul>
-    {% else %}
-    <h1>프로젝트를 찾을 수 없습니다.</h1>
-    {% endif %}
-  </body>
-</html>
+  </article>
+</section>
+{% else %}
+<section class="empty-state">
+  <h1 class="empty-state__title">프로젝트를 찾을 수 없습니다.</h1>
+  <p class="empty-state__body">요청한 Jira Project Key에 해당하는 메타데이터가 없습니다.</p>
+  <p class="empty-state__body stack-top">
+    <a class="chip chip--neutral" href="{% url 'project-list' %}">프로젝트 목록으로 돌아가기</a>
+  </p>
+</section>
+{% endif %}
+{% endblock %}

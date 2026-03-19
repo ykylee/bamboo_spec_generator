@@ -1,0 +1,57 @@
+{
+  "buildId": "sample-vs2026-next",
+  "name": "Sample VS2026 Next",
+  "planKey": "SAMPV26",
+  "description": "Sample VS2026 Next build plan",
+  "language": "cpp",
+  "compiler": "vs2026",
+  "repository": {
+    "provider": "bitbucket",
+    "projectKey": "VSN26",
+    "repoSlug": "sample-vs2026-next",
+    "linkageMode": "linked",
+    "branches": [
+      "dev",
+      "release",
+      "master"
+    ]
+  },
+  "requirements": {
+    "os": "windows",
+    "extraCapabilities": [
+      "nuget"
+    ]
+  },
+  "build": {
+    "subPath": "platform/sample-vs2026-next",
+    "prepareCommand": "nuget restore SampleVs2026Next.sln",
+    "buildCommand": "msbuild SampleVs2026Next.sln /p:Configuration=Release /p:Platform=x64",
+    "staticAnalysis": {
+      "customTool": {
+        "commands": [
+          "python scripts/custom_tool.py init --next-windows",
+          "custom-tool analyze {buildCommand}",
+          "python scripts/custom_tool.py publish --next-windows"
+        ]
+      }
+    },
+    "runtimeRequirements": {
+      "commands": [
+        "python",
+        "nuget",
+        "msbuild",
+        "coverity",
+        "custom-tool",
+        "trigger-plan"
+      ],
+      "envVars": [
+        "PATH",
+        "VS2026_ENV"
+      ]
+    },
+    "postBuildTrigger": {
+      "type": "plan",
+      "targetPlanKey": "POSTV26"
+    }
+  }
+}

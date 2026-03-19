@@ -14,6 +14,7 @@
 - 테스트는 `unittest` 기반으로 일부 포함되어 있습니다.
 - 실제 Bamboo 서버 import 및 실행까지는 아직 검증되지 않았습니다.
 - Django/Ninja 기반 운영 백엔드 스캐폴딩, migration, 기본 API/UI, SQLite/PostgreSQL 스위치, 개발용 DB 초기화 명령이 추가되었습니다.
+- 조회용 웹 UI는 Django 템플릿 기반으로 프로젝트 목록/상세 화면을 제공하며, 현재는 읽기 전용 운영 콘솔 성격입니다.
 - `backend/manage.py check`, `migrate`, Django 테스트 기준의 기본 동작은 검증되었습니다.
 
 ## 아직 미구현인 범위
@@ -81,11 +82,14 @@ JSON 입력 모드에서 연도는 JSON 본문 필드가 아니라 `build_info_j
 - [sample-app-web.json](./build_info_json/2026/sample-app-web.json)
 - [sample-app-mfc.json](./build_info_json/2026/sample-app-mfc.json)
 
-현재 샘플은 다음 시나리오를 기준으로 정리되어 있습니다.
+현재 샘플은 총 11개 프로젝트, 13개 빌드 정의 기준으로 정리되어 있습니다. 대표 시나리오는 다음과 같습니다.
 
 - `sample-app-api`: Linux 에이전트에서 Maven으로 빌드하는 Java API 서비스
 - `sample-app-web`: Linux 에이전트에서 `npm`으로 빌드하는 Node.js 웹 애플리케이션
 - `sample-app-mfc`: Windows 에이전트에서 `nuget restore` 후 `msbuild`를 수행하는 Visual Studio 2022 기반 MFC 애플리케이션
+- `sample-python-*`: Linux 에이전트에서 Python 기반 테스트/CLI 패키지를 빌드하는 배치/도구 프로젝트
+- `sample-cmake-*`: Linux/Windows 에이전트에서 CMake 기반 네이티브 프로젝트를 빌드하는 시나리오
+- `sample-vs20*-*`, `sample-firmware-keil`: Windows 에이전트에서 Visual Studio/Keil 기반 네이티브 또는 펌웨어 프로젝트를 빌드하는 시나리오
 
 현재 validator 기준으로 `build.runtimeRequirements.commands`와 `build.runtimeRequirements.envVars`는 필수입니다.
 
@@ -160,6 +164,11 @@ MSBuild 기반 플랜은 생성된 inline Python 코드에서 실제 MSBuild 호
 - `backend/`: Django 기반 운영 백엔드 스캐폴딩
 - `src/bamboo_spec_generator/api_client.py`: 생성기에서 운영 API를 호출하기 위한 클라이언트
 - `--api-plan-key`: 운영 API에서 활성 빌드 정의를 읽어 생성하는 CLI 진입점
+
+현재 UI 엔드포인트는 다음과 같습니다.
+
+- `/`: 프로젝트 목록
+- `/projects/<jiraProjectKey>/`: 프로젝트 상세
 
 운영 API의 활성 빌드 정의 응답은 `definition` JSON 본문과 별도로 `year` 필드를 포함해야 하며, 생성기는 이 값을 내부 `BuildDefinition.year`로 사용합니다.
 

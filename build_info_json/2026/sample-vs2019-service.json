@@ -1,0 +1,57 @@
+{
+  "buildId": "sample-vs2019-service",
+  "name": "Sample VS2019 Service",
+  "planKey": "SAMPV19",
+  "description": "Sample VS2019 Service build plan",
+  "language": "cpp",
+  "compiler": "vs2019",
+  "repository": {
+    "provider": "bitbucket",
+    "projectKey": "VSN19",
+    "repoSlug": "sample-vs2019-service",
+    "linkageMode": "linked",
+    "branches": [
+      "dev",
+      "release",
+      "master"
+    ]
+  },
+  "requirements": {
+    "os": "windows",
+    "extraCapabilities": [
+      "nuget"
+    ]
+  },
+  "build": {
+    "subPath": "services/sample-vs2019-service",
+    "prepareCommand": "nuget restore SampleVs2019Service.sln",
+    "buildCommand": "msbuild SampleVs2019Service.sln /p:Configuration=Release /p:Platform=x64",
+    "staticAnalysis": {
+      "customTool": {
+        "commands": [
+          "python scripts/custom_tool.py init --windows-native",
+          "custom-tool analyze {buildCommand}",
+          "python scripts/custom_tool.py publish --windows-native"
+        ]
+      }
+    },
+    "runtimeRequirements": {
+      "commands": [
+        "python",
+        "nuget",
+        "msbuild",
+        "coverity",
+        "custom-tool",
+        "trigger-plan"
+      ],
+      "envVars": [
+        "PATH",
+        "VS2019_ENV"
+      ]
+    },
+    "postBuildTrigger": {
+      "type": "plan",
+      "targetPlanKey": "POSTV19"
+    }
+  }
+}

@@ -5,6 +5,41 @@ from django.core.exceptions import ObjectDoesNotExist
 from apps.buildmeta.models import BuildPlan
 
 
+def list_latest_failed_builds(limit: int = 5) -> list[dict]:
+    plans = (
+        BuildPlan.objects.select_related(
+            "latest_version__latest_execution",
+            "project_build__project",
+        )
+        .filter(latest_version__latest_success=False)
+        .order_by("-latest_version__latest_execution__created_at")[:limit]
+    )
+    return [
+        {
+            "projectKey": plan.project_build.project.jira_project_key,
+            "buildName": plan.project_build.build_name,
+            "planKey": plan.plan_key,
+            "version": plan.latest_version.version_text if plan.latest_version else "",
+            "buildNumber": (
+                plan.latest_version.latest_execution.build_number
+                if plan.latest_version and plan.latest_version.latest_execution
+                else ""
+            ),
+            "resultStatus": (
+                plan.latest_version.latest_execution.result_status
+                if plan.latest_version and plan.latest_version.latest_execution
+                else ""
+            ),
+            "summaryMessage": (
+                plan.latest_version.latest_execution.summary_message
+                if plan.latest_version and plan.latest_version.latest_execution
+                else ""
+            ),
+        }
+        for plan in plans
+    ]
+
+
 def list_executions_by_plan_key(plan_key: str) -> list[dict] | None:
     try:
         plan = BuildPlan.objects.prefetch_related(

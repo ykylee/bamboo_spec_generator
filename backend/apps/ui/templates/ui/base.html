@@ -1,0 +1,81 @@
+{% load static %}
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{% block title %}Bamboo Spec Generator{% endblock %}</title>
+    <link rel="icon" href="{% static 'ui/favicon.svg' %}" type="image/svg+xml">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;600;700&family=Noto+Serif+KR:wght@600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{% static 'ui/app.css' %}">
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <a class="sidebar__brand" href="{% url 'project-list' %}">
+          <span class="sidebar__logo">BS</span>
+          <span>
+            <strong class="sidebar__title">Bamboo Spec</strong>
+            <span class="sidebar__subtitle">Build Metadata Console</span>
+          </span>
+        </a>
+
+        <nav class="sidebar__nav">
+          <a class="sidebar__nav-item sidebar__nav-item--active" href="{% url 'project-list' %}">프로젝트</a>
+          <span class="sidebar__nav-item sidebar__nav-item--muted">빌드 플랜</span>
+          <span class="sidebar__nav-item sidebar__nav-item--muted">실행 이력</span>
+          <span class="sidebar__nav-item sidebar__nav-item--muted">정적 분석</span>
+        </nav>
+
+        <section class="sidebar__section">
+          <p class="sidebar__section-label">Current Scope</p>
+          <p class="sidebar__section-body">
+            현재 UI는 읽기 전용 운영 콘솔입니다. 프로젝트, 저장소, 빌드 플랜 메타데이터 탐색에 집중합니다.
+          </p>
+        </section>
+      </aside>
+
+      <div class="main-shell">
+        <header class="topbar">
+          <div class="topbar__main">
+            <div>
+              <p class="topbar__eyebrow">Operations Dashboard</p>
+              <h1 class="topbar__title">{% block page_heading %}Bamboo Spec Generator{% endblock %}</h1>
+            </div>
+            <form class="global-filter-bar" method="get" action="{% url 'project-list' %}">
+              <label class="filter-field">
+                <span class="filter-field__label">검색</span>
+                <input
+                  class="filter-field__input"
+                  type="text"
+                  name="q"
+                  value="{{ request.GET.q|default:'' }}"
+                  placeholder="Jira, Bitbucket, 대표 저장소"
+                >
+              </label>
+              <label class="filter-field">
+                <span class="filter-field__label">상태</span>
+                <select class="filter-field__input" name="status">
+                  <option value="all"{% if request.GET.status|default:'all' == 'all' %} selected{% endif %}>전체</option>
+                  <option value="attention"{% if request.GET.status == 'attention' %} selected{% endif %}>주의 필요</option>
+                  <option value="healthy"{% if request.GET.status == 'healthy' %} selected{% endif %}>정상</option>
+                </select>
+              </label>
+              <button class="filter-submit" type="submit">적용</button>
+            </form>
+          </div>
+          <div class="topbar__status">
+            <span class="badge badge--success">Read Only</span>
+            <span class="badge">Django UI</span>
+          </div>
+        </header>
+
+        <main class="page-content">
+          {% block content %}{% endblock %}
+        </main>
+      </div>
+    </div>
+  </body>
+</html>
