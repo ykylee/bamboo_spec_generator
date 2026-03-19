@@ -251,3 +251,48 @@ class OperationsApiClientTest(unittest.TestCase):
         self.assertEqual("http://localhost:8000/api/v1/build-plans/SAMPAPI/executions", request_obj.full_url)
         self.assertEqual("GET", request_obj.get_method())
         self.assertEqual("execution-1", payload[0]["buildExecutionId"])
+
+    @patch("src.bamboo_spec_generator.api_client.request.urlopen")
+    def test_record_static_analysis_results_posts_results(self, urlopen_mock) -> None:
+        urlopen_mock.return_value = _FakeResponse(
+            {
+                "buildExecutionId": "execution-1",
+                "updatedCount": 1,
+            }
+        )
+        client = OperationsApiClient(
+            OperationsApiConfig(base_url="http://localhost:8000", token="token", timeout_seconds=3.0)
+        )
+
+        payload = client.record_static_analysis_results(
+            "execution-1",
+            [
+                {
+                    "toolName": "coverity",
+                    "status": "passed",
+                    "summary": "0 high impact defects",
+                    "metricsJson": {"high": 0},
+                }
+            ],
+        )
+
+        request_obj = urlopen_mock.call_args.args[0]
+        self.assertEqual(
+            "http://localhost:8000/api/v1/build-executions/execution-1/static-analysis-results",
+            request_obj.full_url,
+        )
+        self.assertEqual("POST", request_obj.get_method())
+        self.assertEqual(
+            {
+                "staticAnalysisResults": [
+                    {
+                        "toolName": "coverity",
+                        "status": "passed",
+                        "summary": "0 high impact defects",
+                        "metricsJson": {"high": 0},
+                    }
+                ]
+            },
+            json.loads(request_obj.data.decode("utf-8")),
+        )
+        self.assertEqual(1, payload["updatedCount"])

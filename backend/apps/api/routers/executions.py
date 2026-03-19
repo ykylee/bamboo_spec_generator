@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from ninja import Router
 
-from apps.api.schemas import ExecutionFinishIn, ExecutionStartIn, ExecutionStartOut
-from apps.buildmeta.services import finish_execution, start_execution
+from apps.api.schemas import ExecutionFinishIn, ExecutionStartIn, ExecutionStartOut, StaticAnalysisResultsUpsertIn
+from apps.buildmeta.services import finish_execution, record_static_analysis_results, start_execution
 
 
 router = Router(tags=["executions"])
@@ -31,5 +31,13 @@ def complete_execution(request, execution_id: str, payload: ExecutionFinishIn) -
         job_name=payload.jobName,
         task_name=payload.taskName,
         finished_at=payload.finishedAt,
+        static_analysis_results=[result.dict() for result in payload.staticAnalysisResults],
+    )
+
+
+@router.post("/build-executions/{execution_id}/static-analysis-results")
+def upsert_static_analysis_results(request, execution_id: str, payload: StaticAnalysisResultsUpsertIn) -> dict:
+    return record_static_analysis_results(
+        execution_id=execution_id,
         static_analysis_results=[result.dict() for result in payload.staticAnalysisResults],
     )
