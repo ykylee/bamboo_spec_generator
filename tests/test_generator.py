@@ -10,7 +10,7 @@ from src.bamboo_spec_generator.parser import discover_input_files, parse_build_d
 from src.bamboo_spec_generator.java_assets import load_python_wrapper_method
 from src.bamboo_spec_generator.script_assets import load_python_script_assets
 from src.bamboo_spec_generator.script_renderer import render_python_launcher_scripts, render_python_scripts
-from src.bamboo_spec_generator.validator import validate_build_definitions
+from src.bamboo_spec_generator.validator import ValidationError, validate_build_definitions
 from src.bamboo_spec_generator.writer import write_specs_project
 
 
@@ -63,8 +63,17 @@ class GeneratorFlowTest(unittest.TestCase):
         mfc_launchers = render_python_launcher_scripts(mfc_build)
 
         self.assertIn("Path('services/sample-app-api')", api_scripts["prepare_build.py"])
+        self.assertIn("PLAN_KEY = 'SAMPAPI'", api_scripts["prepare_build.py"])
+        self.assertIn("start_execution_if_configured()", api_scripts["prepare_build.py"])
         self.assertIn("command = 'mvn -B clean package'", api_scripts["run_build.py"])
+        self.assertIn("start_execution_if_configured()", api_scripts["run_build.py"])
+        self.assertIn("finish_execution_if_configured(", api_scripts["run_build.py"])
+        self.assertIn("start_execution_if_configured()", api_scripts["run_coverity.py"])
+        self.assertIn("record_static_analysis_result(", api_scripts["run_coverity.py"])
         self.assertIn("'custom-tool analyze mvn -B clean package',", api_scripts["run_custom_analysis.py"])
+        self.assertIn("start_execution_if_configured()", api_scripts["run_custom_analysis.py"])
+        self.assertIn("start_execution_if_configured()", api_scripts["trigger_follow_up.py"])
+        self.assertIn("collect_static_analysis_results()", api_scripts["trigger_follow_up.py"])
         self.assertIn("Path('src/SampleAppMfc')", mfc_scripts["prepare_build.py"])
         self.assertIn("VS2022_ENV", mfc_scripts["run_build.py"])
         self.assertIn("Directory.Build.targets", mfc_scripts["run_custom_analysis.py"])
@@ -73,6 +82,22 @@ class GeneratorFlowTest(unittest.TestCase):
         self.assertIn("echo [prepare] launching prepare_build.py", mfc_launchers["prepare_build.bat"])
         self.assertIn('python "%SCRIPT_DIR%prepare_build.py" %*', mfc_launchers["prepare_build.bat"])
         self.assertIn('echo "[coverity] launching run_coverity.py"', api_launchers["run_coverity.sh"])
+
+    def test_python_script_templates_render_prepare_context_exports(self) -> None:
+        api_build = parse_build_definition(Path("build_info_json/2026/sample-app-api.json"))
+
+        scripts = render_python_scripts(
+            api_build,
+            prepare_context={
+                "variables": {
+                    "BITBUCKET_APPLICATION_LINK": "BITBUCKET_SERVER",
+                    "currentRepository.linkageMode": "linked",
+                }
+            },
+        )
+
+        self.assertIn("os.environ['BITBUCKET_APPLICATION_LINK'] = 'BITBUCKET_SERVER'", scripts["prepare_build.py"])
+        self.assertIn("os.environ['currentRepository.linkageMode'] = 'linked'", scripts["prepare_build.py"])
 
     def test_sample_inputs_generate_single_specs_project(self) -> None:
         input_root = Path("build_info_json")
@@ -107,6 +132,8 @@ class GeneratorFlowTest(unittest.TestCase):
             scripts_index_summary_path = output_root / "scripts" / "index-summary.txt"
             compare_report_path = output_root / "scripts" / "compare-report.txt"
             compare_report_json_path = output_root / "scripts" / "compare-report.json"
+            repository_links_path = output_root / "repository-links.json"
+            repository_links_summary_path = output_root / "repository-links-summary.txt"
             mfc_plan_path = (
                 output_root
                 / "src"
@@ -174,6 +201,8 @@ class GeneratorFlowTest(unittest.TestCase):
             self.assertTrue(scripts_index_summary_path.exists())
             self.assertTrue(compare_report_path.exists())
             self.assertTrue(compare_report_json_path.exists())
+            self.assertTrue(repository_links_path.exists())
+            self.assertTrue(repository_links_summary_path.exists())
             self.assertIn("mvn -B dependency:go-offline", rendered_api_script_path.read_text(encoding="utf-8"))
             self.assertIn('echo "[prepare] launching prepare_build.py"', rendered_api_launcher_path.read_text(encoding="utf-8"))
             self.assertIn('exec python3 "$SCRIPT_DIR/prepare_build.py" "$@"', rendered_api_launcher_path.read_text(encoding="utf-8"))
@@ -182,6 +211,11 @@ class GeneratorFlowTest(unittest.TestCase):
             self.assertIn("prepare_build", bundle_readme)
             self.assertIn("launcher `prepare_build.sh`", bundle_readme)
             self.assertIn("Working subPath: `services/sample-app-api`", bundle_readme)
+            self.assertIn("## 저장소 연결", bundle_readme)
+            self.assertIn("Linkage mode: `linked`", bundle_readme)
+            self.assertIn("Bamboo application link: `BITBUCKET_SERVER`", bundle_readme)
+            self.assertIn("Branch trigger policy: dev(order=1, enabled=true), release(order=2, enabled=true), master(order=3, enabled=true)", bundle_readme)
+            self.assertIn("Branch matching pattern: `^(dev|release|master)$`", bundle_readme)
             manifest = json.loads(rendered_api_manifest_path.read_text(encoding="utf-8"))
             self.assertEqual("sample-app-api", manifest["buildId"])
             self.assertTrue(manifest["generatedAtUtc"].endswith("Z"))
@@ -189,6 +223,19 @@ class GeneratorFlowTest(unittest.TestCase):
             self.assertEqual(self._expected_source_revision(), manifest["sourceRevision"])
             self.assertEqual("python3", manifest["pythonCommand"])
             self.assertEqual("services/sample-app-api", manifest["workingSubPath"])
+            self.assertEqual("linked", manifest["repository"]["linkageMode"])
+            self.assertEqual("BITBUCKET_SERVER", manifest["repository"]["applicationLink"])
+            self.assertEqual(["dev", "release", "master"], manifest["repository"]["branches"])
+            self.assertEqual(
+                [
+                    {"branch": "dev", "order": 1, "enabled": True},
+                    {"branch": "release", "order": 2, "enabled": True},
+                    {"branch": "master", "order": 3, "enabled": True},
+                ],
+                manifest["repository"]["branchTriggerPolicy"],
+            )
+            self.assertEqual("^(dev|release|master)$", manifest["repository"]["branchMatchingPattern"])
+            self.assertFalse(manifest["repository"]["requiresRepositoryRegistration"])
             prepare_task = next(task for task in manifest["tasks"] if task["taskName"] == "prepare_build")
             self.assertEqual("prepare_build.py", prepare_task["pythonScript"])
             self.assertEqual("prepare_build.sh", prepare_task["launcherScript"])
@@ -199,6 +246,10 @@ class GeneratorFlowTest(unittest.TestCase):
             self.assertEqual(
                 "scripts/plan_tasks/fragments/py/basic_command_support.py",
                 prepare_task["assetSources"]["pythonScript"]["commandSupport"],
+            )
+            self.assertEqual(
+                "scripts/plan_tasks/fragments/py/execution_support.py",
+                prepare_task["assetSources"]["pythonScript"]["executionSupport"],
             )
             self.assertEqual(
                 "scripts/plan_tasks/overlays/task/prepare_build/sh/python_task_launcher.sh",
@@ -212,6 +263,11 @@ class GeneratorFlowTest(unittest.TestCase):
             self.assertIn("buildId=sample-app-api", bundle_summary)
             self.assertIn("bundleContentSha256=", bundle_summary)
             self.assertIn("bundleSha256=", bundle_summary)
+            self.assertIn("repository.linkageMode=linked", bundle_summary)
+            self.assertIn("repository.applicationLink=BITBUCKET_SERVER", bundle_summary)
+            self.assertIn("repository.branchTriggerPolicy=dev:1:enabled,release:2:enabled,master:3:enabled", bundle_summary)
+            self.assertIn("repository.branchMatchingPattern=^(dev|release|master)$", bundle_summary)
+            self.assertIn("repository.requiresRegistration=false", bundle_summary)
             self.assertIn("task.prepare_build.pythonScript=prepare_build.py", bundle_summary)
             self.assertIn(
                 "task.prepare_build.source.launcher=scripts/plan_tasks/overlays/task/prepare_build/sh/python_task_launcher.sh",
@@ -226,6 +282,7 @@ class GeneratorFlowTest(unittest.TestCase):
             self.assertTrue(sample_bundle["generatedAtUtc"].endswith("Z"))
             self.assertEqual(__version__, sample_bundle["generatorVersion"])
             self.assertEqual(self._expected_source_revision(), sample_bundle["sourceRevision"])
+            self.assertEqual("linked", sample_bundle["linkageMode"])
             self.assertEqual("scripts/sample-app-api", sample_bundle["bundlePath"])
             self.assertEqual("scripts/sample-app-api/manifest.json", sample_bundle["bundleManifest"])
             self.assertEqual(manifest["bundleContentSha256"], sample_bundle["bundleContentSha256"])
@@ -237,6 +294,28 @@ class GeneratorFlowTest(unittest.TestCase):
             self.assertIn("bundle.sample-app-api.path=scripts/sample-app-api", index_summary)
             self.assertIn("bundle.sample-app-api.contentSha256=", index_summary)
             self.assertIn("bundle.sample-app-api.sha256=", index_summary)
+            self.assertIn("bundle.sample-app-api.linkageMode=linked", index_summary)
+            repository_links = json.loads(repository_links_path.read_text(encoding="utf-8"))
+            sample_repository_link = next(entry for entry in repository_links["entries"] if entry["buildId"] == "sample-app-api")
+            self.assertEqual("linked", sample_repository_link["linkageMode"])
+            self.assertEqual("BITBUCKET_SERVER", sample_repository_link["applicationLink"])
+            self.assertEqual(["dev", "release", "master"], sample_repository_link["branches"])
+            self.assertEqual(
+                [
+                    {"branch": "dev", "order": 1, "enabled": True},
+                    {"branch": "release", "order": 2, "enabled": True},
+                    {"branch": "master", "order": 3, "enabled": True},
+                ],
+                sample_repository_link["branchTriggerPolicy"],
+            )
+            self.assertEqual("^(dev|release|master)$", sample_repository_link["branchMatchingPattern"])
+            self.assertFalse(sample_repository_link["requiresRepositoryRegistration"])
+            repository_links_summary = repository_links_summary_path.read_text(encoding="utf-8")
+            self.assertIn("repository.linkageMode=linked", repository_links_summary)
+            self.assertIn("repository.applicationLink=BITBUCKET_SERVER", repository_links_summary)
+            self.assertIn("repository.branchTriggerPolicy=dev:1:enabled,release:2:enabled,master:3:enabled", repository_links_summary)
+            self.assertIn("repository.branchMatchingPattern=^(dev|release|master)$", repository_links_summary)
+            self.assertIn("repository.requiresRegistration=false", repository_links_summary)
             compare_report = compare_report_path.read_text(encoding="utf-8")
             self.assertIn("baseline=none", compare_report)
             self.assertIn("status=initial-generation", compare_report)
@@ -255,7 +334,24 @@ class GeneratorFlowTest(unittest.TestCase):
             self.assertIn('Requirement.exists("system.builder.nuget")', mfc_plan)
             self.assertIn('Requirement.exists("system.builder.python")', mfc_plan)
             self.assertIn('private static final String LINKED_REPOSITORY = "SAMPLE/sample-app-mfc";', mfc_plan)
+            self.assertIn('private static final String REPOSITORY_LINKAGE_MODE = "linked";', mfc_plan)
+            self.assertIn('private static final String[] REPOSITORY_BRANCHES = new String[] {"dev", "release", "master"};', mfc_plan)
+            self.assertIn(
+                'private static final String[] REPOSITORY_BRANCH_TRIGGER_POLICY = new String[] {"dev:1:enabled", "release:2:enabled", "master:3:enabled"};',
+                mfc_plan,
+            )
+            self.assertIn('private static final String REPOSITORY_BRANCH_MATCHING_PATTERN = "^(dev|release|master)$";', mfc_plan)
+            self.assertIn("// Branch trigger policy: dev(order=1, enabled=true), release(order=2, enabled=true), master(order=3, enabled=true)", mfc_plan)
+            self.assertIn('private static final String BITBUCKET_APPLICATION_LINK = "BITBUCKET_SERVER";', mfc_plan)
+            self.assertIn(".repositoryBranches(repositoryBranches())", mfc_plan)
+            self.assertIn(".planBranchManagement(planBranchManagement())", mfc_plan)
+            self.assertIn(".triggers(repositoryTrigger())", mfc_plan)
             self.assertIn(".linkedRepositories(LINKED_REPOSITORY)", mfc_plan)
+            self.assertIn('new VcsRepositoryBranch(LINKED_REPOSITORY, "dev").branchDisplayName("dev")', mfc_plan)
+            self.assertIn('new PlanBranchManagement()', mfc_plan)
+            self.assertIn('.createForVcsBranchMatching(REPOSITORY_BRANCH_MATCHING_PATTERN);', mfc_plan)
+            self.assertIn('private BitbucketServerTrigger repositoryTrigger() {', mfc_plan)
+            self.assertIn("return new BitbucketServerTrigger();", mfc_plan)
             self.assertIn('pythonScriptTask("prepare_build.py", PREPARE_BUILD_SCRIPT)', mfc_plan)
             self.assertIn('private static final String PREPARE_BUILD_SCRIPT = """', mfc_plan)
             self.assertIn("command = 'nuget restore SampleAppMfc.sln'", mfc_plan)
@@ -269,6 +365,97 @@ class GeneratorFlowTest(unittest.TestCase):
             self.assertIn('Arrays.asList(args).contains("--print-plans")', specs_publisher)
             self.assertIn('System.out.println("DRY RUN: " + plan.toString());', specs_publisher)
             self.assertIn("server.publish(plan);", specs_publisher)
+
+    def test_create_if_missing_outputs_repository_tracking_metadata(self) -> None:
+        build = parse_build_definition(Path("build_info_json/2026/sample-app-api.json"))
+        build = replace(
+            build,
+            repository=replace(
+                build.repository,
+                linkage_mode="create_if_missing",
+                application_link="BITBUCKET_DC",
+                branches=["release", "dev", "master"],
+            ),
+        )
+
+        with TemporaryDirectory() as temp_dir:
+            output_root = Path(temp_dir) / "bamboo-specs"
+            write_specs_project(output_root, [build])
+
+            manifest = json.loads((output_root / "scripts" / build.build_id / "manifest.json").read_text(encoding="utf-8"))
+            repository_links = json.loads((output_root / "repository-links.json").read_text(encoding="utf-8"))
+            plan_java = (
+                output_root
+                / "src"
+                / "main"
+                / "java"
+                / "com"
+                / "example"
+                / "specs"
+                / "generated"
+                / "SampleAppApiPlanSpecs.java"
+            ).read_text(encoding="utf-8")
+
+            self.assertEqual("create_if_missing", manifest["repository"]["linkageMode"])
+            self.assertEqual("BITBUCKET_DC", manifest["repository"]["applicationLink"])
+            self.assertEqual(["release", "dev", "master"], manifest["repository"]["branches"])
+            self.assertEqual(
+                [
+                    {"branch": "release", "order": 1, "enabled": True},
+                    {"branch": "dev", "order": 2, "enabled": True},
+                    {"branch": "master", "order": 3, "enabled": True},
+                ],
+                manifest["repository"]["branchTriggerPolicy"],
+            )
+            self.assertEqual("^(release|dev|master)$", manifest["repository"]["branchMatchingPattern"])
+            self.assertTrue(manifest["repository"]["requiresRepositoryRegistration"])
+            self.assertEqual("create_if_missing", repository_links["entries"][0]["linkageMode"])
+            self.assertEqual("BITBUCKET_DC", repository_links["entries"][0]["applicationLink"])
+            self.assertEqual(
+                [
+                    {"branch": "release", "order": 1, "enabled": True},
+                    {"branch": "dev", "order": 2, "enabled": True},
+                    {"branch": "master", "order": 3, "enabled": True},
+                ],
+                repository_links["entries"][0]["branchTriggerPolicy"],
+            )
+            self.assertEqual("^(release|dev|master)$", repository_links["entries"][0]["branchMatchingPattern"])
+            self.assertTrue(repository_links["entries"][0]["requiresRepositoryRegistration"])
+            self.assertIn("// Repository linkage mode: create_if_missing", plan_java)
+            self.assertIn("// create_if_missing uses Bamboo application link: BITBUCKET_DC", plan_java)
+            self.assertIn("// Repository branches: release, dev, master", plan_java)
+            self.assertIn("// Branch trigger policy: release(order=1, enabled=true), dev(order=2, enabled=true), master(order=3, enabled=true)", plan_java)
+            self.assertIn(
+                'private static final String[] REPOSITORY_BRANCH_TRIGGER_POLICY = new String[] {"release:1:enabled", "dev:2:enabled", "master:3:enabled"};',
+                plan_java,
+            )
+            self.assertIn('private static final String REPOSITORY_BRANCH_MATCHING_PATTERN = "^(release|dev|master)$";', plan_java)
+            self.assertIn('private static final String BITBUCKET_APPLICATION_LINK = "BITBUCKET_DC";', plan_java)
+            self.assertIn('new VcsRepositoryBranch(LINKED_REPOSITORY, "release").branchDisplayName("release")', plan_java)
+            self.assertIn('.createForVcsBranchMatching(REPOSITORY_BRANCH_MATCHING_PATTERN);', plan_java)
+            self.assertIn(".triggers(repositoryTrigger())", plan_java)
+            self.assertIn(".planRepositories(createPlanRepository())", plan_java)
+            self.assertIn("private BitbucketServerRepository createPlanRepository() {", plan_java)
+            self.assertIn('.server(new ApplicationLink().name(BITBUCKET_APPLICATION_LINK))', plan_java)
+            self.assertIn('.projectKey("SAMPLE")', plan_java)
+            self.assertIn('.repositorySlug("sample-app-api")', plan_java)
+            self.assertIn('.branch("release");', plan_java)
+
+    def test_create_if_missing_requires_application_link(self) -> None:
+        build = parse_build_definition(Path("build_info_json/2026/sample-app-api.json"))
+        build = replace(
+            build,
+            repository=replace(
+                build.repository,
+                linkage_mode="create_if_missing",
+                application_link=None,
+            ),
+        )
+
+        with self.assertRaises(ValidationError) as context:
+            validate_build_definitions([build])
+
+        self.assertIn("repository.applicationLink", str(context.exception))
 
     def test_compare_report_detects_changed_bundle_on_regeneration(self) -> None:
         input_root = Path("build_info_json")
@@ -344,6 +531,49 @@ class GeneratorFlowTest(unittest.TestCase):
             self.assertEqual(
                 {"previous": ["PATH"], "current": ["PATH", "JAVA_HOME"]},
                 changed_bundle["bundleChanges"]["runtimeEnvVars"],
+            )
+
+    def test_write_specs_project_records_prepare_context_artifacts(self) -> None:
+        build = parse_build_definition(Path("build_info_json/2026/sample-app-api.json"))
+
+        with TemporaryDirectory() as temp_dir:
+            output_root = Path(temp_dir) / "bamboo-specs"
+            write_specs_project(
+                output_root,
+                [build],
+                prepare_contexts={
+                    build.plan_key: {
+                        "planKey": build.plan_key,
+                        "variables": {
+                            "BITBUCKET_APPLICATION_LINK": "BITBUCKET_SERVER",
+                            "currentRepository.linkageMode": "linked",
+                        },
+                    }
+                },
+            )
+
+            prepare_script = (output_root / "scripts" / build.build_id / "prepare_build.py").read_text(encoding="utf-8")
+            prepare_context = json.loads(
+                (output_root / "scripts" / build.build_id / "prepare-context.json").read_text(encoding="utf-8")
+            )
+            manifest = json.loads((output_root / "scripts" / build.build_id / "manifest.json").read_text(encoding="utf-8"))
+            summary = (output_root / "scripts" / build.build_id / "bundle-summary.txt").read_text(encoding="utf-8")
+
+            self.assertIn("os.environ['BITBUCKET_APPLICATION_LINK'] = 'BITBUCKET_SERVER'", prepare_script)
+            self.assertEqual("BITBUCKET_SERVER", prepare_context["variables"]["BITBUCKET_APPLICATION_LINK"])
+            self.assertEqual(
+                {
+                    "planKey": build.plan_key,
+                    "variables": {
+                        "BITBUCKET_APPLICATION_LINK": "BITBUCKET_SERVER",
+                        "currentRepository.linkageMode": "linked",
+                    },
+                },
+                manifest["prepareContext"],
+            )
+            self.assertIn(
+                "prepareContext.variables=BITBUCKET_APPLICATION_LINK,currentRepository.linkageMode",
+                summary,
             )
 
 

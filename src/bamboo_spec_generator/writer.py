@@ -28,10 +28,15 @@ from .script_renderer import (
 PACKAGE_NAME = "com.example.specs.generated"
 
 
-def write_specs_project(output_root: Path, builds: list[BuildDefinition]) -> list[Path]:
+def write_specs_project(
+    output_root: Path,
+    builds: list[BuildDefinition],
+    prepare_contexts: dict[str, dict] | None = None,
+) -> list[Path]:
     java_root = output_root / "src" / "main" / "java" / "com" / "example" / "specs" / "generated"
     java_root.mkdir(parents=True, exist_ok=True)
     scripts_index_entries: list[dict[str, str]] = []
+    repository_link_entries: list[dict[str, Any]] = []
     generated_at_utc = _generated_at_utc()
     source_revision = _source_revision()
     previous_bundles = _load_previous_bundles(output_root / "scripts")
@@ -58,6 +63,7 @@ def write_specs_project(output_root: Path, builds: list[BuildDefinition]) -> lis
         "생성된 Java Specs 클래스는 `@BambooSpec`를 사용하며, `src/main/java/` 아래에 위치합니다.\n"
         "각 빌드별 Coverity 설정 파일은 `coverity/<buildId>/coverity.yaml` 아래에 생성됩니다.\n"
         "각 빌드별 렌더링된 Python Task 스크립트와 실행 보조 자산은 `scripts/<buildId>/` 아래에 기록됩니다.\n"
+        "저장소 연결 모드와 브랜치 정책은 `repository-links.json` 및 각 번들의 `manifest.json`에 함께 기록됩니다.\n"
         "각 Task의 실행 로직은 Bamboo `ScriptTask`의 inline body에 직접 포함됩니다.\n\n"
         "## 사전 점검\n\n"
         "- Bamboo 서버 버전과 `pom.xml`의 Bamboo Specs 버전이 호환되어야 합니다.\n"
@@ -72,12 +78,13 @@ def write_specs_project(output_root: Path, builds: list[BuildDefinition]) -> lis
         "## 사용 방법\n\n"
         "1. Bamboo 서버 버전에 맞게 `pom.xml`의 Bamboo Specs 부모 버전을 조정합니다.\n"
         "2. Bamboo Linked Repository 이름이 `projectKey/repoSlug` 규칙과 일치하도록 Bamboo 쪽 구성을 준비합니다.\n"
-        "3. `scripts/<buildId>/`에 기록된 최종 스크립트와 OS별 launcher로 생성 내용을 검토할 수 있습니다.\n"
-        "4. Repository Stored Specs로 사용할 경우 이 디렉터리를 Bamboo가 읽는 저장소 루트의 `bamboo-specs/`로 배치합니다.\n"
-        "5. publish 전에는 `mvn -q exec:java -Dexec.args=\"--dry-run\"`으로 계획을 점검합니다.\n"
-        "6. 플랜 목록만 보려면 `mvn -q exec:java -Dexec.args=\"--print-plans\"`를 사용합니다.\n"
-        "7. `pom.xml`에는 Bamboo Specs 종료 스레드와 `exec-maven-plugin` 충돌을 피하기 위해 `cleanupDaemonThreads=false`가 기본 설정됩니다.\n"
-        "8. 실제 배포 시에는 `BAMBOO_URL`과 `BAMBOO_TOKEN_FILE`을 설정한 뒤 `mvn -q exec:java`를 사용합니다.\n",
+        "3. `repository-links.json`에서 각 플랜의 `linkageMode`, 브랜치 정책, 후속 등록 필요 여부를 확인합니다.\n"
+        "4. `scripts/<buildId>/`에 기록된 최종 스크립트와 OS별 launcher로 생성 내용을 검토할 수 있습니다.\n"
+        "5. Repository Stored Specs로 사용할 경우 이 디렉터리를 Bamboo가 읽는 저장소 루트의 `bamboo-specs/`로 배치합니다.\n"
+        "6. publish 전에는 `mvn -q exec:java -Dexec.args=\"--dry-run\"`으로 계획을 점검합니다.\n"
+        "7. 플랜 목록만 보려면 `mvn -q exec:java -Dexec.args=\"--print-plans\"`를 사용합니다.\n"
+        "8. `pom.xml`에는 Bamboo Specs 종료 스레드와 `exec-maven-plugin` 충돌을 피하기 위해 `cleanupDaemonThreads=false`가 기본 설정됩니다.\n"
+        "9. 실제 배포 시에는 `BAMBOO_URL`과 `BAMBOO_TOKEN_FILE`을 설정한 뒤 `mvn -q exec:java`를 사용합니다.\n",
         encoding="utf-8",
     )
     written_files.append(readme_path)
@@ -98,8 +105,9 @@ def write_specs_project(output_root: Path, builds: list[BuildDefinition]) -> lis
 
         scripts_root = output_root / "scripts" / build.build_id
         scripts_root.mkdir(parents=True, exist_ok=True)
-        python_scripts = render_python_scripts(build)
-        launcher_scripts = render_python_launcher_scripts(build)
+        prepare_context = (prepare_contexts or {}).get(build.plan_key)
+        python_scripts = render_python_scripts(build, prepare_context=prepare_context)
+        launcher_scripts = render_python_launcher_scripts(build, prepare_context=prepare_context)
 
         for script_name, script_body in python_scripts.items():
             script_path = scripts_root / script_name
@@ -112,6 +120,10 @@ def write_specs_project(output_root: Path, builds: list[BuildDefinition]) -> lis
         bundle_readme_path = scripts_root / "README.md"
         bundle_readme_path.write_text(_generate_scripts_bundle_readme(build, python_scripts, launcher_scripts), encoding="utf-8")
         written_files.append(bundle_readme_path)
+        if prepare_context:
+            prepare_context_path = scripts_root / "prepare-context.json"
+            prepare_context_path.write_text(json.dumps(prepare_context, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+            written_files.append(prepare_context_path)
         manifest_path = scripts_root / "manifest.json"
         manifest_text = _generate_scripts_bundle_manifest(
             build,
@@ -119,6 +131,7 @@ def write_specs_project(output_root: Path, builds: list[BuildDefinition]) -> lis
             launcher_scripts,
             generated_at_utc,
             source_revision,
+            prepare_context,
         )
         manifest_path.write_text(manifest_text, encoding="utf-8")
         written_files.append(manifest_path)
@@ -126,12 +139,24 @@ def write_specs_project(output_root: Path, builds: list[BuildDefinition]) -> lis
         summary_path.write_text(_generate_scripts_bundle_summary(build, manifest_text), encoding="utf-8")
         written_files.append(summary_path)
         scripts_index_entries.append(_build_scripts_index_entry(build, manifest_text))
+        repository_link_entries.append(_build_repository_link_entry(build))
 
         coverity_root = output_root / "coverity" / build.build_id
         coverity_root.mkdir(parents=True, exist_ok=True)
         coverity_path = coverity_root / "coverity.yaml"
         coverity_path.write_text(generate_coverity_yaml(build), encoding="utf-8")
         written_files.append(coverity_path)
+
+    repository_links_path = output_root / "repository-links.json"
+    repository_links_text = _generate_repository_links(repository_link_entries)
+    repository_links_path.write_text(repository_links_text, encoding="utf-8")
+    written_files.append(repository_links_path)
+    repository_links_summary_path = output_root / "repository-links-summary.txt"
+    repository_links_summary_path.write_text(
+        _generate_repository_links_summary(repository_links_text),
+        encoding="utf-8",
+    )
+    written_files.append(repository_links_summary_path)
 
     scripts_root = output_root / "scripts"
     index_path = scripts_root / "index.json"
@@ -177,6 +202,17 @@ def _generate_scripts_bundle_readme(
         f"- Compiler: {build.compiler}\n"
         f"- Python command: {'python' if build.requirements.os.lower() == 'windows' else 'python3'}\n"
         f"- Working subPath: `{build.build.sub_path}`\n\n"
+        "## 저장소 연결\n\n"
+        f"- Provider: {build.repository.provider}\n"
+        f"- Project key: {build.repository.project_key}\n"
+        f"- Repo slug: {build.repository.repo_slug}\n"
+        f"- Linked repository name: `{build.repository.project_key}/{build.repository.repo_slug}`\n"
+        f"- Linkage mode: `{build.repository.linkage_mode}`\n"
+        f"- Bamboo application link: `{_repository_application_link(build)}`\n"
+        f"- Branches: {', '.join(build.repository.branches)}\n"
+        f"- Branch trigger policy: {_format_branch_trigger_policy_text(build.repository.branches)}\n"
+        f"- Branch matching pattern: `{_branch_matching_pattern(build.repository.branches)}`\n"
+        f"- Additional registration required: {'yes' if build.repository.linkage_mode == 'create_if_missing' else 'no'}\n\n"
         "## Task 파일 매핑\n\n"
         + "\n".join(task_lines)
         + "\n\n"
@@ -196,6 +232,7 @@ def _generate_scripts_bundle_manifest(
     launcher_scripts: dict[str, str],
     generated_at_utc: str,
     source_revision: str,
+    prepare_context: dict | None,
 ) -> str:
     launcher_extension = ".bat" if build.requirements.os.lower() == "windows" else ".sh"
     python_asset_sources = get_python_script_asset_sources(build)
@@ -234,6 +271,8 @@ def _generate_scripts_bundle_manifest(
             "commands": build.build.runtime_requirements.commands,
             "envVars": build.build.runtime_requirements.env_vars,
         },
+        "repository": _build_repository_link_entry(build),
+        "prepareContext": prepare_context or {"variables": {}},
         "tasks": tasks,
     }
     payload["bundleContentSha256"] = _sha256_text(
@@ -246,6 +285,8 @@ def _generate_scripts_bundle_manifest(
                 "pythonCommand": payload["pythonCommand"],
                 "workingSubPath": payload["workingSubPath"],
                 "runtimeRequirements": payload["runtimeRequirements"],
+                "repository": payload["repository"],
+                "prepareContext": payload["prepareContext"],
                 "tasks": payload["tasks"],
             },
             ensure_ascii=False,
@@ -276,6 +317,17 @@ def _generate_scripts_bundle_summary(build: BuildDefinition, manifest_text: str)
         f"bundleSha256={manifest['bundleSha256']}",
         f"runtime.commands={','.join(manifest['runtimeRequirements']['commands'])}",
         f"runtime.envVars={','.join(manifest['runtimeRequirements']['envVars'])}",
+        f"repository.provider={manifest['repository']['provider']}",
+        f"repository.projectKey={manifest['repository']['projectKey']}",
+        f"repository.repoSlug={manifest['repository']['repoSlug']}",
+        f"repository.linkedRepositoryName={manifest['repository']['linkedRepositoryName']}",
+        f"repository.linkageMode={manifest['repository']['linkageMode']}",
+        f"repository.applicationLink={manifest['repository']['applicationLink']}",
+        f"repository.branches={','.join(manifest['repository']['branches'])}",
+        f"repository.branchTriggerPolicy={','.join(_format_branch_trigger_policy_entries(manifest['repository']['branches']))}",
+        f"repository.branchMatchingPattern={manifest['repository']['branchMatchingPattern']}",
+        f"repository.requiresRegistration={str(manifest['repository']['requiresRepositoryRegistration']).lower()}",
+        f"prepareContext.variables={','.join(sorted(manifest['prepareContext'].get('variables', {}).keys()))}",
     ]
 
     for task in manifest["tasks"]:
@@ -306,6 +358,7 @@ def _build_scripts_index_entry(build: BuildDefinition, manifest_text: str) -> di
         "sourceRevision": manifest["sourceRevision"],
         "os": build.requirements.os,
         "compiler": build.compiler,
+        "linkageMode": manifest["repository"]["linkageMode"],
         "bundlePath": f"scripts/{build.build_id}",
         "bundleManifest": f"scripts/{build.build_id}/manifest.json",
         "bundleSummary": f"scripts/{build.build_id}/bundle-summary.txt",
@@ -344,6 +397,7 @@ def _generate_scripts_index_summary(index_text: str) -> str:
                 f"bundle.{build_id}.sourceRevision={bundle['sourceRevision']}",
                 f"bundle.{build_id}.os={bundle['os']}",
                 f"bundle.{build_id}.compiler={bundle['compiler']}",
+                f"bundle.{build_id}.linkageMode={bundle['linkageMode']}",
                 f"bundle.{build_id}.path={bundle['bundlePath']}",
                 f"bundle.{build_id}.manifest={bundle['bundleManifest']}",
                 f"bundle.{build_id}.summary={bundle['bundleSummary']}",
@@ -356,6 +410,82 @@ def _generate_scripts_index_summary(index_text: str) -> str:
 
 def _generated_at_utc() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _build_repository_link_entry(build: BuildDefinition) -> dict[str, Any]:
+    return {
+        "buildId": build.build_id,
+        "planKey": build.plan_key,
+        "provider": build.repository.provider,
+        "projectKey": build.repository.project_key,
+        "repoSlug": build.repository.repo_slug,
+        "linkedRepositoryName": f"{build.repository.project_key}/{build.repository.repo_slug}",
+        "linkageMode": build.repository.linkage_mode,
+        "applicationLink": _repository_application_link(build),
+        "branches": list(build.repository.branches),
+        "branchTriggerPolicy": [
+            {
+                "branch": branch,
+                "order": index,
+                "enabled": True,
+            }
+            for index, branch in enumerate(build.repository.branches, start=1)
+        ],
+        "branchMatchingPattern": _branch_matching_pattern(build.repository.branches),
+        "requiresRepositoryRegistration": build.repository.linkage_mode == "create_if_missing",
+    }
+
+
+def _generate_repository_links(entries: list[dict[str, Any]]) -> str:
+    payload = {"entries": sorted(entries, key=lambda entry: entry["buildId"])}
+    return json.dumps(payload, ensure_ascii=False, indent=2) + "\n"
+
+
+def _generate_repository_links_summary(repository_links_text: str) -> str:
+    repository_links = json.loads(repository_links_text)
+    lines: list[str] = []
+    for entry in repository_links["entries"]:
+        build_id = entry["buildId"]
+        lines.extend(
+            [
+                f"buildId={build_id}",
+                f"planKey={entry['planKey']}",
+                f"repository.provider={entry['provider']}",
+                f"repository.projectKey={entry['projectKey']}",
+                f"repository.repoSlug={entry['repoSlug']}",
+                f"repository.linkedRepositoryName={entry['linkedRepositoryName']}",
+                f"repository.linkageMode={entry['linkageMode']}",
+                f"repository.applicationLink={entry['applicationLink']}",
+                f"repository.branches={','.join(entry['branches'])}",
+                f"repository.branchTriggerPolicy={','.join(_format_branch_trigger_policy_entries(entry['branches']))}",
+                f"repository.branchMatchingPattern={entry['branchMatchingPattern']}",
+                f"repository.requiresRegistration={str(entry['requiresRepositoryRegistration']).lower()}",
+                "",
+            ]
+        )
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def _format_branch_trigger_policy_entries(branches: list[str]) -> list[str]:
+    return [f"{branch}:{index}:enabled" for index, branch in enumerate(branches, start=1)]
+
+
+def _format_branch_trigger_policy_text(branches: list[str]) -> str:
+    return ", ".join(
+        f"{branch}(order={index}, enabled=true)"
+        for index, branch in enumerate(branches, start=1)
+    )
+
+
+def _branch_matching_pattern(branches: list[str]) -> str:
+    escaped = [branch.replace("\\", "\\\\").replace("|", "\\|") for branch in branches]
+    return "^(" + "|".join(escaped) + ")$"
+
+
+def _repository_application_link(build: BuildDefinition) -> str:
+    if build.repository.application_link and build.repository.application_link.strip():
+        return build.repository.application_link
+    return "BITBUCKET_SERVER"
 
 
 def _source_revision() -> str:

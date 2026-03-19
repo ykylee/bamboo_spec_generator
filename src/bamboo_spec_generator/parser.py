@@ -26,6 +26,7 @@ def parse_build_definition_payload(raw: dict[str, Any], *, year: str) -> BuildDe
         project_key=repository_raw.get("projectKey", ""),
         repo_slug=repository_raw.get("repoSlug", ""),
         linkage_mode=repository_raw.get("linkageMode", "linked"),
+        application_link=repository_raw.get("applicationLink"),
         branches=list(repository_raw.get("branches", ["dev", "release", "master"])),
     )
 

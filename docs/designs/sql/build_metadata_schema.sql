@@ -15,7 +15,6 @@ create table build_plan (
     build_id varchar(255) not null unique,
     plan_key varchar(64) not null unique,
     latest_version_id uuid,
-    active_definition_id uuid,
     created_at timestamptz not null default now(),
     updated_at timestamptz not null default now()
 );
@@ -52,6 +51,7 @@ create table build_plan_definition (
     id uuid primary key,
     build_plan_id uuid not null references build_plan(id),
     project_id uuid not null references project(id),
+    year varchar(16) not null,
     source_kind varchar(32) not null,
     definition_json jsonb not null,
     definition_hash varchar(128) not null,
@@ -129,10 +129,6 @@ create table static_analysis_result (
 alter table build_plan
     add constraint fk_build_plan_latest_version
     foreign key (latest_version_id) references build_version(id);
-
-alter table build_plan
-    add constraint fk_build_plan_active_definition
-    foreign key (active_definition_id) references build_plan_definition(id);
 
 alter table build_version
     add constraint fk_build_version_latest_execution

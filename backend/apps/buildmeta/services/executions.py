@@ -34,10 +34,35 @@ def start_execution(
     started_at: datetime | None = None,
 ) -> dict:
     plan = BuildPlan.objects.select_for_update().select_related("latest_version").get(plan_key=plan_key)
-    version = BuildVersion.objects.filter(build_plan=plan, commit_hash=commit_hash).first()
+    existing_execution = (
+        BuildExecution.objects.select_related("build_version")
+        .filter(build_plan=plan, build_number=build_number)
+        .order_by("-created_at")
+        .first()
+    )
+    if existing_execution is not None:
+        if existing_execution.commit_hash != commit_hash:
+            raise ValueError(
+                f"Build number '{build_number}' for plan '{plan_key}' is already associated with a different commit."
+            )
+        version = existing_execution.build_version
+        version.latest_execution = existing_execution
+        version.save(update_fields=["latest_execution", "updated_at"])
+        return {
+            "buildVersionId": str(version.id),
+            "buildExecutionId": str(existing_execution.id),
+            "version": version.version_text,
+            "reusedExistingVersion": True,
+        }
+
+    version = BuildVersion.objects.filter(
+        build_plan=plan,
+        commit_hash=commit_hash,
+    ).order_by("-major", "-minor", "-patch", "-created_at").first()
     reused_existing_version = version is not None
     if version is None:
         major, minor, patch = _next_version_numbers(plan.latest_version, branch_kind)
+        BuildVersion.objects.filter(build_plan=plan, is_latest=True).update(is_latest=False)
         version = BuildVersion.objects.create(
             build_plan=plan,
             version_text=f"v{major}.{minor}.{patch}",
@@ -48,7 +73,6 @@ def start_execution(
             commit_hash=commit_hash,
             is_latest=True,
         )
-        BuildVersion.objects.filter(build_plan=plan).exclude(pk=version.pk).update(is_latest=False)
         plan.latest_version = version
         plan.save(update_fields=["latest_version", "updated_at"])
 
@@ -112,9 +136,10 @@ def finish_execution(
     version.latest_success = success
     version.save(update_fields=["latest_execution", "latest_success", "updated_at"])
 
-    plan = execution.build_plan
-    plan.latest_version = version
-    plan.save(update_fields=["latest_version", "updated_at"])
+    if version.is_latest:
+        plan = execution.build_plan
+        plan.latest_version = version
+        plan.save(update_fields=["latest_version", "updated_at"])
 
     return {
         "buildExecutionId": str(execution.id),

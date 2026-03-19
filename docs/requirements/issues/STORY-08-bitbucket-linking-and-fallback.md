@@ -8,7 +8,8 @@
 
 - 부분 구현
 - `projectKey/repoSlug` 기반 linked repository 이름 생성은 구현되었다.
-- 미등록 저장소 대응과 `create_if_missing` 실질 동작은 아직 미구현이다.
+- `create_if_missing`일 때 plan-local `BitbucketServerRepository` 생성과 branch management/trigger 생성이 구현되었다.
+- 운영값인 `repository.applicationLink`를 DB/API/운영 설정과 연동하는 흐름은 아직 미구현이다.
 
 ## 우선순위
 
@@ -16,8 +17,8 @@
 
 ## 다음 구현 포인트
 
-- `linkageMode=create_if_missing`일 때 생성 결과에 남길 메타데이터 형식 확정
-- 생성기에서 `linked`와 `create_if_missing`를 실제로 분기 처리
+- `repository.applicationLink` 값을 JSON 외 입력 소스(DB/API/환경설정)와 연결
+- Bamboo 운영 환경별 Application Link naming 규칙 확정
 
 ## 요약
 

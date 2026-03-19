@@ -14,14 +14,14 @@
 
 ## 설명
 
-타겟 빌드 정의에 포함할 필드와 필수/선택 속성을 정하고, 연도별 관리 방식을 디렉터리 기반으로 할지 메타데이터 기반으로 할지 결정한다. JSON 스키마에는 빌드 상세 설정뿐 아니라 Bitbucket 저장소 식별을 위한 `repository.projectKey`, `repository.repoSlug`, 선택적 `repository.linkageMode`, `repository.branches` 구조도 포함해야 한다. 결과물은 개발과 운영이 모두 참고할 수 있는 JSON 예시와 구조 규칙을 포함해야 한다.
+타겟 빌드 정의에 포함할 필드와 필수/선택 속성을 정하고, 연도별 관리 방식을 디렉터리 기반으로 할지 메타데이터 기반으로 할지 결정한다. JSON 스키마에는 빌드 상세 설정뿐 아니라 Bitbucket 저장소 식별을 위한 `repository.projectKey`, `repository.repoSlug`, 선택적 `repository.linkageMode`, `repository.branches`, `repository.applicationLink` 구조도 포함해야 한다. 결과물은 개발과 운영이 모두 참고할 수 있는 JSON 예시와 구조 규칙을 포함해야 한다.
 
 ## 수용 기준
 
 - JSON 스키마 초안이 정의되어 있다.
 - 필수 필드와 선택 필드가 구분되어 있다.
 - 저장소 연결용 `repository` 필드 구조가 정의되어 있다.
-- `projectKey`, `repoSlug`, `linkageMode`, `branches`의 필수/기본값 규칙이 정의되어 있다.
+- `projectKey`, `repoSlug`, `linkageMode`, `branches`, `applicationLink`의 필수/기본값 규칙이 정의되어 있다.
 - 연도별 관리 방식이 정의되어 있다.
 - JSON 예시가 최소 1개 이상 제공된다.
 - 후속 구현이 이 구조를 기준으로 진행 가능하다.

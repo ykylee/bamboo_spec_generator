@@ -21,6 +21,7 @@ class ScriptAssetError(Exception):
 class PythonScriptAsset:
     template: str
     command_support: str
+    execution_support: str
     pre_run: str
 
 
@@ -29,7 +30,9 @@ def load_python_script_assets(build: BuildDefinition) -> dict[str, str]:
     for script_name, task_name in _python_task_mapping().items():
         asset = _compose_python_asset(task_name, build)
         rendered_assets[script_name] = (
-            asset.template.replace("{{COMMAND_SUPPORT}}", asset.command_support).replace("{{PRE_RUN}}", asset.pre_run)
+            asset.template.replace("{{COMMAND_SUPPORT}}", asset.command_support)
+            .replace("{{EXECUTION_SUPPORT}}", asset.execution_support)
+            .replace("{{PRE_RUN}}", asset.pre_run)
         )
     return rendered_assets
 
@@ -39,6 +42,7 @@ def get_python_script_asset_sources(build: BuildDefinition) -> dict[str, dict[st
     for script_name, task_name in _python_task_mapping().items():
         template_path = COMMON_PY_ROOT / f"{task_name}.py"
         command_support_path: Path | None = None
+        execution_support_path: Path | None = FRAGMENTS_PY_ROOT / "execution_support.py"
         pre_run_path: Path | None = None
 
         if _uses_msbuild(build) and task_name in {"prepare_build", "run_build", "run_custom_analysis"}:
@@ -50,6 +54,7 @@ def get_python_script_asset_sources(build: BuildDefinition) -> dict[str, dict[st
         sources[script_name] = {
             "template": _relative_path(template_path),
             "commandSupport": _relative_path(command_support_path),
+            "executionSupport": _relative_path(execution_support_path),
             "preRun": _relative_path(pre_run_path),
         }
     return sources
@@ -66,7 +71,13 @@ def _compose_python_asset(task_name: str, build: BuildDefinition) -> PythonScrip
     else:
         command_support = ""
         pre_run = ""
-    return PythonScriptAsset(template=template, command_support=command_support, pre_run=pre_run)
+    execution_support = _read_asset(FRAGMENTS_PY_ROOT / "execution_support.py")
+    return PythonScriptAsset(
+        template=template,
+        command_support=command_support,
+        execution_support=execution_support,
+        pre_run=pre_run,
+    )
 
 
 def _read_asset(asset_path: Path) -> str:

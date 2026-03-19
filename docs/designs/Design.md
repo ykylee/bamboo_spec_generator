@@ -16,7 +16,7 @@
 
 - 1~5장은 현재 구현과 직접 연결되는 상세 설계다.
 - 6~12장은 향후 DB 및 운영 메타데이터 확장을 위한 상세 설계다.
-- 저장소 연결의 `branches`와 `create_if_missing`는 현재 입력/검증에는 반영되어 있지만, 실제 Bamboo 트리거 생성과 미등록 저장소 처리 로직은 아직 구현되지 않았다.
+- 저장소 연결의 `branches`, `create_if_missing`, `applicationLink`는 현재 Java Specs 생성까지 반영된다. 남은 범위는 운영 환경별 application link 값 공급과 세부 운영 정책 확정이다.
 
 ## 1. 입력 JSON 설계
 
@@ -24,6 +24,7 @@
 
 - 입력 파일은 `build_info_json/<year>/<buildId>.json` 구조를 권장한다.
 - 연도는 JSON 내부 필드가 아니라 디렉터리명에서 해석한다.
+- DB 기반 활성 정의에서는 디렉터리 정보가 없으므로, 연도를 `BuildPlanDefinition.year` 같은 별도 컬럼으로 저장한다.
 
 ### 최상위 구조
 
@@ -40,6 +41,7 @@
     "projectKey": "SAMPLE",
     "repoSlug": "sample-app-api",
     "linkageMode": "linked",
+    "applicationLink": "BITBUCKET_SERVER",
     "branches": ["dev", "release", "master"]
   },
   "requirements": {
@@ -73,6 +75,7 @@
 
 - `buildId`, `planKey`, `language`, `compiler`, `repository`, `requirements`, `build`는 필수다.
 - `repository.branches`는 생략 시 `dev`, `release`, `master`를 기본값으로 사용한다.
+- `repository.applicationLink`는 `create_if_missing`일 때 필수이며 Bamboo Application Link 이름을 의미한다.
 - `build.subPath`는 저장소 내부 상대경로여야 한다.
 - `staticAnalysis.customTool.commands`에는 `analyze {buildCommand}` 패턴이 포함되어야 한다.
 - `build.runtimeRequirements.commands`와 `build.runtimeRequirements.envVars`는 현재 구현 기준 필수다.
@@ -85,6 +88,7 @@
 - `projectKey`
 - `repoSlug`
 - `linkageMode`
+- `applicationLink`
 - `branches`
 
 ### 연결 모드
@@ -92,15 +96,15 @@
 - `linked`
   - Bamboo에 사전 등록된 linked repository 참조
 - `create_if_missing`
-  - 후속 등록이 가능하도록 식별 정보를 생성물에 남김
-  - 현재 미구현
+  - Bamboo plan-local Bitbucket repository를 생성한다.
+  - `applicationLink`를 통해 Bamboo의 Bitbucket Application Link 이름을 참조한다.
 
 ### 브랜치 정책
 
 - 기본 브랜치는 `dev`, `release`, `master`
 - 생성 순서는 `dev=1`, `release=2`, `master=3`
 - `release`는 초기 범위에서 단일 브랜치명
-- 현재 구현은 브랜치 유효성 검증만 수행하고 실제 트리거 생성은 하지 않는다.
+- 현재 구현은 `repositoryBranches(...)`, `planBranchManagement(...)`, `BitbucketServerTrigger` 생성까지 수행한다.
 
 ## 3. 공통 워크플로우 및 작업 하위 경로 설계
 
@@ -267,13 +271,13 @@ erDiagram
         string build_id
         string plan_key
         string latest_version_id FK
-        string active_definition_id FK
     }
 
     BuildPlanDefinition {
         string id PK
         string build_plan_id FK
         string project_id FK
+        string year
         string source_kind
         boolean is_active
     }
@@ -414,7 +418,6 @@ erDiagram
   - `build_id`: not null
   - `plan_key`: not null
   - `latest_version_id`: nullable FK -> `BuildVersion.id`
-  - `active_definition_id`: nullable FK -> `BuildPlanDefinition.id`
   - `created_at`, `updated_at`: not null
 - 제약
   - `build_id` unique
@@ -427,6 +430,7 @@ erDiagram
   - `id`: PK
   - `build_plan_id`: FK -> `BuildPlan.id`, not null
   - `project_id`: FK -> `Project.id`, not null
+  - `year`: not null
   - `source_kind`: not null
   - `definition_json`: not null
   - `definition_hash`: not null
@@ -434,6 +438,7 @@ erDiagram
   - `created_at`: not null
 - 제약
   - `(build_plan_id, definition_hash)` unique
+  - JSON 입력에서 해석한 연도를 DB 적재 시 별도 컬럼으로 보존한다.
   - 활성 정의는 플랜당 1건만 허용하는 partial unique index 후보
 
 #### BuildVersion
@@ -542,7 +547,7 @@ erDiagram
 1. 입력: `plan_key`, `commit_hash`
 2. `BuildPlan.id` 조회
 3. `BuildVersion(build_plan_id, commit_hash)` 조회
-4. 있으면 기존 `BuildVersion.id` 재사용
+4. 있으면 기존 `BuildVersion.id`를 재사용하고, 중복 데이터가 존재하면 가장 높은 버전을 우선 선택
 5. 없으면 브랜치 규칙에 따라 새 버전 생성
 6. 항상 새 `BuildExecution` 생성
 
@@ -581,7 +586,7 @@ erDiagram
 ### 처리 순서
 
 1. `build_plan_id + commit_hash`로 기존 `BuildVersion` 조회
-2. 있으면 해당 버전 재사용
+2. 있으면 해당 버전을 재사용하고, 중복 데이터가 있으면 가장 높은 버전을 대표값으로 선택
 3. `BuildExecution`은 항상 새로 생성
 4. 종료 후 `BuildVersion`의 최신 요약 필드 갱신
 5. 필요 시 `BuildPlan.latest_version_id` 유지 또는 갱신
@@ -658,7 +663,7 @@ erDiagram
 ## 12. 무결성 고려사항
 
 - `(build_plan_id, version_text)`는 유일해야 한다.
-- `(build_plan_id, commit_hash)`는 버전 레벨 유일 제약 후보다.
+- `(build_plan_id, commit_hash)`는 버전 레벨 유일 제약이다.
 - `latest_version_id`는 같은 플랜의 버전만 가리켜야 한다.
 - 최신 포인터 갱신과 실행 결과 저장은 가능하면 같은 트랜잭션 경계에서 처리한다.
 
@@ -696,10 +701,12 @@ erDiagram
 
 - `db_loader.py`
   - 활성 `BuildPlanDefinition`을 조회해 내부 `BuildDefinition`으로 변환
+  - `definition_json`와 별도 `year` 컬럼을 조합해 내부 모델을 구성
 - `db_context_loader.py`
   - 준비 스테이지 변수 컨텍스트 조회
 - `version_resolver.py`
-  - `plan_key`, `branch_kind`, `commit_hash` 기준 버전 조회/생성
+  - `plan_key`, `commit_hash` 기준 버전 조회/생성
+  - 중복 데이터가 있으면 가장 높은 버전을 대표값으로 선택
 - `execution_recorder.py`
   - 빌드 시작/종료, 성공 여부, 실패 위치 저장
 - `static_analysis_recorder.py`
@@ -782,11 +789,10 @@ backend/
 - `BuildPlan`
   - `build_id`, `plan_key`
   - `ForeignKey(BuildVersion, null=True, on_delete=PROTECT)` as `latest_version`
-  - `ForeignKey(BuildPlanDefinition, null=True, on_delete=PROTECT)` as `active_definition`
 - `BuildPlanDefinition`
   - `ForeignKey(BuildPlan)`
   - `ForeignKey(Project)`
-  - `source_kind`, `definition_json`, `definition_hash`, `is_active`
+  - `year`, `source_kind`, `definition_json`, `definition_hash`, `is_active`
 - `BuildVersion`
   - `ForeignKey(BuildPlan)`
   - `version_text`, `major`, `minor`, `patch`, `branch_kind`, `commit_hash`
@@ -852,6 +858,7 @@ backend/
 
 - `GET /api/v1/build-plans/{plan_key}/active-definition`
 - 목적: 생성기가 활성 빌드 정의를 조회
+- 응답의 `year`는 `definition` JSON 내부가 아니라 DB의 `BuildPlanDefinition.year` 필드에서 제공한다.
 - 응답 예시:
 
 ```json

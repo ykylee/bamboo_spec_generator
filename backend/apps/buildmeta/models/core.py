@@ -35,13 +35,6 @@ class BuildPlan(TimestampedModel):
         on_delete=models.PROTECT,
         related_name="+",
     )
-    active_definition = models.ForeignKey(
-        "buildmeta.BuildPlanDefinition",
-        null=True,
-        blank=True,
-        on_delete=models.PROTECT,
-        related_name="+",
-    )
 
     def __str__(self) -> str:
         return self.plan_key
@@ -99,6 +92,7 @@ class BuildPlanDefinition(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     build_plan = models.ForeignKey(BuildPlan, on_delete=models.CASCADE, related_name="definitions")
     project = models.ForeignKey(Project, on_delete=models.CASCADE, related_name="definitions")
+    year = models.CharField(max_length=16)
     source_kind = models.CharField(max_length=32, choices=SOURCE_KIND_CHOICES)
     definition_json = models.JSONField()
     definition_hash = models.CharField(max_length=128)

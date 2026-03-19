@@ -19,19 +19,19 @@ class ScriptRenderContext:
     replacements: dict[str, str]
 
 
-def render_python_scripts(build: BuildDefinition) -> dict[str, str]:
+def render_python_scripts(build: BuildDefinition, prepare_context: dict | None = None) -> dict[str, str]:
     assets = load_python_script_assets(build)
-    context = ScriptRenderContext(replacements=_build_replacements(build))
+    context = ScriptRenderContext(replacements=_build_replacements(build, prepare_context=prepare_context))
     return {script_name: _render_template(template, context.replacements) for script_name, template in assets.items()}
 
 
-def render_python_launcher_scripts(build: BuildDefinition) -> dict[str, str]:
+def render_python_launcher_scripts(build: BuildDefinition, prepare_context: dict | None = None) -> dict[str, str]:
     extension = _launcher_extension(build)
     replacements = {
         "{{PYTHON_COMMAND}}": _python_command(build),
     }
     rendered: dict[str, str] = {}
-    for script_name in render_python_scripts(build):
+    for script_name in render_python_scripts(build, prepare_context=prepare_context):
         template = _read_launcher_template(build, script_name.removesuffix(".py"))
         launcher_name = script_name.removesuffix(".py") + extension
         rendered[launcher_name] = _render_template(
@@ -118,10 +118,12 @@ def _escape_yaml(value: str) -> str:
     return value.replace("\\", "\\\\").replace('"', '\\"')
 
 
-def _build_replacements(build: BuildDefinition) -> dict[str, str]:
+def _build_replacements(build: BuildDefinition, *, prepare_context: dict | None = None) -> dict[str, str]:
     return {
         "{{SUB_PATH}}": repr(build.build.sub_path),
+        "{{PLAN_KEY}}": repr(build.plan_key),
         "{{PREPARE_COMMAND}}": repr(build.build.prepare_command),
+        "{{PREPARE_CONTEXT_EXPORTS}}": _prepare_context_exports(prepare_context),
         "{{BUILD_COMMAND}}": repr(build.build.build_command),
         "{{COVERITY_CONFIG}}": repr(_generate_coverity_yaml(build)),
         "{{CUSTOM_TOOL_COMMANDS}}": _format_commands(_render_custom_tool_commands(build)),
@@ -134,6 +136,18 @@ def _compiler_env_var(compiler: str) -> str:
     if compiler.startswith("vs"):
         return compiler.upper() + "_ENV"
     return "MSBUILD_ENV"
+
+
+def _prepare_context_exports(prepare_context: dict | None) -> str:
+    if not prepare_context:
+        return "    pass"
+    variables = prepare_context.get("variables", {})
+    if not variables:
+        return "    pass"
+    lines = []
+    for key, value in sorted(variables.items()):
+        lines.append(f"    os.environ[{key!r}] = {str(value)!r}")
+    return "\n".join(lines)
 
 
 def _python_command(build: BuildDefinition) -> str:

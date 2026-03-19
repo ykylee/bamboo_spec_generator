@@ -32,12 +32,12 @@ class ProjectBuildAdmin(admin.ModelAdmin):
 
 @admin.register(BuildPlan)
 class BuildPlanAdmin(admin.ModelAdmin):
-    list_display = ("plan_key", "build_id", "latest_version", "active_definition")
+    list_display = ("plan_key", "build_id", "latest_version")
 
 
 @admin.register(BuildPlanDefinition)
 class BuildPlanDefinitionAdmin(admin.ModelAdmin):
-    list_display = ("build_plan", "project", "source_kind", "definition_hash", "is_active", "created_at")
+    list_display = ("build_plan", "project", "year", "source_kind", "definition_hash", "is_active", "created_at")
 
 
 @admin.register(BuildVersion)

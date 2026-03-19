@@ -18,11 +18,9 @@
 
 ## 아직 미구현인 범위
 
-- JSON 정의의 운영 DB 자동 적재/동기화
 - Bamboo 준비 스테이지와 운영 API의 실제 변수 주입 연동
 - Bamboo 실행 결과, 버전, 실패 위치, 정적분석 결과의 end-to-end 적재
-- Bitbucket 브랜치별 Bamboo 트리거 생성
-- `repository.linkageMode=create_if_missing`의 실질적 생성 동작
+- `repository.applicationLink` 운영값을 DB/API/환경설정과 연동하는 흐름
 
 현재 운영 백엔드는 스캐폴딩과 기본 기능이 구현되었지만, 운영 데이터 적재/조회 흐름은 아직 확장 중입니다.
 
@@ -73,6 +71,8 @@
 - `runtimeRequirements.envVars`: 에이전트에 있어야 하는 환경변수 목록
 - `postBuildTrigger`: 후속 플랜 트리거 설정
 
+JSON 입력 모드에서 연도는 JSON 본문 필드가 아니라 `build_info_json/<year>/...` 경로의 디렉터리명에서 해석합니다. 반대로 운영 백엔드의 DB 참조 모드에서는 같은 정보를 파일 경로에서 복원할 수 없으므로, `BuildPlanDefinition.year` 같은 별도 필드로 저장하고 API 응답에서도 이 값을 함께 전달해야 합니다.
+
 중요한 점은 `prepareCommand`와 `buildCommand`가 생성기가 내부적으로 쓰는 스크립트 경로가 아니라, 실제 프로젝트에서 수행할 원본 준비/빌드 명령이라는 점입니다.
 
 예제 파일:
@@ -108,7 +108,7 @@ MSBuild 기반 플랜은 생성된 inline Python 코드에서 실제 MSBuild 호
 
 입력 JSON의 `runtimeRequirements`는 Bamboo capability로 직접 강제하기 어려운 런타임 전제 조건을 명시적으로 남기기 위한 블록입니다. 예를 들어 `coverity`, `custom-tool`, `trigger-plan`, `VS2022_ENV` 같은 항목을 각 빌드 단위로 기록합니다.
 
-`repository.branches`와 `repository.linkageMode`는 현재 입력/검증에는 반영되어 있지만, 실제 Java Specs 생성에서는 브랜치별 트리거와 `create_if_missing` 분기 처리까지는 구현되지 않았습니다.
+`repository.branches`, `repository.linkageMode`, `repository.applicationLink`는 실제 Java Specs 생성에도 반영됩니다. `linked`는 linked repository를 참조하고, `create_if_missing`는 plan-local `BitbucketServerRepository`를 생성합니다. 브랜치별 트리거 정책과 branch management도 함께 생성됩니다.
 
 ## 스크립트 자산 관리
 
@@ -148,14 +148,20 @@ MSBuild 기반 플랜은 생성된 inline Python 코드에서 실제 MSBuild 호
 - `--db-init-schema`: `docs/designs/sql/build_metadata_schema.sql` 스키마 적용
 - `python3 manage.py init_dev_db`: SQLite 개발 DB 초기화
 - `python3 manage.py init_postgres_db --force`: PostgreSQL schema 초기화
+- `python3 manage.py import_build_definitions --input-root ../build_info_json`: JSON 빌드 정의를 운영 DB에 적재
+- `python3 manage.py sync_build_definitions --input-root ../build_info_json --deactivate-missing`: JSON 빌드 정의를 운영 DB와 반복 동기화
 
 둘 다 Python DB 드라이버 대신 외부 `psql` 명령을 사용합니다.
+
+현재 `BuildPlanDefinition.year`는 DB 참조 모드의 명시적 메타데이터입니다. 기존 로컬 DB가 이 필드 없이 만들어졌다면 자동 백필 대신 DB 초기화 후 재적재를 기준으로 운영합니다.
 
 운영 백엔드 방향으로는 다음 구조가 추가되었습니다.
 
 - `backend/`: Django 기반 운영 백엔드 스캐폴딩
 - `src/bamboo_spec_generator/api_client.py`: 생성기에서 운영 API를 호출하기 위한 클라이언트
 - `--api-plan-key`: 운영 API에서 활성 빌드 정의를 읽어 생성하는 CLI 진입점
+
+운영 API의 활성 빌드 정의 응답은 `definition` JSON 본문과 별도로 `year` 필드를 포함해야 하며, 생성기는 이 값을 내부 `BuildDefinition.year`로 사용합니다.
 
 ## 요구 환경
 
@@ -188,6 +194,22 @@ mvn -version
 ```bash
 python3 -m pip install -r requirements-backend.txt
 ```
+
+처음 작업하는 로컬 환경 권장 순서:
+
+```bash
+python3 -m venv .venv
+. .venv/bin/activate
+python -m pip install -r requirements-backend.txt
+cp backend/.env.example backend/.env
+set -a
+. backend/.env
+set +a
+python backend/manage.py migrate
+python backend/manage.py check
+```
+
+현재 `backend/manage.py`는 `backend/.env`를 자동으로 읽지 않으므로, 실행 전에 셸에서 직접 환경변수를 로드해야 합니다.
 
 Windows `cmd` 기준:
 

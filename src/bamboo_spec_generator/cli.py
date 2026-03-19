@@ -63,11 +63,12 @@ def main() -> int:
         try:
             client = OperationsApiClient(OperationsApiConfig.from_env())
             builds = [client.get_build_definition(args.api_plan_key)]
+            prepare_contexts = {args.api_plan_key: client.get_prepare_context(args.api_plan_key)}
             validate_build_definitions(builds)
         except (OperationsApiError, ValidationError) as error:
             print(f"API generation failed: {error}")
             return 1
-        written_files = write_specs_project(output_root, builds)
+        written_files = write_specs_project(output_root, builds, prepare_contexts=prepare_contexts)
         print(f"Processed 1 build definition from operations API for plan: {args.api_plan_key}")
         print(f"Generated {len(written_files)} files under: {output_root}")
         return 0

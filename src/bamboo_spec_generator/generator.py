@@ -16,18 +16,28 @@ def generate_plan_java(build: BuildDefinition, package_name: str) -> str:
     description = _escape_java(build.description or build.name)
     project_key = _project_key(build.year)
     linked_repository_name = _linked_repository_name(build)
+    repository_branches = _repository_branches_java_array(build)
+    repository_branch_policy_entries = _repository_branch_policy_java_entries(build)
     python_scripts = generate_python_scripts(build)
     python_command = _python_command(build)
     python_wrapper_method = load_python_wrapper_method(build)
+    repository_metadata_comment = _repository_metadata_comment(build)
+    repository_attachment_chain = _repository_attachment_chain(build)
+    repository_factory_method = _repository_factory_method(build)
 
     return f"""package {package_name};
 
 import com.atlassian.bamboo.specs.api.BambooSpec;
+import com.atlassian.bamboo.specs.api.builders.applink.ApplicationLink;
 import com.atlassian.bamboo.specs.api.builders.plan.Plan;
 import com.atlassian.bamboo.specs.api.builders.plan.Job;
 import com.atlassian.bamboo.specs.api.builders.plan.Stage;
+import com.atlassian.bamboo.specs.api.builders.plan.branches.PlanBranchManagement;
 import com.atlassian.bamboo.specs.api.builders.project.Project;
 import com.atlassian.bamboo.specs.api.builders.requirement.Requirement;
+import com.atlassian.bamboo.specs.api.builders.repository.VcsRepositoryBranch;
+import com.atlassian.bamboo.specs.builders.repository.bitbucket.server.BitbucketServerRepository;
+import com.atlassian.bamboo.specs.builders.trigger.BitbucketServerTrigger;
 import com.atlassian.bamboo.specs.builders.task.ScriptTask;
 import com.atlassian.bamboo.specs.builders.task.VcsCheckoutTask;
 
@@ -37,6 +47,11 @@ public class {class_name} {{
     private static final String PLAN_KEY = "{build.plan_key}";
     private static final String YEAR = "{build.year}";
     private static final String LINKED_REPOSITORY = "{linked_repository_name}";
+    private static final String REPOSITORY_LINKAGE_MODE = "{build.repository.linkage_mode}";
+    private static final String[] REPOSITORY_BRANCHES = new String[] {{{repository_branches}}};
+    private static final String[] REPOSITORY_BRANCH_TRIGGER_POLICY = new String[] {{{repository_branch_policy_entries}}};
+    private static final String REPOSITORY_BRANCH_MATCHING_PATTERN = "{_escape_java(_repository_branch_matching_pattern(build))}";
+    private static final String BITBUCKET_APPLICATION_LINK = "{_escape_java(_bitbucket_application_link(build))}";
     private static final String PYTHON_COMMAND = "{python_command}";
     private static final String SCRIPT_DIRECTORY = ".bamboo-specs";
     private static final String PREPARE_BUILD_SCRIPT = {_java_text_block(python_scripts["prepare_build.py"], 4)};
@@ -54,9 +69,13 @@ public class {class_name} {{
             .key(PROJECT_KEY)
             .name("Generated Plans " + YEAR);
 
+{repository_metadata_comment}
         return new Plan(project, "{description}", PLAN_KEY)
             .description("{description}")
-            .linkedRepositories(LINKED_REPOSITORY)
+{repository_attachment_chain}
+            .repositoryBranches(repositoryBranches())
+            .planBranchManagement(planBranchManagement())
+            .triggers(repositoryTrigger())
             .stages(
                 prepareStage(),
                 buildStage(),
@@ -64,6 +83,23 @@ public class {class_name} {{
                 triggerFollowUpStage()
             );
     }}
+
+    private VcsRepositoryBranch[] repositoryBranches() {{
+        return new VcsRepositoryBranch[] {{
+{_repository_branches_builder(build, 3)}
+        }};
+    }}
+
+    private PlanBranchManagement planBranchManagement() {{
+        return new PlanBranchManagement()
+            .createForVcsBranchMatching(REPOSITORY_BRANCH_MATCHING_PATTERN);
+    }}
+
+    private BitbucketServerTrigger repositoryTrigger() {{
+        return new BitbucketServerTrigger();
+    }}
+
+{repository_factory_method}
 
     private Stage prepareStage() {{
         return new Stage("Prepare")
@@ -340,6 +376,80 @@ def _extra_capability_key(capability: str) -> str:
 
 def _linked_repository_name(build: BuildDefinition) -> str:
     return f"{build.repository.project_key}/{build.repository.repo_slug}"
+
+
+def _repository_branches_java_array(build: BuildDefinition) -> str:
+    return ", ".join(f'"{_escape_java(branch)}"' for branch in build.repository.branches)
+
+
+def _repository_metadata_comment(build: BuildDefinition) -> str:
+    comment_lines = [
+        f'        // Repository linkage mode: {build.repository.linkage_mode}',
+        f'        // Repository branches: {", ".join(build.repository.branches)}',
+        f'        // Branch trigger policy: {", ".join(_repository_branch_policy_comment_entries(build))}',
+    ]
+    if build.repository.linkage_mode == "create_if_missing":
+        comment_lines.append(
+            f"        // create_if_missing uses Bamboo application link: {_bitbucket_application_link(build)}"
+        )
+    return "\n".join(comment_lines)
+
+
+def _repository_branch_policy_java_entries(build: BuildDefinition) -> str:
+    return ", ".join(
+        f'"{_escape_java(branch)}:{index}:enabled"'
+        for index, branch in enumerate(build.repository.branches, start=1)
+    )
+
+
+def _repository_branch_policy_comment_entries(build: BuildDefinition) -> list[str]:
+    return [
+        f"{branch}(order={index}, enabled=true)"
+        for index, branch in enumerate(build.repository.branches, start=1)
+    ]
+
+
+def _repository_branch_matching_pattern(build: BuildDefinition) -> str:
+    escaped_branches = [branch.replace("\\", "\\\\").replace("|", "\\|") for branch in build.repository.branches]
+    return "^(" + "|".join(escaped_branches) + ")$"
+
+
+def _repository_branches_builder(build: BuildDefinition, indent_size: int) -> str:
+    indent = " " * indent_size
+    entries = []
+    for branch in build.repository.branches:
+        entries.append(
+            f'{indent}new VcsRepositoryBranch(LINKED_REPOSITORY, "{_escape_java(branch)}").branchDisplayName("{_escape_java(branch)}")'
+        )
+    return ",\n".join(entries)
+
+
+def _repository_attachment_chain(build: BuildDefinition) -> str:
+    if build.repository.linkage_mode == "create_if_missing":
+        return "            .planRepositories(createPlanRepository())"
+    return "            .linkedRepositories(LINKED_REPOSITORY)"
+
+
+def _repository_factory_method(build: BuildDefinition) -> str:
+    if build.repository.linkage_mode != "create_if_missing":
+        return ""
+
+    default_branch = build.repository.branches[0] if build.repository.branches else "dev"
+    return f"""    private BitbucketServerRepository createPlanRepository() {{
+        return new BitbucketServerRepository()
+            .name(LINKED_REPOSITORY)
+            .server(new ApplicationLink().name(BITBUCKET_APPLICATION_LINK))
+            .projectKey("{_escape_java(build.repository.project_key)}")
+            .repositorySlug("{_escape_java(build.repository.repo_slug)}")
+            .branch("{_escape_java(default_branch)}");
+    }}
+"""
+
+
+def _bitbucket_application_link(build: BuildDefinition) -> str:
+    if build.repository.application_link and build.repository.application_link.strip():
+        return build.repository.application_link
+    return "BITBUCKET_SERVER"
 
 
 
