@@ -13,6 +13,8 @@ venv/
 
 # Generated artifacts
 bamboo-specs/
+output/
+.playwright-cli/
 
 # Local backend database
 backend/db.sqlite3

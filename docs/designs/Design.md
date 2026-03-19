@@ -10,7 +10,7 @@
 
 ## 요약
 
-이 문서는 제품의 상세 설계를 한 곳에 모은다. 범위는 JSON 입력 스키마, 저장소 연결 및 브랜치 트리거, 작업 하위 경로, MSBuild 보정, 스크립트 자산 렌더링, 빌드 메타데이터 DB 모델, 운영 백엔드/API/조회 UI 설계다.
+이 문서는 제품의 상세 설계를 한 곳에 모은다. 범위는 JSON 입력 스키마, 저장소 연결 및 브랜치 트리거, 작업 하위 경로, MSBuild 보정, 스크립트 자산 렌더링, 빌드 메타데이터 DB 모델, 운영 백엔드/API/조회 UI 설계, 그리고 장기 확장 범위인 배포/릴리스 관리 상세 설계다.
 
 ## 구현 범위 구분
 
@@ -203,6 +203,17 @@ scripts/plan_tasks/
 - `BuildDefinitionHistory`
   - 정의 변경 이력
 
+### 향후 확장 엔터티
+
+- `DeploymentEnvironment`
+  - `dev`, `qa`, `staging`, `prod` 같은 배포 대상 환경
+- `Release`
+  - 배포 후보가 되는 릴리스 단위
+- `DeploymentExecution`
+  - 환경별 배포 실행 이력
+- `DeploymentApproval`
+  - 승인/거절/재시도 이력
+
 ### 핵심 필드 예시
 
 - `Project`
@@ -222,6 +233,7 @@ scripts/plan_tasks/
 - 하나의 `Project`는 여러 `ProjectBuild`를 가질 수 있다.
 - 하나의 `ProjectBuild`는 하나의 `BuildPlan`과 연결된다.
 - 결과 취합 시에는 `BuildPlan` 단위 조회뿐 아니라 상위 `Project`에 연결된 모든 `ProjectRepository`를 함께 조회할 수 있어야 한다.
+- 장기적으로는 `BuildVersion -> Release -> DeploymentExecution -> DeploymentEnvironment` 흐름으로 CD 상태를 이어서 추적할 수 있어야 한다.
 
 ### ERD 초안
 

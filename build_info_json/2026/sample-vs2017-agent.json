@@ -1,0 +1,57 @@
+{
+  "buildId": "sample-vs2017-agent",
+  "name": "Sample VS2017 Agent",
+  "planKey": "SAMPV17",
+  "description": "Sample VS2017 Agent build plan",
+  "language": "cpp",
+  "compiler": "vs2017",
+  "repository": {
+    "provider": "bitbucket",
+    "projectKey": "VSN17",
+    "repoSlug": "sample-vs2017-agent",
+    "linkageMode": "linked",
+    "branches": [
+      "dev",
+      "release",
+      "master"
+    ]
+  },
+  "requirements": {
+    "os": "windows",
+    "extraCapabilities": [
+      "nuget"
+    ]
+  },
+  "build": {
+    "subPath": "agents/sample-vs2017-agent",
+    "prepareCommand": "nuget restore SampleVs2017Agent.sln",
+    "buildCommand": "msbuild SampleVs2017Agent.sln /p:Configuration=Release /p:Platform=x64",
+    "staticAnalysis": {
+      "customTool": {
+        "commands": [
+          "python scripts/custom_tool.py init --windows-native",
+          "custom-tool analyze {buildCommand}",
+          "python scripts/custom_tool.py publish --windows-native"
+        ]
+      }
+    },
+    "runtimeRequirements": {
+      "commands": [
+        "python",
+        "nuget",
+        "msbuild",
+        "coverity",
+        "custom-tool",
+        "trigger-plan"
+      ],
+      "envVars": [
+        "PATH",
+        "VS2017_ENV"
+      ]
+    },
+    "postBuildTrigger": {
+      "type": "plan",
+      "targetPlanKey": "POSTV17"
+    }
+  }
+}

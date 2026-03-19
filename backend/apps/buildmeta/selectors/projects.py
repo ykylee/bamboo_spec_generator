@@ -6,16 +6,59 @@ from apps.buildmeta.models import Project
 
 
 def list_project_summaries() -> list[dict]:
-    return [
-        {
-            "jiraProjectKey": project.jira_project_key,
-            "bitbucketProjectKey": project.bitbucket_project_key,
-            "representativeRepoSlug": project.representative_repo_slug,
-            "repositoryCount": project.repositories.count(),
-            "buildCount": project.builds.count(),
-        }
-        for project in Project.objects.prefetch_related("repositories", "builds").all().order_by("jira_project_key")
-    ]
+    summaries = []
+    projects = (
+        Project.objects.prefetch_related(
+            "repositories",
+            "builds__build_plan__latest_version",
+        )
+        .all()
+        .order_by("jira_project_key")
+    )
+    for project in projects:
+        repositories = list(project.repositories.all())
+        builds = list(project.builds.all())
+        repository_count = len(repositories)
+        build_count = len(builds)
+        representative_repo_slug = project.representative_repo_slug
+        missing_coverity_count = sum(
+            1
+            for repo in repositories
+            if not repo.coverity_project or not repo.coverity_stream
+        )
+        failed_build_count = sum(
+            1
+            for build in builds
+            if build.build_plan.latest_version is not None and build.build_plan.latest_version.latest_success is False
+        )
+
+        warning_tags = []
+        if not representative_repo_slug:
+            warning_tags.append("대표 저장소 없음")
+        if repository_count == 0:
+            warning_tags.append("저장소 없음")
+        if build_count == 0:
+            warning_tags.append("빌드 없음")
+        if missing_coverity_count:
+            warning_tags.append(f"Coverity 미지정 {missing_coverity_count}")
+        if failed_build_count:
+            warning_tags.append(f"마지막 빌드 실패 {failed_build_count}")
+
+        summaries.append(
+            {
+                "jiraProjectKey": project.jira_project_key,
+                "bitbucketProjectKey": project.bitbucket_project_key,
+                "representativeRepoSlug": representative_repo_slug,
+                "repositoryCount": repository_count,
+                "buildCount": build_count,
+                "missingCoverityCount": missing_coverity_count,
+                "failedBuildCount": failed_build_count,
+                "warningTags": warning_tags,
+                "metadataWarningTags": [tag for tag in warning_tags if not tag.startswith("마지막 빌드 실패")],
+                "needsAttention": bool(warning_tags),
+            }
+        )
+    return summaries
 
 
 def get_project_detail(jira_project_key: str) -> dict | None:

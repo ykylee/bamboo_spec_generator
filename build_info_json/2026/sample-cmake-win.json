@@ -1,0 +1,53 @@
+{
+  "buildId": "sample-cmake-win",
+  "name": "Sample CMake Win",
+  "planKey": "SAMPCMW",
+  "description": "Sample CMake Win build plan",
+  "language": "cpp",
+  "compiler": "cmake",
+  "repository": {
+    "provider": "bitbucket",
+    "projectKey": "CMAKEW",
+    "repoSlug": "sample-cmake-win",
+    "linkageMode": "linked",
+    "branches": [
+      "dev",
+      "release",
+      "master"
+    ]
+  },
+  "requirements": {
+    "os": "windows",
+    "extraCapabilities": []
+  },
+  "build": {
+    "subPath": "native/sample-cmake-win",
+    "prepareCommand": "cmake -S . -B build -G \"Visual Studio 17 2022\"",
+    "buildCommand": "cmake --build build --config Release",
+    "staticAnalysis": {
+      "customTool": {
+        "commands": [
+          "python scripts/custom_tool.py init --windows-cmake",
+          "custom-tool analyze {buildCommand}",
+          "python scripts/custom_tool.py publish --windows-cmake"
+        ]
+      }
+    },
+    "runtimeRequirements": {
+      "commands": [
+        "python",
+        "cmake",
+        "coverity",
+        "custom-tool",
+        "trigger-plan"
+      ],
+      "envVars": [
+        "PATH"
+      ]
+    },
+    "postBuildTrigger": {
+      "type": "plan",
+      "targetPlanKey": "POSTCMW"
+    }
+  }
+}

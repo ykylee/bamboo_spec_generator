@@ -1,0 +1,53 @@
+{
+  "buildId": "sample-cmake-core",
+  "name": "Sample CMake Core",
+  "planKey": "SAMPCML",
+  "description": "Sample CMake Core build plan",
+  "language": "cpp",
+  "compiler": "cmake",
+  "repository": {
+    "provider": "bitbucket",
+    "projectKey": "CMAKEL",
+    "repoSlug": "sample-cmake-core",
+    "linkageMode": "linked",
+    "branches": [
+      "dev",
+      "release",
+      "master"
+    ]
+  },
+  "requirements": {
+    "os": "linux",
+    "extraCapabilities": []
+  },
+  "build": {
+    "subPath": "libs/sample-cmake-core",
+    "prepareCommand": "cmake -S . -B build -DCMAKE_BUILD_TYPE=Release",
+    "buildCommand": "cmake --build build --config Release",
+    "staticAnalysis": {
+      "customTool": {
+        "commands": [
+          "python3 scripts/custom_tool.py init --cmake",
+          "custom-tool analyze {buildCommand}",
+          "python3 scripts/custom_tool.py publish --cmake"
+        ]
+      }
+    },
+    "runtimeRequirements": {
+      "commands": [
+        "python3",
+        "cmake",
+        "coverity",
+        "custom-tool",
+        "trigger-plan"
+      ],
+      "envVars": [
+        "PATH"
+      ]
+    },
+    "postBuildTrigger": {
+      "type": "plan",
+      "targetPlanKey": "POSTCML"
+    }
+  }
+}

@@ -1,0 +1,57 @@
+{
+  "buildId": "sample-vs2013-legacy",
+  "name": "Sample VS2013 Legacy",
+  "planKey": "SAMPV13",
+  "description": "Sample VS2013 Legacy build plan",
+  "language": "cpp",
+  "compiler": "vs2013",
+  "repository": {
+    "provider": "bitbucket",
+    "projectKey": "VSN13",
+    "repoSlug": "sample-vs2013-legacy",
+    "linkageMode": "linked",
+    "branches": [
+      "dev",
+      "release",
+      "master"
+    ]
+  },
+  "requirements": {
+    "os": "windows",
+    "extraCapabilities": [
+      "nuget"
+    ]
+  },
+  "build": {
+    "subPath": "legacy/sample-vs2013-legacy",
+    "prepareCommand": "nuget restore SampleVs2013Legacy.sln",
+    "buildCommand": "msbuild SampleVs2013Legacy.sln /p:Configuration=Release /p:Platform=Win32",
+    "staticAnalysis": {
+      "customTool": {
+        "commands": [
+          "python scripts/custom_tool.py init --legacy-windows",
+          "custom-tool analyze {buildCommand}",
+          "python scripts/custom_tool.py publish --legacy-windows"
+        ]
+      }
+    },
+    "runtimeRequirements": {
+      "commands": [
+        "python",
+        "nuget",
+        "msbuild",
+        "coverity",
+        "custom-tool",
+        "trigger-plan"
+      ],
+      "envVars": [
+        "PATH",
+        "VS2013_ENV"
+      ]
+    },
+    "postBuildTrigger": {
+      "type": "plan",
+      "targetPlanKey": "POSTV13"
+    }
+  }
+}
