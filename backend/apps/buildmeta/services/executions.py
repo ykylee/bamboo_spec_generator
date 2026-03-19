@@ -97,6 +97,26 @@ def start_execution(
     }
 
 
+def record_static_analysis_results(*, execution_id: str, static_analysis_results: list[dict]) -> dict:
+    execution = BuildExecution.objects.get(pk=execution_id)
+    updated_count = 0
+    for result in static_analysis_results:
+        StaticAnalysisResult.objects.update_or_create(
+            build_execution=execution,
+            tool_name=result["toolName"],
+            defaults={
+                "status": result["status"],
+                "summary": result.get("summary", ""),
+                "metrics_json": result.get("metricsJson"),
+            },
+        )
+        updated_count += 1
+    return {
+        "buildExecutionId": str(execution.id),
+        "updatedCount": updated_count,
+    }
+
+
 @transaction.atomic
 def finish_execution(
     *,
@@ -111,29 +131,21 @@ def finish_execution(
     static_analysis_results: list[dict] | None = None,
 ) -> dict:
     execution = BuildExecution.objects.select_related("build_version", "build_plan").get(pk=execution_id)
-    execution.success = success
-    execution.result_status = result_status
-    execution.summary_message = summary_message
-    execution.stage_name = stage_name
-    execution.job_name = job_name
-    execution.task_name = task_name
-    execution.finished_at = finished_at
-    execution.save()
+    _record_static_analysis_results_for_execution(execution, static_analysis_results or [])
 
-    for result in static_analysis_results or []:
-        StaticAnalysisResult.objects.update_or_create(
-            build_execution=execution,
-            tool_name=result["toolName"],
-            defaults={
-                "status": result["status"],
-                "summary": result.get("summary", ""),
-                "metrics_json": result.get("metricsJson"),
-            },
-        )
+    if _should_apply_execution_finish(execution, success):
+        execution.success = success
+        execution.result_status = result_status
+        execution.summary_message = summary_message
+        execution.stage_name = stage_name
+        execution.job_name = job_name
+        execution.task_name = task_name
+        execution.finished_at = finished_at
+        execution.save()
 
     version = execution.build_version
     version.latest_execution = execution
-    version.latest_success = success
+    version.latest_success = execution.success
     version.save(update_fields=["latest_execution", "latest_success", "updated_at"])
 
     if version.is_latest:
@@ -147,3 +159,25 @@ def finish_execution(
         "resultStatus": execution.result_status,
         "success": execution.success,
     }
+
+
+def _record_static_analysis_results_for_execution(execution: BuildExecution, static_analysis_results: list[dict]) -> None:
+    for result in static_analysis_results:
+        StaticAnalysisResult.objects.update_or_create(
+            build_execution=execution,
+            tool_name=result["toolName"],
+            defaults={
+                "status": result["status"],
+                "summary": result.get("summary", ""),
+                "metrics_json": result.get("metricsJson"),
+            },
+        )
+
+
+def _should_apply_execution_finish(execution: BuildExecution, success: bool) -> bool:
+    is_terminal = execution.finished_at is not None or execution.result_status != "running"
+    if not is_terminal:
+        return True
+    if execution.success is False and success:
+        return False
+    return True

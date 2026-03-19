@@ -35,3 +35,7 @@ class ExecutionFinishIn(Schema):
     taskName: str = ""
     finishedAt: datetime | None = None
     staticAnalysisResults: list[StaticAnalysisResultIn] = []
+
+
+class StaticAnalysisResultsUpsertIn(Schema):
+    staticAnalysisResults: list[StaticAnalysisResultIn]

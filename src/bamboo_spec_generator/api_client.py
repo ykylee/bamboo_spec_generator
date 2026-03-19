@@ -92,6 +92,13 @@ class OperationsApiClient:
             payload["finishedAt"] = finished_at
         return self._request_json("POST", f"/api/v1/build-executions/{parse.quote(execution_id)}/finish", body=payload)
 
+    def record_static_analysis_results(self, execution_id: str, static_analysis_results: list[dict]) -> dict:
+        return self._request_json(
+            "POST",
+            f"/api/v1/build-executions/{parse.quote(execution_id)}/static-analysis-results",
+            body={"staticAnalysisResults": static_analysis_results},
+        )
+
     def get_build_definition(self, plan_key: str) -> BuildDefinition:
         payload = self.get_active_definition(plan_key)
         return parse_build_definition_payload(payload["definition"], year=str(payload["year"]))

@@ -14,6 +14,7 @@ from apps.buildmeta.models import (
     BuildExecution,
     BuildPlan,
     BuildPlanDefinition,
+    StaticAnalysisResult,
     BuildVersion,
     Project,
     ProjectBuild,
@@ -21,7 +22,7 @@ from apps.buildmeta.models import (
 )
 from apps.buildmeta.selectors.definitions import get_active_definition_by_plan_key
 from apps.buildmeta.services import load_definition_import_records, sync_definition_records
-from apps.buildmeta.services.executions import finish_execution, start_execution
+from apps.buildmeta.services.executions import finish_execution, record_static_analysis_results, start_execution
 
 
 class ExecutionServiceTest(TestCase):
@@ -129,6 +130,65 @@ class ExecutionServiceTest(TestCase):
 
         self.plan.refresh_from_db()
         self.assertEqual("v0.0.2", self.plan.latest_version.version_text)
+
+    def test_finish_execution_does_not_overwrite_failure_with_success(self) -> None:
+        start_payload = start_execution(
+            plan_key="SAMPAPI",
+            branch_kind=BuildVersion.BRANCH_KIND_DEV,
+            commit_hash="abcdef123456",
+            build_number="101",
+        )
+
+        finish_execution(
+            execution_id=start_payload["buildExecutionId"],
+            success=False,
+            result_status="failed",
+            summary_message="Coverity failed",
+            stage_name="Static Analysis",
+            job_name="Coverity Scan",
+            task_name="run_coverity.py",
+        )
+        finish_payload = finish_execution(
+            execution_id=start_payload["buildExecutionId"],
+            success=True,
+            result_status="successful",
+            summary_message="Follow-up succeeded",
+            stage_name="Trigger Follow-up",
+            job_name="Follow-up Trigger",
+            task_name="trigger_follow_up.py",
+        )
+
+        execution = BuildExecution.objects.get(pk=start_payload["buildExecutionId"])
+        self.assertFalse(execution.success)
+        self.assertEqual("failed", execution.result_status)
+        self.assertEqual("run_coverity.py", execution.task_name)
+        self.assertFalse(finish_payload["success"])
+
+    def test_record_static_analysis_results_upserts_by_tool_name(self) -> None:
+        start_payload = start_execution(
+            plan_key="SAMPAPI",
+            branch_kind=BuildVersion.BRANCH_KIND_DEV,
+            commit_hash="abcdef123456",
+            build_number="101",
+        )
+
+        record_static_analysis_results(
+            execution_id=start_payload["buildExecutionId"],
+            static_analysis_results=[
+                {"toolName": "coverity", "status": "passed", "summary": "initial", "metricsJson": {"high": 0}},
+            ],
+        )
+        record_static_analysis_results(
+            execution_id=start_payload["buildExecutionId"],
+            static_analysis_results=[
+                {"toolName": "coverity", "status": "failed", "summary": "updated", "metricsJson": {"high": 1}},
+            ],
+        )
+
+        result = StaticAnalysisResult.objects.get(build_execution_id=start_payload["buildExecutionId"], tool_name="coverity")
+        self.assertEqual("failed", result.status)
+        self.assertEqual("updated", result.summary)
+        self.assertEqual({"high": 1}, result.metrics_json)
 
 
 class DefinitionSelectorTest(TestCase):

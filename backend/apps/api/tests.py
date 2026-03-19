@@ -181,3 +181,37 @@ class ApiSmokeTest(TestCase):
         self.assertEqual("v0.0.1", payload[0]["version"])
         self.assertEqual("successful", payload[0]["resultStatus"])
         self.assertEqual("coverity", payload[0]["staticAnalysisResults"][0]["toolName"])
+
+    def test_static_analysis_results_upsert_endpoint(self) -> None:
+        start_payload = start_execution(
+            plan_key="SAMPAPI",
+            branch_kind=BuildVersion.BRANCH_KIND_DEV,
+            commit_hash="abcdef123456",
+            build_number="101",
+        )
+
+        response = self.client.post(
+            f"/api/v1/build-executions/{start_payload['buildExecutionId']}/static-analysis-results",
+            data=json.dumps(
+                {
+                    "staticAnalysisResults": [
+                        {
+                            "toolName": "coverity",
+                            "status": "passed",
+                            "summary": "0 high impact defects",
+                            "metricsJson": {"high": 0},
+                        }
+                    ]
+                }
+            ),
+            content_type="application/json",
+            **self.auth_headers,
+        )
+
+        self.assertEqual(200, response.status_code)
+        payload = response.json()
+        self.assertEqual(1, payload["updatedCount"])
+
+        list_response = self.client.get("/api/v1/build-plans/SAMPAPI/executions", **self.auth_headers)
+        list_payload = list_response.json()
+        self.assertEqual("coverity", list_payload[0]["staticAnalysisResults"][0]["toolName"])

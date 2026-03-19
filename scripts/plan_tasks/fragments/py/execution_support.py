@@ -7,7 +7,6 @@ from urllib import error, request
 EXECUTION_WORKING_DIRECTORY = Path({{SUB_PATH}})
 EXECUTION_STATE_DIRECTORY = EXECUTION_WORKING_DIRECTORY / ".bamboo-meta"
 EXECUTION_STATE_PATH = EXECUTION_STATE_DIRECTORY / "execution-state.json"
-STATIC_ANALYSIS_DIRECTORY = EXECUTION_STATE_DIRECTORY / "static-analysis"
 PLAN_KEY = {{PLAN_KEY}}
 
 
@@ -97,24 +96,24 @@ def _save_execution_state(payload: dict) -> None:
 
 
 def record_static_analysis_result(tool_name: str, status: str, summary: str = "", metrics_json: dict | None = None) -> None:
-    payload = {
-        "toolName": tool_name,
-        "status": status,
-        "summary": summary,
-        "metricsJson": metrics_json,
-    }
-    _write_json(STATIC_ANALYSIS_DIRECTORY / f"{tool_name}.json", payload)
-
-
-def collect_static_analysis_results() -> list[dict]:
-    if not STATIC_ANALYSIS_DIRECTORY.is_dir():
-        return []
-    results: list[dict] = []
-    for path in sorted(STATIC_ANALYSIS_DIRECTORY.glob("*.json")):
-        payload = _read_json(path)
-        if payload is not None:
-            results.append(payload)
-    return results
+    state = start_execution_if_configured() or _load_execution_state()
+    execution_id = state.get("buildExecutionId", "")
+    if not execution_id:
+        return
+    _api_request(
+        "POST",
+        f"/api/v1/build-executions/{execution_id}/static-analysis-results",
+        {
+            "staticAnalysisResults": [
+                {
+                    "toolName": tool_name,
+                    "status": status,
+                    "summary": summary,
+                    "metricsJson": metrics_json,
+                }
+            ]
+        },
+    )
 
 
 def start_execution_if_configured() -> dict | None:
@@ -179,7 +178,7 @@ def finish_execution_if_configured(
             "stageName": stage_name,
             "jobName": job_name,
             "taskName": task_name,
-            "staticAnalysisResults": collect_static_analysis_results(),
+            "staticAnalysisResults": [],
         },
     )
     if payload is None:
