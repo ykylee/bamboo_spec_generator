@@ -65,6 +65,13 @@ class ProjectRepository(TimestampedModel):
 class ProjectBuild(TimestampedModel):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     project = models.ForeignKey(Project, on_delete=models.CASCADE, related_name="builds")
+    repository = models.ForeignKey(
+        ProjectRepository,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="builds",
+    )
     build_plan = models.OneToOneField(BuildPlan, on_delete=models.CASCADE, related_name="project_build")
     build_name = models.CharField(max_length=255)
     build_type = models.CharField(max_length=128)

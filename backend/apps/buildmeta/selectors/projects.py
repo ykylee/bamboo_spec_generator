@@ -14,6 +14,7 @@ def _project_queryset():
     )
     return Project.objects.prefetch_related(
         "repositories",
+        "builds__repository",
         "builds__build_plan__latest_version__latest_execution",
         active_definitions,
     )
@@ -107,6 +108,7 @@ def get_project_detail(jira_project_key: str) -> dict | None:
                 "buildName": build.build_name,
                 "buildType": build.build_type,
                 "runtimeStack": build.runtime_stack,
+                "repositorySlug": build.repository.repo_slug if build.repository_id else "",
                 "planKey": build.build_plan.plan_key,
                 "buildId": build.build_plan.build_id,
                 "generationReady": bool(getattr(build.build_plan, "active_definitions", [])),
@@ -139,10 +141,15 @@ def _build_generation_status(project: Project, repositories: list, builds: list)
         issues.append("대표 저장소 메타데이터 불일치")
 
     ready_build_count = 0
+    unlinked_build_count = 0
     for build in builds:
+        if build.repository_id is None:
+            unlinked_build_count += 1
         if getattr(build.build_plan, "active_definitions", []):
             ready_build_count += 1
     missing_definition_count = len(builds) - ready_build_count
+    if unlinked_build_count:
+        issues.append(f"저장소 연결 없는 빌드 {unlinked_build_count}")
     if missing_definition_count:
         issues.append(f"활성 정의 없음 {missing_definition_count}")
 

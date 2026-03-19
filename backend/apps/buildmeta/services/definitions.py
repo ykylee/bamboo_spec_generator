@@ -64,9 +64,9 @@ def import_definition_records(records: list[DefinitionImportRecord], *, source_k
     for record in records:
         build = record.build_definition
         project = _upsert_project(record)
-        _upsert_repository(project, record)
+        repository = _upsert_repository(project, record)
         plan = _upsert_build_plan(record)
-        _upsert_project_build(project, plan, record)
+        _upsert_project_build(project, repository, plan, record)
         changed_active, definition = _activate_definition(
             plan=plan,
             project=project,
@@ -107,9 +107,9 @@ def sync_definition_records(
     for record in records:
         build = record.build_definition
         project = _upsert_project(record)
-        _upsert_repository(project, record)
+        repository = _upsert_repository(project, record)
         plan = _upsert_build_plan(record)
-        _upsert_project_build(project, plan, record)
+        _upsert_project_build(project, repository, plan, record)
         synced_plan_keys.add(plan.plan_key)
 
         changed_active, definition = _activate_definition(
@@ -202,12 +202,13 @@ def _upsert_build_plan(record: DefinitionImportRecord) -> BuildPlan:
     return plan
 
 
-def _upsert_project_build(project: Project, plan: BuildPlan, record: DefinitionImportRecord) -> ProjectBuild:
+def _upsert_project_build(project: Project, repository: ProjectRepository, plan: BuildPlan, record: DefinitionImportRecord) -> ProjectBuild:
     build = record.build_definition
     project_build, created = ProjectBuild.objects.get_or_create(
         build_plan=plan,
         defaults={
             "project": project,
+            "repository": repository,
             "build_name": build.name,
             "build_type": build.compiler,
             "runtime_stack": build.language,
@@ -217,10 +218,11 @@ def _upsert_project_build(project: Project, plan: BuildPlan, record: DefinitionI
         return project_build
 
     project_build.project = project
+    project_build.repository = repository
     project_build.build_name = build.name
     project_build.build_type = build.compiler
     project_build.runtime_stack = build.language
-    project_build.save(update_fields=["project", "build_name", "build_type", "runtime_stack", "updated_at"])
+    project_build.save(update_fields=["project", "repository", "build_name", "build_type", "runtime_stack", "updated_at"])
     return project_build
 
 

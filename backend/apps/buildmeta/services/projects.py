@@ -27,7 +27,7 @@ def update_project(jira_project_key: str, payload) -> dict | None:
 
 def _save_project(existing_jira_project_key: str | None, data: dict) -> dict:
     _validate_repositories(data["repositories"])
-    _validate_builds(data["builds"])
+    _validate_builds(data["builds"], data["repositories"])
 
     with transaction.atomic():
         project, _ = Project.objects.get_or_create(
@@ -41,8 +41,8 @@ def _save_project(existing_jira_project_key: str | None, data: dict) -> dict:
         project.representative_repo_slug = _resolve_representative_repo_slug(data, current_value=project.representative_repo_slug)
         project.save(update_fields=["bitbucket_project_key", "representative_repo_slug", "updated_at"])
 
-        _upsert_repositories(project, data["repositories"])
-        _upsert_builds(project, data["builds"])
+        repository_map = _upsert_repositories(project, data["repositories"])
+        _upsert_builds(project, data["builds"], repository_map)
 
     payload = get_project_detail(project.jira_project_key)
     if payload is None:
@@ -84,19 +84,25 @@ def _validate_repositories(repositories: list[dict]) -> None:
         raise ValueError("Only one representative repository can be provided per request.")
 
 
-def _validate_builds(builds: list[dict]) -> None:
+def _validate_builds(builds: list[dict], repositories: list[dict]) -> None:
     seen_plan_keys: set[str] = set()
     seen_build_ids: set[str] = set()
+    repository_slugs = {repository["repoSlug"].strip() for repository in repositories}
     for build in builds:
         build_name = build["buildName"].strip()
         build_id = build["buildId"].strip()
         plan_key = build["planKey"].strip()
+        repository_slug = build["repositorySlug"].strip()
         if not build_name:
             raise ValueError("Build buildName is required.")
         if not build_id:
             raise ValueError("Build buildId is required.")
         if not plan_key:
             raise ValueError("Build planKey is required.")
+        if not repository_slug:
+            raise ValueError("Build repositorySlug is required.")
+        if repository_slug not in repository_slugs:
+            raise ValueError(f"Build repositorySlug '{repository_slug}' is not registered in repositories.")
         if plan_key in seen_plan_keys:
             raise ValueError(f"Build planKey '{plan_key}' is duplicated in the request.")
         if build_id in seen_build_ids:
@@ -105,9 +111,10 @@ def _validate_builds(builds: list[dict]) -> None:
         seen_build_ids.add(build_id)
 
 
-def _upsert_repositories(project: Project, repositories: list[dict]) -> None:
+def _upsert_repositories(project: Project, repositories: list[dict]) -> dict[str, ProjectRepository]:
+    repository_map: dict[str, ProjectRepository] = {}
     for repository in repositories:
-        ProjectRepository.objects.update_or_create(
+        project_repository, _ = ProjectRepository.objects.update_or_create(
             project=project,
             repo_slug=repository["repoSlug"].strip(),
             defaults={
@@ -116,12 +123,15 @@ def _upsert_repositories(project: Project, repositories: list[dict]) -> None:
                 "is_representative": repository["isRepresentative"],
             },
         )
+        repository_map[project_repository.repo_slug] = project_repository
+    return repository_map
 
 
-def _upsert_builds(project: Project, builds: list[dict]) -> None:
+def _upsert_builds(project: Project, builds: list[dict], repository_map: dict[str, ProjectRepository]) -> None:
     for build in builds:
         build_id = build["buildId"].strip()
         plan_key = build["planKey"].strip()
+        repository_slug = build["repositorySlug"].strip()
         plan = BuildPlan.objects.filter(plan_key=plan_key).first()
         if plan is not None and plan.build_id != build_id:
             raise ValueError(f"Build plan '{plan_key}' already exists with a different buildId.")
@@ -136,6 +146,7 @@ def _upsert_builds(project: Project, builds: list[dict]) -> None:
             project_build = ProjectBuild(project=project, build_plan=plan)
 
         project_build.project = project
+        project_build.repository = repository_map[repository_slug]
         project_build.build_name = build["buildName"].strip()
         project_build.build_type = build["buildType"].strip()
         project_build.runtime_stack = build["runtimeStack"].strip()

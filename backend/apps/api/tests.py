@@ -17,7 +17,7 @@ class ApiSmokeTest(TestCase):
             bitbucket_project_key="SAMPLE",
             representative_repo_slug="sample-app-api",
         )
-        ProjectRepository.objects.create(
+        repository = ProjectRepository.objects.create(
             project=self.project,
             repo_slug="sample-app-api",
             coverity_project="sample-app",
@@ -27,6 +27,7 @@ class ApiSmokeTest(TestCase):
         self.plan = BuildPlan.objects.create(build_id="sample-app-api", plan_key="SAMPAPI")
         ProjectBuild.objects.create(
             project=self.project,
+            repository=repository,
             build_plan=self.plan,
             build_name="backend",
             build_type="python",
@@ -254,6 +255,7 @@ class ApiSmokeTest(TestCase):
                             "runtimeStack": "python3.12",
                             "buildId": "new-service-api",
                             "planKey": "NEWSVCAPI",
+                            "repositorySlug": "new-service",
                         }
                     ],
                 }
@@ -290,6 +292,7 @@ class ApiSmokeTest(TestCase):
                             "runtimeStack": "java17",
                             "buildId": "sample-app-api",
                             "planKey": "SAMPAPI",
+                            "repositorySlug": "sample-app-api",
                         }
                     ],
                 }
@@ -303,3 +306,4 @@ class ApiSmokeTest(TestCase):
         self.assertEqual("SAMPLE2", payload["bitbucketProjectKey"])
         self.assertEqual("backend-api", payload["builds"][0]["buildName"])
         self.assertEqual("sample-app-release", payload["repositories"][0]["coverityStream"])
+        self.assertEqual("sample-app-api", payload["builds"][0]["repositorySlug"])

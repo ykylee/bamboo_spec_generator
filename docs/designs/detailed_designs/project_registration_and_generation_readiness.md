@@ -10,7 +10,7 @@
 
 ## 요약
 
-이 문서는 프로젝트 등록/수정 API와 프로젝트별 Specs 생성 준비도 계산 로직의 함수 단위 설계를 정리한다. 현재 설계 목표는 별도 스키마 마이그레이션 없이 기존 `Project`, `ProjectRepository`, `ProjectBuild`, `BuildPlan`, `BuildPlanDefinition` 모델 위에서 운영 입력과 생성기 연계 가능 여부를 계산하는 것이다.
+이 문서는 프로젝트 등록/수정 API와 프로젝트별 Specs 생성 준비도 계산 로직의 함수 단위 설계를 정리한다. 현재 설계 목표는 `Project`, `ProjectRepository`, `ProjectBuild`, `BuildPlan`, `BuildPlanDefinition` 모델 위에서 운영 입력과 생성기 연계 가능 여부를 계산하는 것이다. 최근 변경으로 `ProjectBuild`는 어느 `ProjectRepository`에 연결되는지 명시적으로 저장한다.
 
 ## 배경
 
@@ -23,6 +23,7 @@
 - 프로젝트 등록/수정 요청을 단일 서비스 계층에서 검증하고 저장한다.
 - 저장 직후 상세 응답을 재조회해 API/UI가 동일한 응답 구조를 사용하게 한다.
 - 프로젝트/빌드 단위의 Specs 생성 준비도를 selector에서 계산한다.
+- 하나의 프로젝트에 여러 저장소를 등록하고, 각 빌드가 특정 저장소에 연결되도록 한다.
 
 ## 비목표
 
@@ -47,6 +48,7 @@
   - 기존 프로젝트와 키 충돌
   - 저장소 대표 플래그 중복
   - 빌드 `buildId`/`planKey` 중복
+  - 빌드 `repositorySlug`가 저장소 목록에 없음
 
 ### `apps.buildmeta.services.projects.update_project(jira_project_key, payload)`
 
@@ -79,13 +81,15 @@
   - 동일 요청 내 중복 `repoSlug` 금지
   - `isRepresentative=True`는 최대 1건
 
-### `apps.buildmeta.services.projects._validate_builds(builds)`
+### `apps.buildmeta.services.projects._validate_builds(builds, repositories)`
 
 - 책임: 빌드 입력 검증
 - 검증 규칙:
   - `buildName`, `buildId`, `planKey` 필수
+  - `repositorySlug` 필수
   - 동일 요청 내 `buildId` 중복 금지
   - 동일 요청 내 `planKey` 중복 금지
+  - 모든 빌드의 `repositorySlug`는 요청의 저장소 목록에 존재해야 함
 
 ### `apps.buildmeta.services.projects._upsert_builds(project, builds)`
 
@@ -93,8 +97,10 @@
 - 핵심 제약:
   - 기존 `planKey`가 다른 `buildId`와 연결돼 있으면 오류
   - 기존 `BuildPlan`이 다른 프로젝트에 연결돼 있으면 오류
+  - 각 `ProjectBuild`는 `ProjectRepository` 하나에 연결돼야 함
 - 이유:
   - 한 플랜이 여러 프로젝트에 중복 소속되는 상태를 막아야 한다.
+  - 운영 화면에서 빌드가 어느 저장소에 속하는지 식별 가능해야 한다.
 
 ### `apps.buildmeta.selectors.projects.list_project_summaries()`
 
@@ -113,6 +119,7 @@
 - 책임: 프로젝트 상세 화면/API에 필요한 메타데이터와 준비도를 반환한다.
 - 빌드별 추가 필드:
   - `buildId`
+  - `repositorySlug`
   - `generationReady`
   - `activeDefinitionYear`
   - `latestVersion`
@@ -125,6 +132,7 @@
   - 저장소 1개 이상 존재
   - 빌드 1개 이상 존재
   - 대표 저장소 slug가 존재하고 실제 저장소 메타데이터와 일치
+  - 모든 연결 빌드가 특정 저장소에 연결돼 있음
   - 모든 연결 빌드가 활성 정의를 1개 이상 가짐
 - 반환 구조:
   - `generationReady`

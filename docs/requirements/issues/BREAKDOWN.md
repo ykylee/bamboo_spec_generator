@@ -30,6 +30,7 @@
 15. STORY-24 빌드 현황 조회 기능 확장
 16. STORY-25 Bamboo 시스템 운영 현황 조회 기능 도입
 17. STORY-26 운영 관리 API 표준화
+18. STORY-27 빌드 등록 구조 및 지원 옵션 정의
 
 ## EPIC-01 생성기 본체
 
@@ -138,27 +139,30 @@
 ### 구현 상태
 
 - 현재 부분 구현:
+  - STORY-21
   - STORY-22
   - STORY-24
   - STORY-26
+- 현재 요구사항 정의 및 일부 UI 반영:
+  - STORY-27
 - 현재 미구현:
-  - STORY-21
   - STORY-23
   - STORY-25
 
 ### 우선순위
 
-- `높음`: STORY-21, STORY-24, STORY-26
+- `높음`: STORY-21, STORY-24, STORY-26, STORY-27
 - `중간`: STORY-22, STORY-23, STORY-25
 
 ### 추천 구현 순서
 
 1. STORY-26 운영 관리 API 표준화
 2. STORY-21 프로젝트 등록 기능 도입
-3. STORY-22 프로젝트 정보 조회 및 수정 기능 확장
-4. STORY-24 빌드 현황 조회 기능 확장
-5. STORY-25 Bamboo 시스템 운영 현황 조회 기능 도입
-6. STORY-23 사용자 및 권한 관리 기능 도입
+3. STORY-27 빌드 등록 구조 및 지원 옵션 정의
+4. STORY-22 프로젝트 정보 조회 및 수정 기능 확장
+5. STORY-24 빌드 현황 조회 기능 확장
+6. STORY-25 Bamboo 시스템 운영 현황 조회 기능 도입
+7. STORY-23 사용자 및 권한 관리 기능 도입
 
 ### 이슈 목록
 
@@ -169,3 +173,4 @@
 - [STORY-24 빌드 현황 조회 기능 확장](./STORY-24-build-status-observability.md)
 - [STORY-25 Bamboo 시스템 운영 현황 조회 기능 도입](./STORY-25-bamboo-system-operations-visibility.md)
 - [STORY-26 운영 관리 API 표준화](./STORY-26-operations-api-standardization.md)
+- [STORY-27 빌드 등록 구조 및 지원 언어/컴파일러 선택 방식 정의](./STORY-27-build-registration-structure-and-supported-options.md)

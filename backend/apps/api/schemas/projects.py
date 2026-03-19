@@ -16,6 +16,7 @@ class ProjectBuildIn(Schema):
     runtimeStack: str = ""
     buildId: str
     planKey: str
+    repositorySlug: str
 
 
 class ProjectCreateIn(Schema):

@@ -142,6 +142,7 @@
         <p class="build-item__meta">Build Type: {{ build.buildType|default:"미지정" }}</p>
         <p class="build-item__meta">Runtime Stack: {{ build.runtimeStack|default:"미지정" }}</p>
         <p class="build-item__meta">Build ID: {{ build.buildId }}</p>
+        <p class="build-item__meta">Repository: {{ build.repositorySlug|default:"미연결" }}</p>
       </li>
       {% empty %}
       <li class="empty-state">

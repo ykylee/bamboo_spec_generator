@@ -623,6 +623,7 @@ class ProjectServiceTest(TestCase):
                         "runtimeStack": "python3.12",
                         "buildId": "ops-api",
                         "planKey": "OPSAPI",
+                        "repositorySlug": "ops-api",
                     }
                 ],
             }
@@ -634,6 +635,7 @@ class ProjectServiceTest(TestCase):
         self.assertEqual(1, Project.objects.count())
         self.assertEqual(1, BuildPlan.objects.count())
         self.assertEqual(1, ProjectBuild.objects.count())
+        self.assertEqual("ops-api", ProjectBuild.objects.get().repository.repo_slug)
 
     def test_create_project_rejects_duplicate_representative_repositories(self) -> None:
         with self.assertRaisesMessage(ValueError, "Only one representative repository can be provided per request."):
@@ -694,3 +696,31 @@ class ProjectServiceTest(TestCase):
         )
 
         self.assertIsNone(payload)
+
+    def test_create_project_rejects_build_repository_not_in_repository_list(self) -> None:
+        with self.assertRaisesMessage(ValueError, "Build repositorySlug 'ops-web' is not registered in repositories."):
+            create_project(
+                {
+                    "jiraProjectKey": "OPS",
+                    "bitbucketProjectKey": "OPS",
+                    "representativeRepoSlug": "ops-api",
+                    "repositories": [
+                        {
+                            "repoSlug": "ops-api",
+                            "coverityProject": "",
+                            "coverityStream": "",
+                            "isRepresentative": True,
+                        }
+                    ],
+                    "builds": [
+                        {
+                            "buildName": "API",
+                            "buildType": "python",
+                            "runtimeStack": "",
+                            "buildId": "ops-api",
+                            "planKey": "OPSAPI",
+                            "repositorySlug": "ops-web",
+                        }
+                    ],
+                }
+            )
