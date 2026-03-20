@@ -219,6 +219,13 @@ mvn -version
 python3 -m pip install -r requirements-backend.txt
 ```
 
+Playwright UI E2E 테스트 의존성 설치:
+
+```bash
+python3 -m pip install -r requirements-playwright.txt
+python3 -m playwright install firefox
+```
+
 처음 작업하는 로컬 환경 권장 순서:
 
 ```bash
@@ -368,6 +375,18 @@ cd backend
 DJANGO_SETTINGS_MODULE=config.settings.test python3 manage.py test apps.api apps.buildmeta
 ```
 
+운영 UI response 테스트 실행:
+
+```bash
+python3 backend/manage.py test apps.ui.tests --settings=config.settings.test
+```
+
+Playwright UI E2E 테스트 실행:
+
+```bash
+python3 -m unittest discover -s tests/playwright -p 'test_*.py'
+```
+
 주의:
 
 - `config.settings.local`은 기본적으로 SQLite를 사용합니다.
@@ -375,6 +394,7 @@ DJANGO_SETTINGS_MODULE=config.settings.test python3 manage.py test apps.api apps
 - `init_dev_db`는 안전하게 SQLite에서만 동작하며, PostgreSQL에서는 실행을 거부합니다.
 - `init_postgres_db --force`는 PostgreSQL의 대상 schema를 삭제 후 재생성하므로 개발 환경에서만 사용해야 합니다.
 - 테스트 설정 `config.settings.test`는 SQLite를 사용하므로 로컬 PostgreSQL 자격증명 없이도 백엔드 기본 동작을 검증할 수 있습니다.
+- Playwright E2E 테스트는 Django response 테스트와 별도 `tests/playwright/` 스위트로 분리되어 있으며, 임시 SQLite DB와 `runserver` subprocess 위에서 Firefox 헤드리스 브라우저로 실행됩니다.
 
 Windows `cmd` 기준:
 

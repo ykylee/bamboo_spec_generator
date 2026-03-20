@@ -242,16 +242,17 @@
     const buildStack = document.querySelector("[data-build-stack]");
     const addRepositoryButton = document.querySelector("[data-add-repository]");
     const addBuildButton = document.querySelector("[data-add-build]");
-
     if (registrationPanel && toggleRegistrationButton) {
       toggleRegistrationButton.addEventListener("click", function () {
         const isHidden = registrationPanel.hasAttribute("hidden");
         if (isHidden) {
           registrationPanel.removeAttribute("hidden");
+          registrationPanel.classList.remove("registration-layout--collapsed");
           toggleRegistrationButton.setAttribute("aria-expanded", "true");
           registrationPanel.scrollIntoView({ behavior: "smooth", block: "start" });
         } else {
           registrationPanel.setAttribute("hidden", "");
+          registrationPanel.classList.add("registration-layout--collapsed");
           toggleRegistrationButton.setAttribute("aria-expanded", "false");
         }
       });
@@ -268,6 +269,38 @@
         buildStack.appendChild(buildTemplate.content.cloneNode(true));
       });
     }
+
+    document.querySelectorAll("[data-open-dialog]").forEach(function (button) {
+      button.addEventListener("click", function () {
+        const dialogId = button.getAttribute("data-open-dialog");
+        const dialog = document.getElementById(dialogId);
+        if (dialog && typeof dialog.showModal === "function") {
+          dialog.showModal();
+        }
+      });
+    });
+
+    document.querySelectorAll("[data-close-repository-dialog]").forEach(function (button) {
+      button.addEventListener("click", function () {
+        const dialog = button.closest("dialog");
+        if (dialog) {
+          dialog.close();
+        }
+      });
+    });
+
+    function syncDashboardHeights() {
+      const dashboardSection = document.querySelector("[data-dashboard-section]");
+      const projectListPanel = document.querySelector("[data-project-list-panel]");
+      if (!dashboardSection || !projectListPanel) {
+        return;
+      }
+      dashboardSection.style.setProperty("--dashboard-list-height", projectListPanel.offsetHeight + "px");
+    }
+
+    syncDashboardHeights();
+    window.addEventListener("load", syncDashboardHeights);
+    window.addEventListener("resize", syncDashboardHeights);
   }());
 </script>
 
@@ -285,22 +318,12 @@
   <article class="stat-card">
     <span class="stat-card__label">Needs Attention</span>
     <p class="stat-card__value">{{ summary.attentionProjects }}</p>
-    <p class="stat-card__meta">정보 미완전 또는 마지막 빌드 실패 프로젝트 수</p>
-  </article>
-  <article class="stat-card">
-    <span class="stat-card__label">Representative Repo Missing</span>
-    <p class="stat-card__value">{{ summary.missingRepresentativeRepos }}</p>
-    <p class="stat-card__meta">대표 저장소가 비어 있는 프로젝트 수</p>
-  </article>
-  <article class="stat-card">
-    <span class="stat-card__label">Specs Ready</span>
-    <p class="stat-card__value">{{ summary.generationReadyProjects }}</p>
-    <p class="stat-card__meta">현재 기준으로 Specs 생성 준비가 된 프로젝트 수</p>
+    <p class="stat-card__meta">저장소 누락, 메타데이터 경고, 마지막 빌드 실패가 있는 프로젝트 수</p>
   </article>
 </section>
 
-<section class="section-grid">
-  <div class="panel">
+<section class="section-grid section-grid--dashboard" data-dashboard-section>
+  <div class="panel panel--project-list" data-project-list-panel>
     <div class="panel__header">
       <h2 class="panel__title">프로젝트 리스트</h2>
       <span class="badge">{{ pageObj.start_index }}-{{ pageObj.end_index }} / {{ pageObj.paginator.count }}</span>
@@ -312,7 +335,7 @@
           <th>Project</th>
           <th>Bitbucket</th>
           <th>대표 저장소</th>
-          <th>규모</th>
+          <th>저장소</th>
           <th>상태</th>
           <th></th>
         </tr>
@@ -325,35 +348,94 @@
             <span class="project-table__sub">운영 메타데이터 프로젝트</span>
           </td>
           <td><span class="chip">{{ project.bitbucketProjectKey }}</span></td>
-          <td>{{ project.representativeRepoSlug|default:"대표 저장소 미지정" }}</td>
           <td>
-            <div class="chip-row">
-              <span class="chip chip--neutral">Repo {{ project.repositoryCount }}</span>
-              <span class="chip chip--neutral">Build {{ project.buildCount }}</span>
-            </div>
+            {% with dialog_id='representative-dialog-'|add:project.jiraProjectKey %}
+            {% if project.representativeRepoSlug %}
+            <button class="chip chip--neutral chip-button chip-button--truncate" type="button" data-open-dialog="{{ dialog_id }}">
+              <span class="chip-button__text">{{ project.representativeRepoSlug }}</span>
+            </button>
+            <dialog class="repository-dialog" id="{{ dialog_id }}">
+              <div class="repository-dialog__body">
+                <div class="panel__header">
+                  <h3 class="panel__title">{{ project.jiraProjectKey }} 대표 저장소</h3>
+                  <button class="chip chip--neutral chip-button" type="button" data-close-repository-dialog>닫기</button>
+                </div>
+                <ul class="meta-list repository-dialog__list">
+                  <li>{{ project.representativeRepoSlug }}</li>
+                </ul>
+              </div>
+            </dialog>
+            {% else %}
+            <span class="chip chip--warning">대표 저장소 미지정</span>
+            {% endif %}
+            {% endwith %}
           </td>
           <td>
-            <div class="chip-row">
-              {% if project.generationReady %}
-              <span class="chip chip--success">Specs 생성 가능</span>
-              {% else %}
-              <span class="chip chip--warning">Specs 준비 필요</span>
-              {% endif %}
-              <span class="chip chip--neutral">정의 {{ project.activeDefinitionCount }}/{{ project.buildCount }}</span>
-              {% if project.warningTags %}
-                {% for warning in project.warningTags %}
-                <span class="chip chip--warning">{{ warning }}</span>
-                {% endfor %}
-              {% else %}
-                <span class="chip chip--success">정상</span>
-              {% endif %}
-            </div>
+            {% with dialog_id='repo-dialog-'|add:project.jiraProjectKey %}
+            <button class="chip chip--neutral chip-button" type="button" data-open-dialog="{{ dialog_id }}">
+              {{ project.repositoryCount }}
+            </button>
+            <dialog class="repository-dialog" id="{{ dialog_id }}">
+              <div class="repository-dialog__body">
+                <div class="panel__header">
+                  <h3 class="panel__title">{{ project.jiraProjectKey }} 저장소</h3>
+                  <button class="chip chip--neutral chip-button" type="button" data-close-repository-dialog>닫기</button>
+                </div>
+                <ul class="meta-list repository-dialog__list">
+                  {% for repo_slug in project.repositorySlugs %}
+                  <li>{{ repo_slug }}</li>
+                  {% empty %}
+                  <li>등록된 저장소가 없습니다.</li>
+                  {% endfor %}
+                </ul>
+              </div>
+            </dialog>
+            {% endwith %}
+          </td>
+          <td class="project-table__status-cell">
+            {% if project.failedBuildCount %}
+            <span class="status-light status-light--danger" aria-label="빌드 실패" title="빌드 실패"></span>
+            {% elif project.warningTags %}
+            <span class="status-light status-light--warning" aria-label="경고" title="경고"></span>
+            {% else %}
+            <span class="status-light status-light--success" aria-label="정상" title="정상"></span>
+            {% endif %}
           </td>
           <td><a class="chip chip--neutral" href="{% url 'project-detail' project.jiraProjectKey %}{% if request.GET.urlencode %}?{{ request.GET.urlencode }}{% endif %}">상세 보기</a></td>
         </tr>
       {% endfor %}
       </tbody>
     </table>
+    <div class="project-compact-list">
+      {% for project in projects %}
+      <article class="project-compact-item">
+        <div class="project-compact-item__main">
+          <div>
+            <h3 class="project-compact-item__title">{{ project.jiraProjectKey }}</h3>
+            <p class="project-compact-item__sub">운영 메타데이터 프로젝트</p>
+          </div>
+          <div class="chip-row">
+            {% if project.generationReady %}
+            <span class="chip chip--success">Specs 생성 가능</span>
+            {% else %}
+            <span class="chip chip--warning">Specs 준비 필요</span>
+            {% endif %}
+            {% if project.warningTags %}
+              <span class="chip chip--warning">{{ project.warningTags.0 }}</span>
+              {% if project.warningTags|length > 1 %}
+              <span class="chip chip--neutral">+{{ project.warningTags|length|add:"-1" }}</span>
+              {% endif %}
+            {% else %}
+              <span class="chip chip--success">정상</span>
+            {% endif %}
+          </div>
+        </div>
+        <div class="project-compact-item__actions">
+          <a class="chip chip--neutral" href="{% url 'project-detail' project.jiraProjectKey %}{% if request.GET.urlencode %}?{{ request.GET.urlencode }}{% endif %}">상세 보기</a>
+        </div>
+      </article>
+      {% endfor %}
+    </div>
     {% if pageObj.paginator.num_pages > 1 %}
     <nav class="pagination" aria-label="프로젝트 리스트 페이지">
       {% if pageObj.has_previous %}
@@ -385,8 +467,8 @@
     {% endif %}
   </div>
 
-  <div class="panel-stack">
-    <aside class="panel panel--stacked">
+  <div class="panel-stack panel-stack--dashboard">
+    <aside class="panel panel--stacked panel--dashboard-side" data-dashboard-side-panel id="attention-panel">
       <div class="panel__header">
         <h2 class="panel__title">주의 필요 프로젝트</h2>
       </div>
@@ -422,7 +504,7 @@
       </ul>
     </aside>
 
-    <aside class="panel panel--stacked">
+    <aside class="panel panel--stacked panel--dashboard-side" data-dashboard-side-panel id="failed-build-panel">
       <div class="panel__header">
         <h2 class="panel__title">최근 실패 빌드</h2>
       </div>

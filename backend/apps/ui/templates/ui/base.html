@@ -12,21 +12,102 @@
     <link rel="stylesheet" href="{% static 'ui/app.css' %}">
   </head>
   <body>
+    <header class="app-header">
+      <div class="app-header__inner">
+        <div class="app-header__brand-group">
+          <button
+            class="sidebar__toggle sidebar__toggle--header app-header__toggle"
+            type="button"
+            data-sidebar-toggle
+            aria-expanded="true"
+            aria-controls="app-sidebar"
+            aria-label="사이드바 접기"
+            title="사이드바 접기"
+          >
+            <span class="sidebar__toggle-bars" aria-hidden="true">
+              <span class="sidebar__toggle-bar"></span>
+              <span class="sidebar__toggle-bar"></span>
+              <span class="sidebar__toggle-bar"></span>
+            </span>
+            <span class="sidebar__toggle-label">사이드바 접기</span>
+          </button>
+          <a class="app-header__brand" href="{% url 'project-list' %}">
+            <span class="app-header__brand-mark" aria-hidden="true">
+              <img src="{% static 'ui/favicon.svg' %}" alt="">
+            </span>
+            <span class="app-header__brand-copy">
+              <strong class="app-header__brand-title">Bamboo Ops Console</strong>
+              <span class="app-header__brand-sub">Spec Generator Dashboard</span>
+            </span>
+          </a>
+        </div>
+        <nav class="app-header__nav" aria-label="서비스 이동">
+          <a class="app-header__nav-link{% if request.resolver_match.url_name == 'project-list' or request.resolver_match.url_name == 'project-detail' %} app-header__nav-link--active{% endif %}" href="{% url 'project-list' %}">프로젝트</a>
+          <span class="app-header__nav-link app-header__nav-link--muted">빌드 플랜</span>
+          <span class="app-header__nav-link app-header__nav-link--muted">실행 이력</span>
+          <span class="app-header__nav-link app-header__nav-link--muted">정적 분석</span>
+        </nav>
+      </div>
+    </header>
+
     <div class="app-shell">
-      <aside class="sidebar">
-        <a class="sidebar__brand" href="{% url 'project-list' %}">
-          <span class="sidebar__logo">BS</span>
-          <span>
-            <strong class="sidebar__title">Bamboo Spec</strong>
-            <span class="sidebar__subtitle">Build Metadata Console</span>
-          </span>
-        </a>
+      <aside class="sidebar" id="app-sidebar">
+        <div class="sidebar__top">
+          <button
+            class="sidebar__toggle"
+            type="button"
+            data-sidebar-toggle
+            aria-expanded="true"
+            aria-controls="app-sidebar"
+            aria-label="사이드바 접기"
+            title="사이드바 접기"
+          >
+            <span class="sidebar__toggle-bars" aria-hidden="true">
+              <span class="sidebar__toggle-bar"></span>
+              <span class="sidebar__toggle-bar"></span>
+              <span class="sidebar__toggle-bar"></span>
+            </span>
+            <span class="sidebar__toggle-label">사이드바 접기</span>
+          </button>
+        </div>
 
         <nav class="sidebar__nav">
-          <a class="sidebar__nav-item sidebar__nav-item--active" href="{% url 'project-list' %}">프로젝트</a>
-          <span class="sidebar__nav-item sidebar__nav-item--muted">빌드 플랜</span>
-          <span class="sidebar__nav-item sidebar__nav-item--muted">실행 이력</span>
-          <span class="sidebar__nav-item sidebar__nav-item--muted">정적 분석</span>
+          <a class="sidebar__nav-item sidebar__nav-item--active" href="{% url 'project-list' %}">
+            <span class="sidebar__nav-icon" aria-hidden="true">
+              <svg viewBox="0 0 20 20" focusable="false">
+                <path d="M3 5.5A2.5 2.5 0 0 1 5.5 3h9A2.5 2.5 0 0 1 17 5.5v9a2.5 2.5 0 0 1-2.5 2.5h-9A2.5 2.5 0 0 1 3 14.5z"/>
+                <path d="M6.5 7h3v3h-3zM10.5 7h3v3h-3zM6.5 11h7v2.5h-7z"/>
+              </svg>
+            </span>
+            <span class="sidebar__nav-text">프로젝트</span>
+          </a>
+          <span class="sidebar__nav-item sidebar__nav-item--muted">
+            <span class="sidebar__nav-icon" aria-hidden="true">
+              <svg viewBox="0 0 20 20" focusable="false">
+                <path d="M4 4.5h5l1.2 1.5H16A1.5 1.5 0 0 1 17.5 7.5v8A1.5 1.5 0 0 1 16 17H4A1.5 1.5 0 0 1 2.5 15.5v-9A2 2 0 0 1 4.5 4.5z"/>
+                <path d="M6 9h8M6 12h5"/>
+              </svg>
+            </span>
+            <span class="sidebar__nav-text">빌드 플랜</span>
+          </span>
+          <span class="sidebar__nav-item sidebar__nav-item--muted">
+            <span class="sidebar__nav-icon" aria-hidden="true">
+              <svg viewBox="0 0 20 20" focusable="false">
+                <path d="M10 3.5A6.5 6.5 0 1 1 3.5 10"/>
+                <path d="M10 6v4l2.5 2.5"/>
+              </svg>
+            </span>
+            <span class="sidebar__nav-text">실행 이력</span>
+          </span>
+          <span class="sidebar__nav-item sidebar__nav-item--muted">
+            <span class="sidebar__nav-icon" aria-hidden="true">
+              <svg viewBox="0 0 20 20" focusable="false">
+                <path d="M4 14.5 7.5 11 10 13l5-6"/>
+                <path d="M4 16.5h12"/>
+              </svg>
+            </span>
+            <span class="sidebar__nav-text">정적 분석</span>
+          </span>
         </nav>
 
         <section class="sidebar__section">
@@ -40,9 +121,11 @@
       <div class="main-shell">
         <header class="topbar">
           <div class="topbar__main">
-            <div>
-              <p class="topbar__eyebrow">Operations Dashboard</p>
-              <h1 class="topbar__title">{% block page_heading %}Bamboo Spec Generator{% endblock %}</h1>
+            <div class="topbar__heading">
+              <div class="topbar__heading-copy">
+                <p class="topbar__eyebrow">Operations Dashboard</p>
+                <h1 class="topbar__title">{% block page_heading %}Bamboo Spec Generator{% endblock %}</h1>
+              </div>
             </div>
             <form class="global-filter-bar" method="get" action="{% url 'project-list' %}">
               <label class="filter-field">
@@ -77,5 +160,42 @@
         </main>
       </div>
     </div>
+    <script>
+      (function () {
+        const appShell = document.querySelector(".app-shell");
+        const sidebar = document.getElementById("app-sidebar");
+        const toggleButtons = document.querySelectorAll("[data-sidebar-toggle]");
+        const storageKey = "bamboo-ui-sidebar-collapsed";
+
+        if (!appShell || !sidebar || !toggleButtons.length) {
+          return;
+        }
+
+        function applySidebarState(collapsed) {
+          appShell.classList.toggle("app-shell--sidebar-collapsed", collapsed);
+          sidebar.classList.toggle("sidebar--collapsed", collapsed);
+          toggleButtons.forEach(function (button) {
+            button.setAttribute("aria-expanded", collapsed ? "false" : "true");
+            const actionText = collapsed ? "사이드바 열기" : "사이드바 접기";
+            button.setAttribute("aria-label", actionText);
+            button.setAttribute("title", actionText);
+            const label = button.querySelector(".sidebar__toggle-label");
+            if (label) {
+              label.textContent = actionText;
+            }
+          });
+        }
+
+        applySidebarState(window.localStorage.getItem(storageKey) === "true");
+
+        toggleButtons.forEach(function (button) {
+          button.addEventListener("click", function () {
+            const nextCollapsed = !appShell.classList.contains("app-shell--sidebar-collapsed");
+            applySidebarState(nextCollapsed);
+            window.localStorage.setItem(storageKey, String(nextCollapsed));
+          });
+        });
+      }());
+    </script>
   </body>
 </html>

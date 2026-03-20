@@ -392,10 +392,12 @@
         const isHidden = editPanel.hasAttribute("hidden");
         if (isHidden) {
           editPanel.removeAttribute("hidden");
+          editPanel.classList.remove("registration-layout--collapsed");
           toggleEditButton.setAttribute("aria-expanded", "true");
           editPanel.scrollIntoView({ behavior: "smooth", block: "start" });
         } else {
           editPanel.setAttribute("hidden", "");
+          editPanel.classList.add("registration-layout--collapsed");
           toggleEditButton.setAttribute("aria-expanded", "false");
         }
       });

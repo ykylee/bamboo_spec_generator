@@ -62,6 +62,7 @@ def list_project_summaries() -> list[dict]:
                 "bitbucketProjectKey": project.bitbucket_project_key,
                 "representativeRepoSlug": representative_repo_slug,
                 "repositoryCount": repository_count,
+                "repositorySlugs": [repo.repo_slug for repo in sorted(repositories, key=lambda item: item.repo_slug)],
                 "buildCount": build_count,
                 "activeDefinitionCount": generation_status["activeDefinitionCount"],
                 "readyBuildCount": generation_status["readyBuildCount"],
