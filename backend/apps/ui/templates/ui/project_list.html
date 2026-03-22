@@ -2,6 +2,19 @@
 
 {% block title %}프로젝트 목록 | Bamboo Spec Generator{% endblock %}
 {% block page_heading %}프로젝트 대시보드{% endblock %}
+{% block topbar_controls %}
+<form class="global-filter-bar global-filter-bar--status" method="get" action="{% url 'project-list' %}">
+  <label class="filter-field">
+    <span class="filter-field__label">상태</span>
+    <select class="filter-field__input" name="status">
+      <option value="all"{% if request.GET.status|default:'all' == 'all' %} selected{% endif %}>전체</option>
+      <option value="attention"{% if request.GET.status == 'attention' %} selected{% endif %}>주의 필요</option>
+      <option value="healthy"{% if request.GET.status == 'healthy' %} selected{% endif %}>정상</option>
+    </select>
+  </label>
+  <button class="filter-submit" type="submit">적용</button>
+</form>
+{% endblock %}
 
 {% block content %}
 <section class="hero">

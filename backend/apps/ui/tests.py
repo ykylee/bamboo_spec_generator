@@ -127,6 +127,8 @@ class ProjectViewTest(TestCase):
         self.assertContains(response, 'class="status-light status-light--success"', html=False)
         self.assertContains(response, "Needs Attention")
         self.assertContains(response, 'class="project-compact-list"', html=False)
+        self.assertContains(response, 'id="project-nav-search"', html=False)
+        self.assertNotContains(response, 'name="q"', html=False)
         self.assertNotContains(response, "Representative Repo Missing")
         self.assertNotContains(response, "Specs Ready")
         self.assertContains(response, 'name="jira_project_key"', html=False)
@@ -149,6 +151,13 @@ class ProjectViewTest(TestCase):
         self.assertEqual(200, response.status_code)
         self.assertContains(response, "등록된 프로젝트가 없습니다.")
         self.assertContains(response, "실패 상태 빌드가 없습니다.")
+
+    def test_project_detail_does_not_render_list_search_filter(self) -> None:
+        response = self.client.get("/projects/SAMPLE/")
+
+        self.assertEqual(200, response.status_code)
+        self.assertContains(response, 'id="project-nav-search"', html=False)
+        self.assertNotContains(response, 'name="q"', html=False)
 
     def test_project_list_filters_by_query_across_project_keys_and_repo_slug(self) -> None:
         self._create_project_with_build(

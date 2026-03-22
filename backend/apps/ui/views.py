@@ -74,6 +74,7 @@ def project_list(request):
         "buildRows": build_rows,
         "registrationOpen": registration_open,
         "registrationSuggestions": _build_registration_suggestions(),
+        "navProjectSearchItems": _build_nav_project_search_items(all_projects),
     }
     return render(request, "ui/project_list.html", context)
 
@@ -113,6 +114,7 @@ def project_detail(request, jira_project_key: str):
         "buildRows": build_rows,
         "editOpen": edit_open,
         "registrationSuggestions": _build_registration_suggestions(),
+        "navProjectSearchItems": _build_nav_project_search_items(list_project_summaries()),
     }
     return render(request, "ui/project_detail.html", context)
 
@@ -260,6 +262,27 @@ def _build_registration_suggestions() -> dict:
             .distinct()
         ),
     }
+
+
+def _build_nav_project_search_items(projects: list[dict]) -> list[dict]:
+    return [
+        {
+            "jiraProjectKey": project["jiraProjectKey"],
+            "bitbucketProjectKey": project["bitbucketProjectKey"],
+            "representativeRepoSlug": project.get("representativeRepoSlug") or "",
+            "searchText": " ".join(
+                filter(
+                    None,
+                    [
+                        project["jiraProjectKey"].lower(),
+                        project["bitbucketProjectKey"].lower(),
+                        (project.get("representativeRepoSlug") or "").lower(),
+                    ],
+                )
+            ),
+        }
+        for project in projects
+    ]
 
 
 def _build_form_initial(project: dict) -> dict:
