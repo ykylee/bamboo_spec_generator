@@ -57,7 +57,7 @@
       <ul class="signal-queue">
         <li class="signal-queue__item"><strong>프로젝트 기준</strong><span>각 플랜이 어느 프로젝트에 묶여 있는지 바로 확인합니다.</span></li>
         <li class="signal-queue__item"><strong>메타데이터</strong><span>정적분석 도구 버전과 Coverity Project를 플랜 단위로 관리합니다.</span></li>
-        <li class="signal-queue__item"><strong>빌드 정보</strong><span>각 행에서 빌드키별 환경구성 관리 페이지로 바로 이동합니다.</span></li>
+        <li class="signal-queue__item"><strong>빌드 정보</strong><span>플랜 상세 안에서 등록 패널을 열어 빌드키별 환경구성을 관리합니다.</span></li>
       </ul>
     </article>
   </div>
@@ -105,9 +105,6 @@
               {% if plan.detailUrl %}
               <a class="chip chip--neutral" href="{{ plan.detailUrl }}">플랜 상세</a>
               {% endif %}
-              {% if plan.buildInfoUrl %}
-              <a class="chip chip--neutral" href="{{ plan.buildInfoUrl }}">빌드 정보</a>
-              {% endif %}
             </div>
           </td>
         </tr>
@@ -132,9 +129,6 @@
         <div class="project-compact-item__actions">
           {% if plan.detailUrl %}
           <a class="chip chip--neutral" href="{{ plan.detailUrl }}">플랜 상세</a>
-          {% endif %}
-          {% if plan.buildInfoUrl %}
-          <a class="chip chip--neutral" href="{{ plan.buildInfoUrl }}">빌드 정보</a>
           {% endif %}
         </div>
       </article>

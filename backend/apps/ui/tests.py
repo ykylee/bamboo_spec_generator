@@ -188,7 +188,6 @@ class ProjectViewTest(TestCase):
         self.assertContains(response, "coverity-2024.12")
         self.assertContains(response, "sample-api-coverity")
         self.assertContains(response, "/projects/SAMPLE/builds/SAMPAPI/")
-        self.assertContains(response, "/projects/SAMPLE/builds/SAMPAPI/infos/")
         self.assertContains(response, "최근 실패 빌드")
 
     def test_build_plan_list_filters_by_query_and_status(self) -> None:
@@ -749,6 +748,8 @@ class ProjectViewTest(TestCase):
         self.assertContains(response, "빌드 플랜 메타데이터")
         self.assertContains(response, "빌드 플랜 수정")
         self.assertContains(response, "빌드 정보")
+        self.assertContains(response, 'id="build-plan-metadata-panel"', html=False)
+        self.assertContains(response, 'id="build-plan-metadata-panel" hidden', html=False)
         self.assertContains(response, "api-linux")
         self.assertContains(response, "연결 정보")
         self.assertContains(response, "sample-app-api")
@@ -769,9 +770,9 @@ class ProjectViewTest(TestCase):
         self.assertEqual("coverity-2024.12", build_plan.static_analysis_tool_version)
         self.assertEqual("sample-api-coverity", build_plan.coverity_project)
 
-    def test_project_build_info_list_registers_build_info(self) -> None:
+    def test_project_build_detail_registers_build_info(self) -> None:
         response = self.client.post(
-            "/projects/SAMPLE/builds/SAMPAPI/infos/",
+            "/projects/SAMPLE/builds/SAMPAPI/",
             data={
                 "form_kind": "build_info",
                 "build_key": "api-linux",
@@ -787,10 +788,16 @@ class ProjectViewTest(TestCase):
         )
 
         self.assertEqual(302, response.status_code)
-        self.assertEqual("/projects/SAMPLE/builds/SAMPAPI/infos/", response["Location"])
+        self.assertEqual("/projects/SAMPLE/builds/SAMPAPI/", response["Location"])
         build_info = BuildPlanBuildInfo.objects.get(build_plan__plan_key="SAMPAPI", build_key="api-linux")
         self.assertEqual("java", build_info.language)
         self.assertEqual("services/api", build_info.build_sub_path)
+
+    def test_project_build_info_list_redirects_to_build_detail_panel(self) -> None:
+        response = self.client.get("/projects/SAMPLE/builds/SAMPAPI/infos/")
+
+        self.assertEqual(302, response.status_code)
+        self.assertEqual("/projects/SAMPLE/builds/SAMPAPI/?add_build_info=open", response["Location"])
 
     def test_project_build_info_detail_updates_build_info(self) -> None:
         BuildPlanBuildInfo.objects.create(

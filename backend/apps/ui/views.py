@@ -251,20 +251,43 @@ def project_build_detail(request, jira_project_key: str, plan_key: str):
         return render(request, "ui/build_detail.html", {"project": project, "build": None})
 
     metadata_form = BuildPlanMetadataForm(initial=_build_build_plan_metadata_initial(build))
+    build_info_form = BuildInfoMetadataForm()
     metadata_error = ""
+    build_info_error = ""
     metadata_open = request.GET.get("edit", "").lower() in {"1", "true", "open"}
+    build_info_open = request.GET.get("add_build_info", "").lower() in {"1", "true", "open"}
 
-    if request.method == "POST" and request.POST.get("form_kind", "").strip() == "build_plan_metadata":
-        metadata_form = BuildPlanMetadataForm(request.POST)
-        metadata_open = True
-        if metadata_form.is_valid():
-            update_build_plan_metadata(
-                plan_key=plan_key,
-                static_analysis_tool_version=metadata_form.cleaned_data["static_analysis_tool_version"],
-                coverity_project=metadata_form.cleaned_data["coverity_project"],
-            )
-            return redirect("project-build-detail", jira_project_key=jira_project_key, plan_key=plan_key)
-        metadata_error = "빌드 플랜 메타데이터를 다시 확인해 주세요."
+    if request.method == "POST":
+        form_kind = request.POST.get("form_kind", "").strip()
+        if form_kind == "build_plan_metadata":
+            metadata_form = BuildPlanMetadataForm(request.POST)
+            metadata_open = True
+            if metadata_form.is_valid():
+                update_build_plan_metadata(
+                    plan_key=plan_key,
+                    static_analysis_tool_version=metadata_form.cleaned_data["static_analysis_tool_version"],
+                    coverity_project=metadata_form.cleaned_data["coverity_project"],
+                )
+                return redirect("project-build-detail", jira_project_key=jira_project_key, plan_key=plan_key)
+            metadata_error = "빌드 플랜 메타데이터를 다시 확인해 주세요."
+        elif form_kind == "build_info":
+            build_info_form = BuildInfoMetadataForm(request.POST)
+            build_info_open = True
+            if build_info_form.is_valid():
+                upsert_build_info(
+                    plan_key=plan_key,
+                    build_key=build_info_form.cleaned_data["build_key"],
+                    pre_process=build_info_form.cleaned_data["pre_process"],
+                    build_command=build_info_form.cleaned_data["build_command"],
+                    clean_command=build_info_form.cleaned_data["clean_command"],
+                    language=build_info_form.cleaned_data["language"],
+                    compiler=build_info_form.cleaned_data["compiler"],
+                    analysis_excluded_files=build_info_form.cleaned_data["analysis_excluded_files"],
+                    coverity_stream=build_info_form.cleaned_data["coverity_stream"],
+                    build_sub_path=build_info_form.cleaned_data["build_sub_path"],
+                )
+                return redirect("project-build-detail", jira_project_key=jira_project_key, plan_key=plan_key)
+            build_info_error = "빌드 정보 입력값을 다시 확인해 주세요."
 
     project = get_project_detail(jira_project_key)
     if project is None:
@@ -285,6 +308,9 @@ def project_build_detail(request, jira_project_key: str, plan_key: str):
         "metadataForm": metadata_form,
         "metadataError": metadata_error,
         "metadataOpen": metadata_open,
+        "buildInfoForm": build_info_form,
+        "buildInfoError": build_info_error,
+        "buildInfoOpen": build_info_open,
         "buildInfoEntries": _list_build_info_entries(plan_key),
         "registrationSuggestions": _build_registration_suggestions(),
         "navProjectSearchItems": _build_nav_project_search_items(list_project_summaries()),
@@ -293,51 +319,7 @@ def project_build_detail(request, jira_project_key: str, plan_key: str):
 
 
 def project_build_info_list(request, jira_project_key: str, plan_key: str):
-    project = get_project_detail(jira_project_key)
-    if project is None:
-        return render(request, "ui/build_info_list.html", {"project": None, "build": None, "executions": []})
-
-    build = next((item for item in project["builds"] if item["planKey"] == plan_key), None)
-    if build is None:
-        return render(request, "ui/build_info_list.html", {"project": project, "build": None, "executions": []})
-
-    repository = next(
-        (item for item in project["repositories"] if item["repoSlug"] == build["repositorySlug"]),
-        None,
-    )
-    build_info_form = BuildInfoMetadataForm()
-    build_info_error = ""
-
-    if request.method == "POST" and request.POST.get("form_kind", "").strip() == "build_info":
-        build_info_form = BuildInfoMetadataForm(request.POST)
-        if build_info_form.is_valid():
-            upsert_build_info(
-                plan_key=plan_key,
-                build_key=build_info_form.cleaned_data["build_key"],
-                pre_process=build_info_form.cleaned_data["pre_process"],
-                build_command=build_info_form.cleaned_data["build_command"],
-                clean_command=build_info_form.cleaned_data["clean_command"],
-                language=build_info_form.cleaned_data["language"],
-                compiler=build_info_form.cleaned_data["compiler"],
-                analysis_excluded_files=build_info_form.cleaned_data["analysis_excluded_files"],
-                coverity_stream=build_info_form.cleaned_data["coverity_stream"],
-                build_sub_path=build_info_form.cleaned_data["build_sub_path"],
-            )
-            return redirect("project-build-info-list", jira_project_key=jira_project_key, plan_key=plan_key)
-        build_info_error = "빌드 정보 입력값을 다시 확인해 주세요."
-
-    context = {
-        "project": project,
-        "build": build,
-        "repository": repository,
-        "buildInfoEntries": _list_build_info_entries(plan_key),
-        "buildInfoForm": build_info_form,
-        "buildInfoError": build_info_error,
-        "executionGroups": _list_execution_groups(plan_key),
-        "registrationSuggestions": _build_registration_suggestions(),
-        "navProjectSearchItems": _build_nav_project_search_items(list_project_summaries()),
-    }
-    return render(request, "ui/build_info_list.html", context)
+    return redirect(f"/projects/{jira_project_key}/builds/{plan_key}/?add_build_info=open")
 
 
 def project_build_info_detail(request, jira_project_key: str, plan_key: str, build_key: str):

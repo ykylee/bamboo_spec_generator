@@ -423,19 +423,36 @@
         });
       }
 
+      function openPanel() {
+        config.panel.hidden = false;
+        config.panel.classList.add("registration-layout--collapsed");
+        requestAnimationFrame(function () {
+          requestAnimationFrame(function () {
+            config.panel.classList.remove("registration-layout--collapsed");
+            syncToggleButtons(true);
+            scrollWithHeaderOffset(config.panel);
+          });
+        });
+      }
+
+      function closePanel() {
+        resetPanel(config.panel);
+        config.panel.classList.add("registration-layout--collapsed");
+        syncToggleButtons(false);
+        window.setTimeout(function () {
+          if (config.panel.classList.contains("registration-layout--collapsed")) {
+            config.panel.hidden = true;
+          }
+        }, 280);
+      }
+
       config.buttons.forEach(function (button) {
         button.addEventListener("click", function () {
           const isHidden = config.panel.hasAttribute("hidden");
           if (isHidden) {
-            config.panel.removeAttribute("hidden");
-            config.panel.classList.remove("registration-layout--collapsed");
-            syncToggleButtons(true);
-            scrollWithHeaderOffset(config.panel);
+            openPanel();
           } else {
-            resetPanel(config.panel);
-            config.panel.setAttribute("hidden", "");
-            config.panel.classList.add("registration-layout--collapsed");
-            syncToggleButtons(false);
+            closePanel();
           }
         });
       });

@@ -12,8 +12,21 @@
     <h1 class="hero__title">{{ build.buildName }}</h1>
     <p class="signal-hero__body">빌드 상세에서는 플랜 공통 메타데이터를 관리하고, 플랜 아래 여러 종류의 `빌드 정보`를 따로 등록해 환경구성과 분석 집계 기준을 분리합니다.</p>
     <div class="hero__actions">
-      <a class="action-button" href="#build-plan-metadata-panel">빌드 플랜 수정</a>
-      <a class="action-button action-button--ghost" href="{% url 'project-build-info-list' project.jiraProjectKey build.planKey %}">빌드 정보</a>
+      <button
+        class="action-button"
+        type="button"
+        data-toggle-build-plan-metadata
+        aria-expanded="{% if metadataOpen %}true{% else %}false{% endif %}"
+        aria-controls="build-plan-metadata-panel"
+      >
+        빌드 플랜 수정
+      </button>
+      <a
+        class="action-button action-button--ghost"
+        href="{% url 'project-build-detail' project.jiraProjectKey build.planKey %}?add_build_info=open#build-info-add-panel"
+      >
+        빌드 정보 등록
+      </a>
       {% if repository %}
       <a class="action-button action-button--ghost" href="{% url 'project-repository-detail' project.jiraProjectKey repository.repoSlug %}">저장소 상세</a>
       {% endif %}
@@ -58,7 +71,7 @@
   </div>
 </section>
 
-<section class="registration-layout registration-layout--signal" id="build-plan-metadata-panel">
+<section class="registration-layout registration-layout--signal{% if not metadataOpen %} registration-layout--collapsed{% endif %}" id="build-plan-metadata-panel" {% if not metadataOpen %}hidden{% endif %}>
   <article class="panel registration-panel registration-panel--signal">
     <div class="panel__header">
       <div>
@@ -67,10 +80,18 @@
       </div>
       <div class="panel__header-actions">
         <span class="badge">Plan Scoped</span>
-        <a class="action-button action-button--ghost" href="{% url 'project-build-info-list' project.jiraProjectKey build.planKey %}">빌드 정보</a>
+        <button
+          class="action-button action-button--ghost"
+          type="button"
+          data-toggle-build-plan-metadata
+          aria-expanded="{% if metadataOpen %}true{% else %}false{% endif %}"
+          aria-controls="build-plan-metadata-panel"
+        >
+          접기
+        </button>
       </div>
     </div>
-    <p class="panel__body">플랜 공통 메타데이터는 이 패널에서 관리하고, 개별 실행 결과는 `빌드 정보` 페이지로 분리합니다.</p>
+    <p class="panel__body">플랜 공통 메타데이터는 이 패널에서 관리하고, 빌드 환경구성은 아래 등록 패널에서 따로 관리합니다.</p>
     {% if metadataError %}
     <div class="form-alert form-alert--error">{{ metadataError }}</div>
     {% endif %}
@@ -119,6 +140,92 @@
   </aside>
 </section>
 
+<section class="registration-layout registration-layout--signal{% if not buildInfoOpen %} registration-layout--collapsed{% endif %}" id="build-info-add-panel" {% if not buildInfoOpen %}hidden{% endif %}>
+  <article class="panel registration-panel registration-panel--signal">
+    <div class="panel__header">
+      <div>
+        <p class="panel__eyebrow">Build Info Entry</p>
+        <h2 class="panel__title">빌드 정보 등록</h2>
+      </div>
+      <div class="panel__header-actions">
+        <span class="badge">{{ build.buildInfoCount }} Registered</span>
+        <a
+          class="action-button action-button--ghost"
+          href="{% url 'project-build-detail' project.jiraProjectKey build.planKey %}"
+        >
+          접기
+        </a>
+      </div>
+    </div>
+    <p class="panel__body">플랜 내부 개별 빌드 환경구성을 빌드키 단위로 등록합니다. 다른 등록 패널과 동일하게 필요할 때만 펼쳐 사용합니다.</p>
+    {% if buildInfoError %}
+    <div class="form-alert form-alert--error">{{ buildInfoError }}</div>
+    {% endif %}
+    <datalist id="coverity-stream-options">
+      {% for item in registrationSuggestions.coverityStreams %}
+      <option value="{{ item }}"></option>
+      {% endfor %}
+    </datalist>
+    <form class="project-form" method="post" action="{% url 'project-build-detail' project.jiraProjectKey build.planKey %}">
+      {% csrf_token %}
+      <input type="hidden" name="form_kind" value="build_info">
+      <div class="project-form__grid">
+        <label class="project-form__field">
+          <span class="project-form__label">빌드키</span>
+          {{ buildInfoForm.build_key }}
+          {% if buildInfoForm.build_key.errors %}<span class="project-form__error">{{ buildInfoForm.build_key.errors|join:", " }}</span>{% endif %}
+        </label>
+        <label class="project-form__field">
+          <span class="project-form__label">언어</span>
+          {{ buildInfoForm.language }}
+        </label>
+        <label class="project-form__field">
+          <span class="project-form__label">컴파일러</span>
+          {{ buildInfoForm.compiler }}
+        </label>
+        <label class="project-form__field">
+          <span class="project-form__label">Coverity Stream</span>
+          {{ buildInfoForm.coverity_stream }}
+        </label>
+        <label class="project-form__field">
+          <span class="project-form__label">빌드 Sub Path</span>
+          {{ buildInfoForm.build_sub_path }}
+        </label>
+        <label class="project-form__field project-form__field--span-3">
+          <span class="project-form__label">Pre Process</span>
+          {{ buildInfoForm.pre_process }}
+        </label>
+        <label class="project-form__field project-form__field--span-3">
+          <span class="project-form__label">빌드 명령어</span>
+          {{ buildInfoForm.build_command }}
+        </label>
+        <label class="project-form__field project-form__field--span-3">
+          <span class="project-form__label">클린 명령어</span>
+          {{ buildInfoForm.clean_command }}
+        </label>
+        <label class="project-form__field project-form__field--span-3">
+          <span class="project-form__label">분석 제외 파일</span>
+          {{ buildInfoForm.analysis_excluded_files }}
+        </label>
+      </div>
+      <div class="project-form__actions">
+        <button class="action-button" type="submit">빌드 정보 등록</button>
+      </div>
+    </form>
+  </article>
+
+  <aside class="panel registration-hints registration-hints--signal">
+    <div class="panel__header">
+      <h2 class="panel__title">입력 기준</h2>
+    </div>
+    <ul class="meta-list">
+      <li><strong>빌드키</strong> 같은 플랜 안에서 개별 빌드를 구분하는 고유 키입니다.</li>
+      <li><strong>환경구성</strong> 명령어, 언어, 컴파일러, sub path를 빌드별로 분리해 관리합니다.</li>
+      <li><strong>실행 연결</strong> Bamboo 실행 시 `buildKey`를 넘기면 이 항목 기준으로 결과를 취합할 수 있습니다.</li>
+    </ul>
+  </aside>
+</section>
+
 <section class="stat-grid">
   <article class="stat-card stat-card--signal">
     <span class="stat-card__label">Static Analysis</span>
@@ -162,7 +269,7 @@
       <li><strong>Repository</strong>{% if repository %}<a href="{% url 'project-repository-detail' project.jiraProjectKey repository.repoSlug %}">{{ repository.repoSlug }}</a>{% else %}미연결{% endif %}</li>
       <li><strong>Latest Version</strong>{{ build.latestVersion|default:"미기록" }}</li>
       <li><strong>Latest Result</strong>{% if build.latestSuccess %}성공{% elif build.latestSuccess == False %}실패{% else %}미기록{% endif %}</li>
-      <li><strong>Build Info Page</strong><a href="{% url 'project-build-info-list' project.jiraProjectKey build.planKey %}">빌드 정보 관리</a></li>
+      <li><strong>Build Info</strong><a class="chip chip--neutral" href="{% url 'project-build-detail' project.jiraProjectKey build.planKey %}?add_build_info=open#build-info-add-panel">등록 패널 열기</a></li>
     </ul>
   </article>
 
@@ -184,7 +291,7 @@
       <p class="panel__eyebrow">Build Info Snapshot</p>
       <h2 class="panel__title">등록된 빌드 정보</h2>
     </div>
-    <a class="chip chip--neutral" href="{% url 'project-build-info-list' project.jiraProjectKey build.planKey %}">전체 관리</a>
+    <a class="chip chip--neutral" href="{% url 'project-build-detail' project.jiraProjectKey build.planKey %}?add_build_info=open#build-info-add-panel">등록</a>
   </div>
   <ul class="entity-preview-list">
     {% for buildInfo in buildInfoEntries %}
@@ -217,4 +324,67 @@
   <p class="empty-state__body">프로젝트가 없어서 빌드 상세를 불러올 수 없습니다.</p>
 </section>
 {% endif %}
+<script>
+  (function () {
+    const panelConfigs = [
+      { panel: document.getElementById("build-plan-metadata-panel"), buttons: Array.from(document.querySelectorAll("[data-toggle-build-plan-metadata]")) },
+    ];
+
+    function scrollWithHeaderOffset(target) {
+      if (!target) {
+        return;
+      }
+      const header = document.querySelector(".app-header");
+      const headerHeight = header ? header.getBoundingClientRect().height : 0;
+      const targetTop = target.getBoundingClientRect().top + window.scrollY;
+      const offsetTop = Math.max(targetTop - headerHeight - 18, 0);
+      window.scrollTo({ top: offsetTop, behavior: "smooth" });
+    }
+
+    panelConfigs.forEach(function (config) {
+      if (!config.panel || !config.buttons.length) {
+        return;
+      }
+
+      function syncToggleButtons(isExpanded) {
+        config.buttons.forEach(function (button) {
+          button.setAttribute("aria-expanded", isExpanded ? "true" : "false");
+        });
+      }
+
+      function openPanel() {
+        config.panel.hidden = false;
+        config.panel.classList.add("registration-layout--collapsed");
+        requestAnimationFrame(function () {
+          requestAnimationFrame(function () {
+            config.panel.classList.remove("registration-layout--collapsed");
+            syncToggleButtons(true);
+            scrollWithHeaderOffset(config.panel);
+          });
+        });
+      }
+
+      function closePanel() {
+        config.panel.classList.add("registration-layout--collapsed");
+        syncToggleButtons(false);
+        window.setTimeout(function () {
+          if (config.panel.classList.contains("registration-layout--collapsed")) {
+            config.panel.hidden = true;
+          }
+        }, 280);
+      }
+
+      config.buttons.forEach(function (button) {
+        button.addEventListener("click", function () {
+          const isHidden = config.panel.hasAttribute("hidden");
+          if (isHidden) {
+            openPanel();
+          } else {
+            closePanel();
+          }
+        });
+      });
+    });
+  }());
+</script>
 {% endblock %}

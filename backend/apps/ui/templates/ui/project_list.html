@@ -542,23 +542,40 @@
     }
 
     if (registrationPanel && toggleRegistrationButton) {
-      document.querySelectorAll("[data-toggle-registration]").forEach(function (button) {
-        button.addEventListener("click", function () {
-          const isHidden = registrationPanel.hasAttribute("hidden");
-          if (isHidden) {
-            registrationPanel.removeAttribute("hidden");
+      function openRegistrationPanel() {
+        registrationPanel.hidden = false;
+        registrationPanel.classList.add("registration-layout--collapsed");
+        requestAnimationFrame(function () {
+          requestAnimationFrame(function () {
             registrationPanel.classList.remove("registration-layout--collapsed");
             document.querySelectorAll("[data-toggle-registration]").forEach(function (toggle) {
               toggle.setAttribute("aria-expanded", "true");
             });
             scrollWithHeaderOffset(registrationPanel);
+          });
+        });
+      }
+
+      function closeRegistrationPanel() {
+        resetRegistrationPanel();
+        registrationPanel.classList.add("registration-layout--collapsed");
+        document.querySelectorAll("[data-toggle-registration]").forEach(function (toggle) {
+          toggle.setAttribute("aria-expanded", "false");
+        });
+        window.setTimeout(function () {
+          if (registrationPanel.classList.contains("registration-layout--collapsed")) {
+            registrationPanel.hidden = true;
+          }
+        }, 280);
+      }
+
+      document.querySelectorAll("[data-toggle-registration]").forEach(function (button) {
+        button.addEventListener("click", function () {
+          const isHidden = registrationPanel.hasAttribute("hidden");
+          if (isHidden) {
+            openRegistrationPanel();
           } else {
-            resetRegistrationPanel();
-            registrationPanel.setAttribute("hidden", "");
-            registrationPanel.classList.add("registration-layout--collapsed");
-            document.querySelectorAll("[data-toggle-registration]").forEach(function (toggle) {
-              toggle.setAttribute("aria-expanded", "false");
-            });
+            closeRegistrationPanel();
           }
         });
       });

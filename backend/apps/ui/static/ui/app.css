@@ -483,10 +483,21 @@ a {
   display: grid;
   grid-template-columns: minmax(0, 1.65fr) minmax(300px, 0.75fr);
   gap: 18px;
+  overflow: clip;
+  max-height: 2400px;
+  opacity: 1;
+  transform: translateY(0);
+  transition:
+    max-height 280ms ease,
+    opacity 220ms ease,
+    transform 280ms ease;
 }
 
 .registration-layout--collapsed {
-  display: none;
+  max-height: 0;
+  opacity: 0;
+  transform: translateY(-10px);
+  pointer-events: none;
 }
 
 .registration-panel,

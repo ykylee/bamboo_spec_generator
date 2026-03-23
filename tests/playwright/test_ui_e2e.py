@@ -211,7 +211,7 @@ class UiPlaywrightE2ETest(unittest.TestCase):
         self.page.locator('input[name="build_name"]').first.fill("Temp Build")
 
         self.page.get_by_role("button", name="접기", exact=True).click()
-        self.page.wait_for_timeout(150)
+        self.page.wait_for_timeout(350)
         self.assertEqual("", registration_panel.get_attribute("hidden"))
         self.assertEqual("false", toggle_button.get_attribute("aria-expanded"))
 
@@ -377,7 +377,7 @@ class UiPlaywrightE2ETest(unittest.TestCase):
         self.page.get_by_role("link", name="플랜 상세").first.click()
         self.page.wait_for_url(f"{self.base_url}/projects/SAMPLE/builds/SAMPAPI/")
 
-    def test_build_detail_updates_plan_metadata_and_opens_build_info_page(self) -> None:
+    def test_build_detail_updates_plan_metadata_and_registers_build_info(self) -> None:
         self._create_project_with_build(
             jira_project_key="SAMPLE",
             bitbucket_project_key="SAMPLE",
@@ -392,6 +392,11 @@ class UiPlaywrightE2ETest(unittest.TestCase):
         )
 
         self.page.goto(f"{self.base_url}/projects/SAMPLE/builds/SAMPAPI/", wait_until="domcontentloaded")
+        metadata_panel = self.page.locator("#build-plan-metadata-panel")
+        self.assertEqual("", metadata_panel.get_attribute("hidden"))
+        self.page.get_by_role("button", name="빌드 플랜 수정").first.click()
+        self.page.wait_for_timeout(300)
+        self.assertIsNone(metadata_panel.get_attribute("hidden"))
         self.page.locator('input[name="static_analysis_tool_version"]').fill("coverity-2024.12")
         self.page.locator('input[name="coverity_project"]').fill("sample-api-coverity")
         self.page.get_by_role("button", name="수정 저장").click()
@@ -400,9 +405,12 @@ class UiPlaywrightE2ETest(unittest.TestCase):
         self.assertTrue(self.page.locator(".signal-hero").get_by_text("coverity-2024.12").first.is_visible())
         self.assertTrue(self.page.locator(".signal-hero").get_by_text("sample-api-coverity").first.is_visible())
 
-        self.page.get_by_role("link", name="빌드 정보").first.click()
-        self.page.wait_for_url(f"{self.base_url}/projects/SAMPLE/builds/SAMPAPI/infos/")
-        self.assertTrue(self.page.get_by_text("빌드 정보 목록").is_visible())
+        build_info_panel = self.page.locator("#build-info-add-panel")
+        self.assertEqual("", build_info_panel.get_attribute("hidden"))
+        self.page.get_by_role("link", name="빌드 정보 등록").first.click()
+        self.page.wait_for_timeout(300)
+        self.assertIn("/projects/SAMPLE/builds/SAMPAPI/?add_build_info=open", self.page.url)
+        self.assertIsNone(build_info_panel.get_attribute("hidden"))
         self.page.locator('input[name="build_key"]').fill("api-linux")
         self.page.locator('input[name="language"]').fill("java")
         self.page.locator('input[name="compiler"]').fill("maven")
@@ -410,9 +418,9 @@ class UiPlaywrightE2ETest(unittest.TestCase):
         self.page.locator('input[name="build_sub_path"]').fill("services/api")
         self.page.locator('textarea[name="build_command"]').fill("mvn -B clean package")
         self.page.get_by_role("button", name="빌드 정보 등록").click()
-        self.page.wait_for_url(f"{self.base_url}/projects/SAMPLE/builds/SAMPAPI/infos/")
+        self.page.wait_for_url(f"{self.base_url}/projects/SAMPLE/builds/SAMPAPI/")
         self.assertTrue(self.page.get_by_text("api-linux").first.is_visible())
-        self.page.locator("table.project-table").get_by_role("link", name="상세").click()
+        self.page.locator(f'a[href="/projects/SAMPLE/builds/SAMPAPI/infos/api-linux/"]').first.click()
         self.page.wait_for_url(f"{self.base_url}/projects/SAMPLE/builds/SAMPAPI/infos/api-linux/")
         self.assertTrue(self.page.get_by_role("heading", name="빌드 정보 수정").is_visible())
 
@@ -479,7 +487,7 @@ class UiPlaywrightE2ETest(unittest.TestCase):
         representative_input.fill("sample-app-web")
 
         edit_panel.get_by_role("button", name="접기", exact=True).click()
-        self.page.wait_for_timeout(150)
+        self.page.wait_for_timeout(350)
 
         self.assertEqual("", edit_panel.get_attribute("hidden"))
         self.assertEqual("false", open_button.get_attribute("aria-expanded"))
