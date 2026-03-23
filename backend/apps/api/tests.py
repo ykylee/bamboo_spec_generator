@@ -74,6 +74,23 @@ class ApiSmokeTest(TestCase):
         self.assertEqual("BITBUCKET_SERVER", payload["currentRepository"]["applicationLink"])
         self.assertEqual("linked", payload["currentRepository"]["linkageMode"])
 
+    def test_prepare_context_endpoint_uses_create_if_missing_when_git_clone_template_exists(self) -> None:
+        SystemSetting.objects.create(
+            key=SystemSetting.KEY_GIT_CLONE_URL_TEMPLATE,
+            value="https://git.example.com/scm/{project_key_lower}/{repo_slug}.git",
+        )
+
+        response = self.client.get("/api/v1/build-plans/SAMPAPI/prepare-context", **self.auth_headers)
+
+        self.assertEqual(200, response.status_code)
+        payload = response.json()
+        self.assertEqual("create_if_missing", payload["currentRepository"]["linkageMode"])
+        self.assertEqual(
+            "https://git.example.com/scm/sample/sample-app-api.git",
+            payload["currentRepository"]["cloneUrl"],
+        )
+        self.assertEqual("create_if_missing", payload["variables"]["currentRepository.linkageMode"])
+
     def test_execution_start_and_finish_endpoints(self) -> None:
         start_response = self.client.post(
             "/api/v1/build-plans/SAMPAPI/executions/start",
@@ -276,10 +293,38 @@ class ApiSmokeTest(TestCase):
 
         self.assertEqual(200, response.status_code)
         payload = response.json()
-        self.assertEqual(1, payload["initializedCount"])
+        self.assertEqual(0, payload["initializedCount"])
+        self.assertEqual(1, payload["updatedCount"])
         build_info = BuildPlanBuildInfo.objects.get(build_plan=self.plan)
         self.assertEqual("linux", build_info.operating_system)
-        self.assertEqual(".", build_info.build_sub_path)
+        self.assertEqual("services/sample-app-api", build_info.build_sub_path)
+
+    def test_specs_draft_initialize_endpoint_preserves_multiple_build_infos(self) -> None:
+        BuildPlanBuildInfo.objects.create(
+            build_plan=self.plan,
+            build_key="api-windows",
+            operating_system="windows",
+            pre_process="setup.bat",
+            build_command="mvn -B verify -Pwindows",
+            clean_command="mvn -B clean",
+            analysis_excluded_files="generated/**",
+            language="java",
+            compiler="maven",
+            coverity_stream="",
+            build_sub_path="services/windows",
+        )
+
+        response = self.client.post(
+            "/api/v1/system-settings/specs-drafts/initialize?resetExisting=true",
+            content_type="application/json",
+            **self.auth_headers,
+        )
+
+        self.assertEqual(200, response.status_code)
+        payload = response.json()
+        self.assertEqual(2, payload["updatedCount"])
+        self.assertEqual(2, BuildPlanBuildInfo.objects.filter(build_plan=self.plan).count())
+        self.assertEqual({"api-linux", "api-windows"}, set(self.plan.build_infos.values_list("build_key", flat=True)))
 
     def test_specs_draft_initialize_plan_endpoint_refreshes_existing_build_info(self) -> None:
         self.plan.definitions.all().delete()

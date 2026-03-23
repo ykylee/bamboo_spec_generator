@@ -39,16 +39,14 @@ def _initialize_specs_draft_plans(*, plans, reset_existing: bool) -> dict[str, i
                 continue
 
             repository = getattr(plan.project_build, "repository", None)
-            if reset_existing:
-                removed_count += plan.build_infos.count()
-                plan.build_infos.all().delete()
+            existing_build_infos = list(plan.build_infos.all().order_by("build_key"))
 
-            if plan.build_infos.exists():
+            if existing_build_infos:
                 inferred_language, inferred_compiler = _infer_language_and_compiler(
                     build_type=plan.project_build.build_type,
                     runtime_stack=plan.project_build.runtime_stack,
                 )
-                for build_info in plan.build_infos.all():
+                for build_info in existing_build_infos:
                     changed = False
                     normalized_operating_system = (build_info.operating_system or "linux").strip()
                     normalized_language = build_info.language.strip() or inferred_language
@@ -72,17 +70,31 @@ def _initialize_specs_draft_plans(*, plans, reset_existing: bool) -> dict[str, i
                         build_info.build_sub_path = normalized_sub_path
                         changed = True
 
+                    if reset_existing:
+                        for field_name in ("pre_process", "build_command", "clean_command", "analysis_excluded_files"):
+                            if getattr(build_info, field_name):
+                                setattr(build_info, field_name, "")
+                                changed = True
+
                     if changed:
-                        build_info.save(
-                            update_fields=[
-                                "operating_system",
-                                "language",
-                                "compiler",
-                                "coverity_stream",
-                                "build_sub_path",
-                                "updated_at",
-                            ]
-                        )
+                        update_fields = [
+                            "operating_system",
+                            "language",
+                            "compiler",
+                            "coverity_stream",
+                            "build_sub_path",
+                            "updated_at",
+                        ]
+                        if reset_existing:
+                            update_fields.extend(
+                                [
+                                    "pre_process",
+                                    "build_command",
+                                    "clean_command",
+                                    "analysis_excluded_files",
+                                ]
+                            )
+                        build_info.save(update_fields=update_fields)
                         updated_count += 1
                 continue
 

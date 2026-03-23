@@ -63,6 +63,15 @@ def get_prepare_context_by_plan_key(plan_key: str) -> dict | None:
         current_repository = next((repo for repo in repositories if repo.is_representative), None)
     if current_repository is None and repositories:
         current_repository = repositories[0]
+    linkage_mode = _repository_linkage_mode(project=project, repository=current_repository)
+    clone_url = (
+        build_git_clone_url(
+            project_key=project.bitbucket_project_key,
+            repo_slug=current_repository.repo_slug,
+        )
+        if current_repository
+        else ""
+    )
 
     return {
         "planKey": plan.plan_key,
@@ -76,15 +85,8 @@ def get_prepare_context_by_plan_key(plan_key: str) -> dict | None:
             "coverityProject": current_repository.coverity_project if current_repository else "",
             "coverityStream": current_repository.coverity_stream if current_repository else "",
             "applicationLink": "BITBUCKET_SERVER",
-            "cloneUrl": (
-                build_git_clone_url(
-                    project_key=project.bitbucket_project_key,
-                    repo_slug=current_repository.repo_slug,
-                )
-                if current_repository
-                else ""
-            ),
-            "linkageMode": "linked",
+            "cloneUrl": clone_url,
+            "linkageMode": linkage_mode,
         },
         "projectBuild": {
             "buildName": project_build.build_name,
@@ -99,19 +101,13 @@ def get_prepare_context_by_plan_key(plan_key: str) -> dict | None:
             "BITBUCKET_PROJECT_KEY": project.bitbucket_project_key,
             "BITBUCKET_REPO_SLUG": current_repository.repo_slug if current_repository else "",
             "BITBUCKET_APPLICATION_LINK": "BITBUCKET_SERVER",
-            "BITBUCKET_CLONE_URL": (
-                build_git_clone_url(
-                    project_key=project.bitbucket_project_key,
-                    repo_slug=current_repository.repo_slug,
-                )
-                if current_repository
-                else ""
-            ),
+            "BITBUCKET_CLONE_URL": clone_url,
             "REPRESENTATIVE_REPO_SLUG": project.representative_repo_slug,
             "COVERITY_PROJECT": current_repository.coverity_project if current_repository else "",
             "COVERITY_STREAM": current_repository.coverity_stream if current_repository else "",
             "PROJECT_BUILD_NAME": project_build.build_name,
             "PROJECT_BUILD_TYPE": project_build.build_type,
+            "currentRepository.linkageMode": linkage_mode,
         },
     }
 
@@ -541,6 +537,15 @@ def _build_definition_for_plan_summary(*, plan: BuildPlan, build_infos: list):
 def _build_definition_payload_from_registration(*, plan: BuildPlan, build_info) -> dict:
     project = plan.project_build.project
     repository = getattr(plan.project_build, "repository", None)
+    linkage_mode = _repository_linkage_mode(project=project, repository=repository)
+    clone_url = (
+        build_git_clone_url(
+            project_key=project.bitbucket_project_key,
+            repo_slug=repository.repo_slug,
+        )
+        if repository
+        else ""
+    )
     language, compiler = _resolve_language_and_compiler(plan=plan, build_info=build_info)
     operating_system = _normalize_operating_system(getattr(build_info, "operating_system", ""))
     build_key = getattr(build_info, "build_key", "").strip()
@@ -556,16 +561,9 @@ def _build_definition_payload_from_registration(*, plan: BuildPlan, build_info) 
             "provider": "bitbucket",
             "projectKey": project.bitbucket_project_key,
             "repoSlug": repository.repo_slug if repository else "",
-            "linkageMode": "linked",
+            "linkageMode": linkage_mode,
             "applicationLink": "BITBUCKET_SERVER",
-            "cloneUrl": (
-                build_git_clone_url(
-                    project_key=project.bitbucket_project_key,
-                    repo_slug=repository.repo_slug,
-                )
-                if repository
-                else ""
-            ),
+            "cloneUrl": clone_url,
             "branches": ["dev", "release", "master"],
         },
         "requirements": {"os": operating_system, "extraCapabilities": []},
@@ -626,6 +624,18 @@ def _normalize_operating_system(value: str) -> str:
 def _normalize_build_sub_path(value: str) -> str:
     normalized = (value or "").strip()
     return normalized or "."
+
+
+def _repository_linkage_mode(*, project, repository) -> str:
+    if repository is None:
+        return "linked"
+    clone_url = build_git_clone_url(
+        project_key=project.bitbucket_project_key,
+        repo_slug=repository.repo_slug,
+    ).strip()
+    if clone_url:
+        return "create_if_missing"
+    return "linked"
 
 
 def _default_custom_tool_commands() -> list[str]:

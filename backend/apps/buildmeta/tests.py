@@ -288,6 +288,43 @@ class DefinitionSelectorTest(TestCase):
         self.assertEqual("BITBUCKET_SERVER", payload["definition"]["repository"]["applicationLink"])
         self.assertEqual("services/sample-app-api", payload["definition"]["build"]["subPath"])
 
+    def test_active_definition_uses_create_if_missing_when_git_clone_template_exists(self) -> None:
+        repository = ProjectRepository.objects.create(
+            project=self.project,
+            repo_slug="sample-app-api",
+            coverity_project="sample-app-api",
+            coverity_stream="sample-app-api-dev",
+            is_representative=True,
+        )
+        ProjectBuild.objects.create(
+            project=self.project,
+            repository=repository,
+            build_plan=self.plan,
+            build_name="Sample API",
+            build_type="maven",
+            runtime_stack="java",
+        )
+        BuildPlanBuildInfo.objects.create(
+            build_plan=self.plan,
+            build_key="api-linux",
+            operating_system="linux",
+            language="java",
+            compiler="maven",
+        )
+        set_system_setting(
+            key=SystemSetting.KEY_GIT_CLONE_URL_TEMPLATE,
+            value="https://git.example.com/scm/{project_key_lower}/{repo_slug}.git",
+        )
+
+        payload = get_active_definition_by_plan_key("SAMPAPI")
+
+        assert payload is not None
+        self.assertEqual("create_if_missing", payload["definition"]["repository"]["linkageMode"])
+        self.assertEqual(
+            "https://git.example.com/scm/sample/sample-app-api.git",
+            payload["definition"]["repository"]["cloneUrl"],
+        )
+
 
     def test_build_plan_preview_maps_build_infos_to_jobs(self) -> None:
         repository = ProjectRepository.objects.create(
@@ -547,6 +584,66 @@ class SpecsDraftInitializationServiceTest(TestCase):
         self.assertEqual("python", build_info.compiler)
         self.assertEqual("ccc", build_info.coverity_stream)
         self.assertEqual(".", build_info.build_sub_path)
+
+    def test_initialize_specs_draft_data_reset_existing_preserves_multiple_build_infos(self) -> None:
+        project = Project.objects.create(
+            jira_project_key="SAMPLE",
+            bitbucket_project_key="SAMPLE",
+            representative_repo_slug="sample-app-api",
+        )
+        repository = ProjectRepository.objects.create(
+            project=project,
+            repo_slug="sample-app-api",
+            coverity_stream="sample-app-dev",
+            is_representative=True,
+        )
+        plan = BuildPlan.objects.create(build_id="sample-app-api", plan_key="SAMPAPI")
+        ProjectBuild.objects.create(
+            project=project,
+            repository=repository,
+            build_plan=plan,
+            build_name="Sample API",
+            build_type="maven",
+            runtime_stack="java",
+        )
+        BuildPlanBuildInfo.objects.create(
+            build_plan=plan,
+            build_key="api-linux",
+            operating_system="",
+            pre_process="source env.sh",
+            build_command="mvn -B verify",
+            clean_command="mvn -B clean",
+            analysis_excluded_files="generated/**",
+            language="",
+            compiler="",
+            coverity_stream="",
+            build_sub_path="",
+        )
+        BuildPlanBuildInfo.objects.create(
+            build_plan=plan,
+            build_key="api-windows",
+            operating_system="windows",
+            pre_process="setup.bat",
+            build_command="mvn -B verify -Pwindows",
+            clean_command="mvn -B clean",
+            analysis_excluded_files="generated-win/**",
+            language="java",
+            compiler="maven",
+            coverity_stream="",
+            build_sub_path="services/api",
+        )
+
+        summary = initialize_specs_draft_data(reset_existing=True)
+
+        self.assertEqual(0, summary["removedCount"])
+        self.assertEqual(2, BuildPlanBuildInfo.objects.filter(build_plan=plan).count())
+        self.assertEqual({"api-linux", "api-windows"}, set(plan.build_infos.values_list("build_key", flat=True)))
+        for build_info in plan.build_infos.order_by("build_key"):
+            self.assertEqual("sample-app-dev", build_info.coverity_stream)
+            self.assertEqual("", build_info.pre_process)
+            self.assertEqual("", build_info.build_command)
+            self.assertEqual("", build_info.clean_command)
+            self.assertEqual("", build_info.analysis_excluded_files)
 
 
 class ValidatorExceptionTest(SimpleTestCase):
