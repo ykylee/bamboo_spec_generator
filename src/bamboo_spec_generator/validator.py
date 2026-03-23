@@ -27,6 +27,16 @@ SUPPORTED_OS = {"windows", "linux"}
 SUPPORTED_REPOSITORY_PROVIDERS = {"bitbucket"}
 SUPPORTED_LINKAGE_MODES = {"linked", "create_if_missing"}
 DEFAULT_REPOSITORY_BRANCHES = {"dev", "release", "master"}
+NO_BUILD_LANGUAGES = {"python"}
+
+
+def is_no_build_language(*, language: str, compiler: str) -> bool:
+    normalized_language = (language or "").strip().lower()
+    normalized_compiler = (compiler or "").strip().lower()
+    return (
+        normalized_language in NO_BUILD_LANGUAGES
+        or normalized_compiler in {"python"}
+    )
 
 
 def validate_build_definitions(build_definitions: list[BuildDefinition]) -> None:
@@ -82,10 +92,11 @@ def validate_build_definitions(build_definitions: list[BuildDefinition]) -> None
             raise ValidationError(
                 f"Build '{build.build_id}' repository.branches must include dev, release, and master."
             )
-        if not build.build.prepare_command.strip():
-            raise ValidationError(f"Build '{build.build_id}' must define prepareCommand.")
-        if not build.build.build_command.strip():
-            raise ValidationError(f"Build '{build.build_id}' must define buildCommand.")
+        if not is_no_build_language(language=build.language, compiler=build.compiler):
+            if not build.build.prepare_command.strip():
+                raise ValidationError(f"Build '{build.build_id}' must define prepareCommand.")
+            if not build.build.build_command.strip():
+                raise ValidationError(f"Build '{build.build_id}' must define buildCommand.")
         if not build.build.sub_path.strip():
             raise ValidationError(f"Build '{build.build_id}' must define build.subPath when provided.")
         if not _is_valid_sub_path(build.build.sub_path):

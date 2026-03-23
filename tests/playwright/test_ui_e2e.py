@@ -173,7 +173,30 @@ class UiPlaywrightE2ETest(unittest.TestCase):
                 project=project,
                 year=definition_year,
                 source_kind=self.BuildPlanDefinition.SOURCE_KIND_JSON,
-                definition_json={"buildId": build_id, "planKey": plan_key},
+                definition_json={
+                    "buildId": build_id,
+                    "name": build_name,
+                    "planKey": plan_key,
+                    "language": "java",
+                    "compiler": "maven",
+                    "repository": {
+                        "provider": "bitbucket",
+                        "projectKey": bitbucket_project_key,
+                        "repoSlug": repo_slug,
+                        "linkageMode": "create_if_missing",
+                        "applicationLink": "BITBUCKET_DC",
+                        "branches": ["dev", "release", "master"],
+                    },
+                    "requirements": {"os": "linux", "extraCapabilities": []},
+                    "build": {
+                        "subPath": "services/sample-app-api",
+                        "prepareCommand": "mvn -B dependency:go-offline",
+                        "buildCommand": "mvn -B clean package",
+                        "staticAnalysis": {"customTool": {"commands": ["custom-tool analyze {buildCommand}"]}},
+                        "runtimeRequirements": {"commands": ["mvn", "coverity"], "envVars": ["JAVA_HOME"]},
+                        "postBuildTrigger": {"type": "plan", "targetPlanKey": "POSTBUILD"},
+                    },
+                },
                 definition_hash=f"sha256:{plan_key.lower()}",
                 is_active=True,
             )
@@ -412,6 +435,7 @@ class UiPlaywrightE2ETest(unittest.TestCase):
         self.assertIn("/projects/SAMPLE/builds/SAMPAPI/?add_build_info=open", self.page.url)
         self.assertIsNone(build_info_panel.get_attribute("hidden"))
         self.page.locator('input[name="build_key"]').fill("api-linux")
+        self.page.locator('input[name="operating_system"]').fill("linux")
         self.page.locator('input[name="language"]').fill("java")
         self.page.locator('input[name="compiler"]').fill("maven")
         self.page.locator('input[name="coverity_stream"]').fill("sample-api-dev")
@@ -420,6 +444,30 @@ class UiPlaywrightE2ETest(unittest.TestCase):
         self.page.get_by_role("button", name="빌드 정보 등록").click()
         self.page.wait_for_url(f"{self.base_url}/projects/SAMPLE/builds/SAMPAPI/")
         self.assertTrue(self.page.get_by_text("api-linux").first.is_visible())
+        self.assertTrue(self.page.get_by_role("heading", name="예상 Bamboo Plan 구성").is_visible())
+        self.assertTrue(self.page.get_by_text("플랜 내부 Job 구성").is_visible())
+        build_stage_toggle = self.page.locator('[data-stage-id="build"] [data-stage-toggle]')
+        build_stage_jobs = self.page.locator("#stage-jobs-build")
+        self.assertEqual("", build_stage_jobs.get_attribute("hidden"))
+        build_stage_toggle.click()
+        self.page.wait_for_timeout(150)
+        self.assertIsNone(build_stage_jobs.get_attribute("hidden"))
+        build_stage_jobs.locator('[data-job-select][data-job-id="api-linux"]').click()
+        self.assertTrue(self.page.get_by_text("mvn -B clean package").first.is_visible())
+        self.assertTrue(self.page.get_by_text("services/api").first.is_visible())
+        self.assertTrue(self.page.get_by_text("linux").first.is_visible())
+        stage_toggle = self.page.locator('[data-stage-id="analysis"] [data-stage-toggle]')
+        stage_jobs = self.page.locator("#stage-jobs-analysis")
+        self.assertEqual("", stage_jobs.get_attribute("hidden"))
+        stage_toggle.click()
+        self.page.wait_for_timeout(150)
+        self.assertIsNone(stage_jobs.get_attribute("hidden"))
+        self.page.locator('[data-job-select][data-job-id="api-linux"]').last.click()
+        self.assertTrue(self.page.get_by_text("Coverity Scan", exact=True).is_visible())
+        self.assertTrue(self.page.get_by_text("Custom Analysis", exact=True).is_visible())
+        self.assertTrue(self.page.get_by_text("Publish Report", exact=True).is_visible())
+        self.assertTrue(self.page.get_by_role("heading", name="Specs Export 초안").is_visible())
+        self.assertTrue(self.page.get_by_text("drafts/SAMPAPI/jobs/api-linux/coverity.yaml").is_visible())
         self.page.locator(f'a[href="/projects/SAMPLE/builds/SAMPAPI/infos/api-linux/"]').first.click()
         self.page.wait_for_url(f"{self.base_url}/projects/SAMPLE/builds/SAMPAPI/infos/api-linux/")
         self.assertTrue(self.page.get_by_role("heading", name="빌드 정보 수정").is_visible())

@@ -738,6 +738,7 @@ class ProjectViewTest(TestCase):
         BuildPlanBuildInfo.objects.create(
             build_plan=BuildPlan.objects.get(plan_key="SAMPAPI"),
             build_key="api-linux",
+            operating_system="linux",
             language="java",
             compiler="maven",
             coverity_stream="sample-api-dev",
@@ -753,6 +754,15 @@ class ProjectViewTest(TestCase):
         self.assertContains(response, "api-linux")
         self.assertContains(response, "연결 정보")
         self.assertContains(response, "sample-app-api")
+        self.assertContains(response, "예상 Bamboo Plan 구성")
+        self.assertContains(response, "플랜 내부 Job 구성")
+        self.assertContains(response, "Post Process")
+        self.assertContains(response, "Specs Export 초안")
+        self.assertContains(response, "plan-preview.json")
+        self.assertContains(response, "linux")
+        self.assertContains(response, 'data-preview-stage', html=False)
+        self.assertContains(response, 'data-job-select', html=False)
+        self.assertContains(response, 'data-job-panel', html=False)
 
     def test_project_build_detail_updates_build_plan_metadata(self) -> None:
         response = self.client.post(
@@ -776,6 +786,7 @@ class ProjectViewTest(TestCase):
             data={
                 "form_kind": "build_info",
                 "build_key": "api-linux",
+                "operating_system": "linux",
                 "pre_process": "source env.sh",
                 "build_command": "mvn -B clean package",
                 "clean_command": "mvn -B clean",
@@ -790,8 +801,54 @@ class ProjectViewTest(TestCase):
         self.assertEqual(302, response.status_code)
         self.assertEqual("/projects/SAMPLE/builds/SAMPAPI/", response["Location"])
         build_info = BuildPlanBuildInfo.objects.get(build_plan__plan_key="SAMPAPI", build_key="api-linux")
+        self.assertEqual("linux", build_info.operating_system)
         self.assertEqual("java", build_info.language)
         self.assertEqual("services/api", build_info.build_sub_path)
+
+    def test_project_build_detail_preview_reflects_registered_build_info(self) -> None:
+        BuildPlanBuildInfo.objects.create(
+            build_plan=BuildPlan.objects.get(plan_key="SAMPAPI"),
+            build_key="api-linux",
+            operating_system="linux",
+            pre_process="source env.sh",
+            build_command="mvn -B clean package",
+            clean_command="mvn -B clean",
+            language="java",
+            compiler="maven",
+            analysis_excluded_files="generated/**",
+            coverity_stream="sample-api-dev",
+            build_sub_path="services/api",
+        )
+
+        response = self.client.get("/projects/SAMPLE/builds/SAMPAPI/")
+
+        self.assertEqual(200, response.status_code)
+        self.assertContains(response, "api-linux")
+        self.assertContains(response, "mvn -B clean package")
+        self.assertContains(response, "services/api")
+        self.assertContains(response, "Run Build")
+        self.assertContains(response, "Register Build Start")
+        self.assertContains(response, "drafts/SAMPAPI/jobs/api-linux/coverity.yaml")
+        self.assertContains(response, "linux")
+
+    def test_project_build_detail_omits_build_stage_for_python_without_build_command(self) -> None:
+        BuildPlanBuildInfo.objects.create(
+            build_plan=BuildPlan.objects.get(plan_key="SAMPAPI"),
+            build_key="script-linux",
+            operating_system="linux",
+            language="python",
+            compiler="python",
+            build_command="",
+            clean_command="",
+            coverity_stream="sample-script-dev",
+        )
+
+        response = self.client.get("/projects/SAMPLE/builds/SAMPAPI/")
+
+        self.assertEqual(200, response.status_code)
+        self.assertContains(response, "script-linux")
+        self.assertContains(response, ">0 jobs<", html=False)
+        self.assertNotContains(response, "Package Binary")
 
     def test_project_build_info_list_redirects_to_build_detail_panel(self) -> None:
         response = self.client.get("/projects/SAMPLE/builds/SAMPAPI/infos/")
@@ -803,6 +860,7 @@ class ProjectViewTest(TestCase):
         BuildPlanBuildInfo.objects.create(
             build_plan=BuildPlan.objects.get(plan_key="SAMPAPI"),
             build_key="api-linux",
+            operating_system="linux",
             language="java",
             compiler="maven",
             coverity_stream="sample-api-dev",
@@ -812,6 +870,7 @@ class ProjectViewTest(TestCase):
             "/projects/SAMPLE/builds/SAMPAPI/infos/api-linux/",
             data={
                 "build_key": "api-linux",
+                "operating_system": "windows",
                 "pre_process": "source env.sh",
                 "build_command": "mvn -B verify",
                 "clean_command": "mvn -B clean",
@@ -826,5 +885,6 @@ class ProjectViewTest(TestCase):
         self.assertEqual(302, response.status_code)
         self.assertEqual("/projects/SAMPLE/builds/SAMPAPI/infos/api-linux/", response["Location"])
         build_info = BuildPlanBuildInfo.objects.get(build_plan__plan_key="SAMPAPI", build_key="api-linux")
+        self.assertEqual("windows", build_info.operating_system)
         self.assertEqual("java17", build_info.language)
         self.assertEqual("sample-api-release", build_info.coverity_stream)

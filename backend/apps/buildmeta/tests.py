@@ -21,9 +21,15 @@ from apps.buildmeta.models import (
     ProjectBuild,
     ProjectRepository,
 )
-from apps.buildmeta.selectors.definitions import get_active_definition_by_plan_key
+from apps.buildmeta.selectors.definitions import (
+    get_active_definition_by_plan_key,
+    get_build_plan_export_draft,
+    get_build_plan_preview,
+)
 from apps.buildmeta.services import create_project, load_definition_import_records, sync_definition_records, update_project
 from apps.buildmeta.services.executions import finish_execution, record_static_analysis_results, start_execution
+from src.bamboo_spec_generator.parser import parse_build_definition_payload
+from src.bamboo_spec_generator.validator import ValidationError, is_no_build_language, validate_build_definitions
 
 
 class ExecutionServiceTest(TestCase):
@@ -251,6 +257,311 @@ class DefinitionSelectorTest(TestCase):
         self.assertIsNotNone(payload)
         assert payload is not None
         self.assertEqual("2026", payload["year"])
+
+    def test_build_plan_preview_maps_build_infos_to_jobs(self) -> None:
+        repository = ProjectRepository.objects.create(
+            project=self.project,
+            repo_slug="sample-app-api",
+            coverity_project="sample-app-api",
+            coverity_stream="sample-app-api-dev",
+            is_representative=True,
+        )
+        ProjectBuild.objects.create(
+            project=self.project,
+            repository=repository,
+            build_plan=self.plan,
+            build_name="Sample API",
+            build_type="maven",
+            runtime_stack="java",
+        )
+        BuildPlanDefinition.objects.create(
+            build_plan=self.plan,
+            project=self.project,
+            year="2026",
+            source_kind=BuildPlanDefinition.SOURCE_KIND_JSON,
+            definition_hash="sha256:preview123",
+            is_active=True,
+            definition_json={
+                "buildId": "sample-app-api",
+                "name": "Sample API",
+                "planKey": "SAMPAPI",
+                "language": "java",
+                "compiler": "maven",
+                "repository": {
+                    "provider": "bitbucket",
+                    "projectKey": "SAMPLE",
+                    "repoSlug": "sample-app-api",
+                    "linkageMode": "create_if_missing",
+                    "applicationLink": "BITBUCKET_DC",
+                    "branches": ["dev", "release", "master"],
+                },
+                "requirements": {"os": "linux", "extraCapabilities": ["python"]},
+                "build": {
+                    "subPath": "services/sample-app-api",
+                    "prepareCommand": "mvn -B dependency:go-offline",
+                    "buildCommand": "mvn -B clean package",
+                    "staticAnalysis": {"customTool": {"commands": ["custom-tool analyze {buildCommand}"]}},
+                    "runtimeRequirements": {"commands": ["mvn", "coverity"], "envVars": ["JAVA_HOME"]},
+                    "postBuildTrigger": {"type": "plan", "targetPlanKey": "POSTBUILD"},
+                },
+            },
+        )
+        BuildPlanBuildInfo.objects.create(
+            build_plan=self.plan,
+            build_key="api-linux",
+            operating_system="linux",
+            pre_process="source env.sh",
+            build_command="mvn -B verify",
+            clean_command="mvn -B clean",
+            language="java17",
+            compiler="maven3.9",
+            analysis_excluded_files="generated/**",
+            coverity_stream="sample-api-dev",
+            build_sub_path="services/api",
+        )
+        BuildPlanBuildInfo.objects.create(
+            build_plan=self.plan,
+            build_key="api-windows",
+            operating_system="windows",
+            language="java",
+            compiler="maven",
+            coverity_stream="sample-api-win",
+        )
+
+        payload = get_build_plan_preview("SAMPAPI")
+
+        self.assertIsNotNone(payload)
+        assert payload is not None
+        self.assertEqual("SAMPAPI", payload["plan"]["planKey"])
+        self.assertEqual(4, len(payload["jobs"]))
+        self.assertEqual(
+            ["Prepare", "Build", "Analysis", "Post Process"],
+            [stage["name"] for stage in payload["stages"]],
+        )
+        self.assertEqual("plan-prepare", payload["jobs"][0]["jobId"])
+        self.assertEqual("api-linux", payload["jobs"][1]["buildKey"])
+        self.assertEqual("linux", payload["jobs"][1]["operatingSystem"])
+        self.assertEqual("mvn -B verify", payload["jobs"][1]["buildCommand"])
+        self.assertEqual("services/sample-app-api", payload["jobs"][2]["buildSubPath"])
+        self.assertEqual("plan-trigger", payload["jobs"][3]["jobId"])
+        self.assertEqual("Register Build Start", payload["jobs"][0]["taskGroups"][0]["tasks"][0]["name"])
+        self.assertEqual("Publish Report", payload["jobs"][1]["taskGroups"][1]["tasks"][3]["name"])
+
+    def test_build_plan_export_draft_renders_job_files(self) -> None:
+        repository = ProjectRepository.objects.create(
+            project=self.project,
+            repo_slug="sample-app-api",
+            coverity_project="sample-app-api",
+            coverity_stream="sample-app-api-dev",
+            is_representative=True,
+        )
+        ProjectBuild.objects.create(
+            project=self.project,
+            repository=repository,
+            build_plan=self.plan,
+            build_name="Sample API",
+            build_type="maven",
+            runtime_stack="java",
+        )
+        BuildPlanDefinition.objects.create(
+            build_plan=self.plan,
+            project=self.project,
+            year="2026",
+            source_kind=BuildPlanDefinition.SOURCE_KIND_JSON,
+            definition_hash="sha256:export123",
+            is_active=True,
+            definition_json={
+                "buildId": "sample-app-api",
+                "name": "Sample API",
+                "planKey": "SAMPAPI",
+                "language": "java",
+                "compiler": "maven",
+                "repository": {
+                    "provider": "bitbucket",
+                    "projectKey": "SAMPLE",
+                    "repoSlug": "sample-app-api",
+                    "linkageMode": "create_if_missing",
+                    "applicationLink": "BITBUCKET_DC",
+                    "branches": ["dev", "release", "master"],
+                },
+                "requirements": {"os": "linux", "extraCapabilities": []},
+                "build": {
+                    "subPath": "services/sample-app-api",
+                    "prepareCommand": "mvn -B dependency:go-offline",
+                    "buildCommand": "mvn -B clean package",
+                    "staticAnalysis": {"customTool": {"commands": ["custom-tool analyze {buildCommand}"]}},
+                    "runtimeRequirements": {"commands": ["mvn", "coverity"], "envVars": ["JAVA_HOME"]},
+                    "postBuildTrigger": {"type": "plan", "targetPlanKey": "POSTBUILD"},
+                },
+            },
+        )
+        BuildPlanBuildInfo.objects.create(
+            build_plan=self.plan,
+            build_key="api-linux",
+            operating_system="linux",
+            pre_process="source env.sh",
+            build_command="mvn -B verify",
+            clean_command="mvn -B clean",
+            language="java",
+            compiler="maven",
+            coverity_stream="sample-api-dev",
+            build_sub_path="services/api",
+        )
+
+        payload = get_build_plan_export_draft("SAMPAPI")
+
+        self.assertIsNotNone(payload)
+        assert payload is not None
+        self.assertEqual("SAMPAPI", payload["summary"]["planKey"])
+        self.assertTrue(any(file["path"].endswith("plan-preview.json") for file in payload["files"]))
+        self.assertTrue(any(file["path"].endswith("coverity.yaml") for file in payload["files"]))
+        self.assertTrue(any(file["path"].endswith("prepare_build.py") for file in payload["files"]))
+        self.assertTrue(any("mvn -B verify" in file["content"] for file in payload["files"]))
+        self.assertTrue(any('"operatingSystem": "linux"' in file["content"] for file in payload["files"]))
+
+    def test_build_plan_preview_omits_build_stage_for_python_without_build_commands(self) -> None:
+        repository = ProjectRepository.objects.create(
+            project=self.project,
+            repo_slug="sample-app-script",
+            coverity_project="sample-app-script",
+            coverity_stream="sample-script-dev",
+            is_representative=True,
+        )
+        ProjectBuild.objects.create(
+            project=self.project,
+            repository=repository,
+            build_plan=self.plan,
+            build_name="Sample Script",
+            build_type="python",
+            runtime_stack="python3.12",
+        )
+        BuildPlanDefinition.objects.create(
+            build_plan=self.plan,
+            project=self.project,
+            year="2026",
+            source_kind=BuildPlanDefinition.SOURCE_KIND_JSON,
+            definition_hash="sha256:script123",
+            is_active=True,
+            definition_json={
+                "buildId": "sample-app-script",
+                "name": "Sample Script",
+                "planKey": "SAMPAPI",
+                "language": "python",
+                "compiler": "python",
+                "repository": {
+                    "provider": "bitbucket",
+                    "projectKey": "SAMPLE",
+                    "repoSlug": "sample-app-script",
+                    "linkageMode": "linked",
+                    "applicationLink": "BITBUCKET_DC",
+                    "branches": ["dev", "release", "master"],
+                },
+                "requirements": {"os": "linux", "extraCapabilities": []},
+                "build": {
+                    "subPath": ".",
+                    "prepareCommand": "",
+                    "buildCommand": "",
+                    "staticAnalysis": {"customTool": {"commands": ["custom-tool analyze {buildCommand}"]}},
+                    "runtimeRequirements": {"commands": ["python", "coverity"], "envVars": ["PYTHONPATH"]},
+                    "postBuildTrigger": {"type": "plan", "targetPlanKey": "POSTBUILD"},
+                },
+            },
+        )
+        BuildPlanBuildInfo.objects.create(
+            build_plan=self.plan,
+            build_key="script-linux",
+            operating_system="linux",
+            language="python",
+            compiler="python",
+            build_command="",
+            clean_command="",
+        )
+
+        payload = get_build_plan_preview("SAMPAPI")
+
+        assert payload is not None
+        build_stage = next(stage for stage in payload["stages"] if stage["id"] == "build")
+        prepare_stage = next(stage for stage in payload["stages"] if stage["id"] == "prepare")
+        self.assertEqual(1, prepare_stage["jobCount"])
+        self.assertEqual(0, build_stage["jobCount"])
+        self.assertEqual([], build_stage["jobs"])
+        script_job = next(job for job in payload["jobs"] if job["jobId"] == "script-linux")
+        self.assertFalse(script_job["hasBuildStage"])
+
+        export_payload = get_build_plan_export_draft("SAMPAPI")
+        assert export_payload is not None
+        self.assertFalse(any(file["path"].endswith("run_build.py") for file in export_payload["files"]))
+
+
+class ValidatorExceptionTest(SimpleTestCase):
+    def test_no_build_languages_are_identified(self) -> None:
+        self.assertTrue(is_no_build_language(language="python", compiler="python"))
+        self.assertFalse(is_no_build_language(language="javascript", compiler="node.js"))
+        self.assertFalse(is_no_build_language(language="typescript", compiler="node.js"))
+        self.assertFalse(is_no_build_language(language="java", compiler="maven"))
+
+    def test_python_definition_allows_blank_prepare_and_build_command(self) -> None:
+        build = parse_build_definition_payload(
+            {
+                "buildId": "sample-script",
+                "name": "Sample Script",
+                "planKey": "SCRIPTS",
+                "language": "python",
+                "compiler": "python",
+                "repository": {
+                    "provider": "bitbucket",
+                    "projectKey": "SAMPLE",
+                    "repoSlug": "sample-script",
+                    "linkageMode": "linked",
+                    "applicationLink": "BITBUCKET_SERVER",
+                    "branches": ["dev", "release", "master"],
+                },
+                "requirements": {"os": "linux", "extraCapabilities": []},
+                "build": {
+                    "subPath": ".",
+                    "prepareCommand": "",
+                    "buildCommand": "",
+                    "staticAnalysis": {"customTool": {"commands": ["custom-tool analyze {buildCommand}"]}},
+                    "runtimeRequirements": {"commands": ["python", "coverity"], "envVars": ["PYTHONPATH"]},
+                    "postBuildTrigger": {"type": "plan", "targetPlanKey": "POSTBUILD"},
+                },
+            },
+            year="2026",
+        )
+
+        validate_build_definitions([build])
+
+    def test_java_definition_still_requires_build_command(self) -> None:
+        build = parse_build_definition_payload(
+            {
+                "buildId": "sample-api",
+                "name": "Sample API",
+                "planKey": "SAMPAPI",
+                "language": "java",
+                "compiler": "maven",
+                "repository": {
+                    "provider": "bitbucket",
+                    "projectKey": "SAMPLE",
+                    "repoSlug": "sample-api",
+                    "linkageMode": "linked",
+                    "applicationLink": "BITBUCKET_SERVER",
+                    "branches": ["dev", "release", "master"],
+                },
+                "requirements": {"os": "linux", "extraCapabilities": []},
+                "build": {
+                    "subPath": ".",
+                    "prepareCommand": "mvn -B dependency:go-offline",
+                    "buildCommand": "",
+                    "staticAnalysis": {"customTool": {"commands": ["custom-tool analyze {buildCommand}"]}},
+                    "runtimeRequirements": {"commands": ["mvn", "coverity"], "envVars": ["JAVA_HOME"]},
+                    "postBuildTrigger": {"type": "plan", "targetPlanKey": "POSTBUILD"},
+                },
+            },
+            year="2026",
+        )
+
+        with self.assertRaises(ValidationError):
+            validate_build_definitions([build])
 
 
 class ImportBuildDefinitionsCommandTest(TestCase):

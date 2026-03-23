@@ -4,6 +4,7 @@ from django.core.paginator import Paginator
 from django.shortcuts import redirect, render
 
 from apps.buildmeta.models import BuildPlan, BuildPlanBuildInfo, Project, ProjectRepository
+from apps.buildmeta.selectors.definitions import get_build_plan_export_draft, get_build_plan_preview
 from apps.buildmeta.selectors.executions import (
     list_build_plan_summaries,
     list_executions_by_plan_key,
@@ -277,6 +278,7 @@ def project_build_detail(request, jira_project_key: str, plan_key: str):
                 upsert_build_info(
                     plan_key=plan_key,
                     build_key=build_info_form.cleaned_data["build_key"],
+                    operating_system=build_info_form.cleaned_data["operating_system"],
                     pre_process=build_info_form.cleaned_data["pre_process"],
                     build_command=build_info_form.cleaned_data["build_command"],
                     clean_command=build_info_form.cleaned_data["clean_command"],
@@ -312,6 +314,8 @@ def project_build_detail(request, jira_project_key: str, plan_key: str):
         "buildInfoError": build_info_error,
         "buildInfoOpen": build_info_open,
         "buildInfoEntries": _list_build_info_entries(plan_key),
+        "buildPlanExportDraft": get_build_plan_export_draft(plan_key),
+        "buildPlanPreview": get_build_plan_preview(plan_key),
         "registrationSuggestions": _build_registration_suggestions(),
         "navProjectSearchItems": _build_nav_project_search_items(list_project_summaries()),
     }
@@ -343,6 +347,7 @@ def project_build_info_detail(request, jira_project_key: str, plan_key: str, bui
             upsert_build_info(
                 plan_key=plan_key,
                 build_key=form.cleaned_data["build_key"],
+                operating_system=form.cleaned_data["operating_system"],
                 pre_process=form.cleaned_data["pre_process"],
                 build_command=form.cleaned_data["build_command"],
                 clean_command=form.cleaned_data["clean_command"],
@@ -571,6 +576,7 @@ def _build_build_plan_metadata_initial(build: dict) -> dict:
 def _build_info_initial(build_info: BuildPlanBuildInfo) -> dict:
     return {
         "build_key": build_info.build_key,
+        "operating_system": build_info.operating_system,
         "pre_process": build_info.pre_process,
         "build_command": build_info.build_command,
         "clean_command": build_info.clean_command,
@@ -670,6 +676,7 @@ def _build_repository_entries(project: dict) -> list[dict]:
 def _serialize_build_info(build_info: BuildPlanBuildInfo) -> dict:
     return {
         "buildKey": build_info.build_key,
+        "operatingSystem": build_info.operating_system,
         "preProcess": build_info.pre_process,
         "buildCommand": build_info.build_command,
         "cleanCommand": build_info.clean_command,

@@ -84,6 +84,7 @@ class BuildPlanMetadataForm(forms.Form):
 
 class BuildInfoMetadataForm(forms.Form):
     build_key = forms.CharField(label="빌드키", max_length=128)
+    operating_system = forms.CharField(label="OS", max_length=32, required=False)
     pre_process = forms.CharField(label="Pre Process", required=False, widget=forms.Textarea(attrs={"rows": 3}))
     build_command = forms.CharField(label="빌드 명령어", required=False, widget=forms.Textarea(attrs={"rows": 3}))
     clean_command = forms.CharField(label="클린 명령어", required=False, widget=forms.Textarea(attrs={"rows": 3}))

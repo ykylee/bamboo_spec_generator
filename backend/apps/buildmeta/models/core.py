@@ -46,6 +46,7 @@ class BuildPlanBuildInfo(TimestampedModel):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     build_plan = models.ForeignKey(BuildPlan, on_delete=models.CASCADE, related_name="build_infos")
     build_key = models.CharField(max_length=128)
+    operating_system = models.CharField(max_length=32, blank=True)
     pre_process = models.TextField(blank=True)
     build_command = models.TextField(blank=True)
     clean_command = models.TextField(blank=True)

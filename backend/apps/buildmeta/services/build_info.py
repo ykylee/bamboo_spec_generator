@@ -7,6 +7,7 @@ def upsert_build_info(
     *,
     plan_key: str,
     build_key: str,
+    operating_system: str,
     pre_process: str,
     build_command: str,
     clean_command: str,
@@ -24,6 +25,7 @@ def upsert_build_info(
         build_plan=plan,
         build_key=build_key.strip(),
         defaults={
+            "operating_system": operating_system.strip(),
             "pre_process": pre_process.strip(),
             "build_command": build_command.strip(),
             "clean_command": clean_command.strip(),

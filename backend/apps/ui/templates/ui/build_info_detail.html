@@ -17,6 +17,7 @@
     </div>
     <div class="chip-row">
       <span class="chip">{{ build.planKey }}</span>
+      <span class="chip chip--neutral">{{ buildInfo.operatingSystem|default:"OS 미지정" }}</span>
       <span class="chip chip--neutral">{{ buildInfo.language|default:"언어 미지정" }}</span>
       <span class="chip chip--neutral">{{ buildInfo.compiler|default:"컴파일러 미지정" }}</span>
       <span class="chip chip--neutral">{{ buildInfo.executionCount }} runs</span>
@@ -27,6 +28,11 @@
       <span class="signal-metric__label">Build Key</span>
       <strong class="signal-metric__value signal-metric__value--compact">{{ buildInfo.buildKey }}</strong>
       <p class="signal-metric__meta">플랜 내부 빌드 식별 키</p>
+    </article>
+    <article class="signal-metric">
+      <span class="signal-metric__label">OS</span>
+      <strong class="signal-metric__value signal-metric__value--compact">{{ buildInfo.operatingSystem|default:"-" }}</strong>
+      <p class="signal-metric__meta">Job requirement 기준 OS</p>
     </article>
     <article class="signal-metric">
       <span class="signal-metric__label">Language</span>
@@ -74,6 +80,10 @@
           {{ buildInfoForm.build_key }}
         </label>
         <label class="project-form__field">
+          <span class="project-form__label">OS</span>
+          {{ buildInfoForm.operating_system }}
+        </label>
+        <label class="project-form__field">
           <span class="project-form__label">언어</span>
           {{ buildInfoForm.language }}
         </label>
@@ -117,6 +127,7 @@
       <h2 class="panel__title">현재 값</h2>
     </div>
     <ul class="meta-list">
+      <li><strong>OS</strong>{{ buildInfo.operatingSystem|default:"미지정" }}</li>
       <li><strong>Coverity Stream</strong>{{ buildInfo.coverityStream|default:"미지정" }}</li>
       <li><strong>Build Sub Path</strong>{{ buildInfo.buildSubPath|default:"미지정" }}</li>
       <li><strong>Pre Process</strong>{{ buildInfo.preProcess|default:"미지정" }}</li>
