@@ -76,6 +76,8 @@ def project_list(request):
         "registrationSuggestions": _build_registration_suggestions(),
         "navProjectSearchItems": _build_nav_project_search_items(all_projects),
     }
+    if _is_partial_project_list_request(request):
+        return render(request, "ui/_project_list_panel.html", context)
     return render(request, "ui/project_list.html", context)
 
 
@@ -126,6 +128,14 @@ def _build_pagination_base_query(request) -> str:
     if not encoded:
         return ""
     return f"{encoded}&"
+
+
+def _is_partial_project_list_request(request) -> bool:
+    return (
+        request.method == "GET"
+        and request.GET.get("partial") == "project-list"
+        and request.headers.get("X-Requested-With") == "XMLHttpRequest"
+    )
 
 
 def _build_project_payload(registration_form: ProjectRegistrationForm, repository_rows: list[dict], build_rows: list[dict]) -> dict:

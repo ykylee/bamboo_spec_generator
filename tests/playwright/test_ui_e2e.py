@@ -175,7 +175,7 @@ class UiPlaywrightE2ETest(unittest.TestCase):
         self.page.goto(self.base_url, wait_until="domcontentloaded")
 
         registration_panel = self.page.locator("#project-registration-panel")
-        toggle_button = self.page.locator("[data-toggle-registration]")
+        toggle_button = self.page.get_by_role("button", name="프로젝트 등록")
 
         self.assertEqual("", registration_panel.get_attribute("hidden"))
         self.assertEqual("false", toggle_button.get_attribute("aria-expanded"))
@@ -187,6 +187,11 @@ class UiPlaywrightE2ETest(unittest.TestCase):
 
         self.assertIsNone(registration_panel.get_attribute("hidden"))
         self.assertEqual("true", toggle_button.get_attribute("aria-expanded"))
+        header_box = self.page.locator(".app-header").bounding_box()
+        panel_box = registration_panel.bounding_box()
+        self.assertIsNotNone(header_box)
+        self.assertIsNotNone(panel_box)
+        self.assertGreaterEqual(panel_box["y"], header_box["height"] - 2)
 
         self.page.locator("[data-add-repository]").click()
         self.page.locator("[data-add-build]").click()
@@ -194,9 +199,58 @@ class UiPlaywrightE2ETest(unittest.TestCase):
         self.assertEqual(2, self.page.locator("[data-repository-row]").count())
         self.assertEqual(2, self.page.locator("[data-build-row]").count())
 
+        self.page.get_by_role("button", name="접기", exact=True).click()
+        self.page.wait_for_timeout(150)
+        self.assertEqual("", registration_panel.get_attribute("hidden"))
+        self.assertEqual("false", toggle_button.get_attribute("aria-expanded"))
+
+    def test_nav_search_requires_keyword_and_filters_matching_projects(self) -> None:
+        self._create_project_with_build(
+            jira_project_key="OPS",
+            bitbucket_project_key="OPSBB",
+            repo_slug="ops-api",
+            build_name="Operations API",
+            build_id="ops-api",
+            plan_key="OPSAPI",
+            with_active_definition=True,
+        )
+        self._create_project_with_build(
+            jira_project_key="WEB",
+            bitbucket_project_key="WEBBB",
+            repo_slug="web-portal",
+            build_name="Web Portal",
+            build_id="web-portal",
+            plan_key="WEBPORTAL",
+            with_active_definition=True,
+        )
+
+        self.page.goto(self.base_url, wait_until="domcontentloaded")
+
+        self.assertTrue(self.page.get_by_text("주의가 필요한 프로젝트를 먼저 보여줍니다.").is_visible())
+        self.assertTrue(self.page.get_by_text("프로젝트 리스트").is_visible())
+        self.page.wait_for_timeout(300)
+        self.assertTrue(self.page.get_by_text("주의가 필요한 프로젝트를 먼저 보여줍니다.").is_visible())
+        self.assertTrue(self.page.locator("#failed-build-panel .panel__title").is_visible())
+
+        search_input = self.page.locator("#project-nav-search")
+        results = self.page.locator("[data-project-search-results]")
+
+        search_input.click()
+        self.assertTrue(results.is_hidden())
+
+        search_input.fill("ops")
+        self.page.wait_for_timeout(150)
+
+        self.assertTrue(results.is_visible())
+        self.assertEqual(["OPS"], self.page.locator("[data-project-search-item]:not([hidden]) strong").all_inner_texts())
+
+        search_input.fill("")
+        self.page.wait_for_timeout(150)
+        self.assertTrue(results.is_hidden())
+
     def test_registration_flow_redirects_to_detail_in_browser(self) -> None:
         self.page.goto(self.base_url, wait_until="domcontentloaded")
-        self.page.locator("[data-toggle-registration]").click()
+        self.page.get_by_role("button", name="프로젝트 등록").click()
 
         self.page.locator('input[name="jira_project_key"]').fill("OPS")
         self.page.locator('input[name="bitbucket_project_key"]').fill("OPS")
@@ -221,6 +275,32 @@ class UiPlaywrightE2ETest(unittest.TestCase):
         self.assertEqual("OPS", self.page.locator(".hero__title").inner_text())
         self.assertTrue(self.page.get_by_text("Specs 준비 필요").is_visible())
         self.assertTrue(self.page.get_by_text("Repository: ops-api").is_visible())
+
+    def test_project_list_pagination_updates_only_list_panel_in_browser(self) -> None:
+        for index in range(11):
+            self._create_project_with_build(
+                jira_project_key=f"PAG{index:02d}",
+                bitbucket_project_key="PAGE",
+                repo_slug=f"page-repo-{index:02d}",
+                build_name=f"Page Build {index:02d}",
+                build_id=f"page-build-{index:02d}",
+                plan_key=f"PAGE{index:02d}",
+                with_active_definition=True,
+            )
+
+        self.page.goto(self.base_url, wait_until="domcontentloaded")
+        self.page.get_by_role("button", name="프로젝트 등록").click()
+        registration_panel = self.page.locator("#project-registration-panel")
+        self.assertIsNone(registration_panel.get_attribute("hidden"))
+
+        self.page.locator(".pagination").get_by_role("link", name="2").click()
+        self.page.wait_for_timeout(300)
+
+        self.assertTrue(self.page.url.endswith("/?page=2"))
+        self.assertIsNone(registration_panel.get_attribute("hidden"))
+        self.assertTrue(
+            self.page.locator("[data-project-list-container]").get_by_text("PAG10", exact=True).first.is_visible()
+        )
 
     def test_detail_edit_panel_shows_validation_error_in_browser(self) -> None:
         self._create_project_with_build(

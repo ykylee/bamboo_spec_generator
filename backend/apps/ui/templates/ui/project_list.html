@@ -1,6 +1,7 @@
 {% extends "ui/base.html" %}
 
 {% block title %}프로젝트 목록 | Bamboo Spec Generator{% endblock %}
+{% block body_class %}page-project-list{% endblock %}
 {% block page_heading %}프로젝트 대시보드{% endblock %}
 {% block topbar_controls %}
 <form class="global-filter-bar global-filter-bar--status" method="get" action="{% url 'project-list' %}">
@@ -17,35 +18,105 @@
 {% endblock %}
 
 {% block content %}
-<section class="hero">
-  <p class="hero__eyebrow">Operational Overview</p>
-  <h1 class="hero__title">주의가 필요한 프로젝트를 먼저 보여줍니다.</h1>
-  <p class="hero__body">
-    주의 필요는 등록 정보가 온전하지 않거나 마지막 빌드가 실패한 경우로 정의합니다. 프로젝트별 경고 상태를 함께 보여줘 먼저 확인해야 할 대상을 빠르게 찾을 수 있도록 구성했습니다.
-  </p>
-  <div class="hero__actions">
-    <button
-      class="action-button"
-      type="button"
-      data-toggle-registration
-      aria-expanded="{% if registrationOpen %}true{% else %}false{% endif %}"
-      aria-controls="project-registration-panel"
-    >
-      프로젝트 등록
-    </button>
-    <a class="action-button action-button--ghost" href="#project-list-panel">프로젝트 목록 보기</a>
+<section class="signal-hero" data-reveal>
+  <div class="signal-hero__content">
+    <p class="signal-hero__eyebrow">Operations Radar</p>
+    <h1 class="hero__title">주의가 필요한 프로젝트를 먼저 보여줍니다.</h1>
+    <p class="signal-hero__body">
+      등록 정보, 활성 정의 연결, 최근 실패 빌드를 한 화면에서 모아 우선순위를 빠르게 결정할 수 있도록 구성했습니다.
+    </p>
+    <div class="hero__actions">
+      <button
+        class="action-button"
+        type="button"
+        data-toggle-registration
+        aria-expanded="{% if registrationOpen %}true{% else %}false{% endif %}"
+        aria-controls="project-registration-panel"
+      >
+        프로젝트 등록
+      </button>
+      <a class="action-button action-button--ghost" href="#project-list-panel" data-scroll-link>프로젝트 목록 보기</a>
+    </div>
+  </div>
+  <div class="signal-hero__board" aria-label="운영 상태 보드">
+    <article class="signal-metric signal-metric--primary">
+      <span class="signal-metric__label">Needs Attention</span>
+      <strong class="signal-metric__value">{{ summary.attentionProjects }}</strong>
+      <p class="signal-metric__meta">즉시 확인이 필요한 프로젝트</p>
+    </article>
+    <article class="signal-metric">
+      <span class="signal-metric__label">Projects</span>
+      <strong class="signal-metric__value">{{ summary.totalProjects }}</strong>
+      <p class="signal-metric__meta">운영 DB 기준 프로젝트 수</p>
+    </article>
+    <article class="signal-metric">
+      <span class="signal-metric__label">Build Plans</span>
+      <strong class="signal-metric__value">{{ summary.totalBuildPlans }}</strong>
+      <p class="signal-metric__meta">연결된 전체 빌드 플랜 수</p>
+    </article>
+    <article class="signal-metric signal-metric--list">
+      <div class="signal-metric__header">
+        <span class="signal-metric__label">Priority Queue</span>
+        <span class="badge">Top 5</span>
+      </div>
+      <ul class="signal-queue">
+        {% for project in attentionProjects %}
+        <li class="signal-queue__item">
+          <strong>{{ project.jiraProjectKey }}</strong>
+          <span>
+            {% if project.failedBuildCount %}
+            실패 빌드 {{ project.failedBuildCount }}건
+            {% elif project.warningTags %}
+            {{ project.warningTags.0 }}
+            {% else %}
+            메타데이터 점검 필요
+            {% endif %}
+          </span>
+        </li>
+        {% empty %}
+        <li class="signal-queue__item signal-queue__item--empty">
+          <strong>안정 상태</strong>
+          <span>현재 우선 점검 대상이 없습니다.</span>
+        </li>
+        {% endfor %}
+      </ul>
+    </article>
   </div>
 </section>
 
+<section class="signal-strip" data-reveal>
+  <article class="signal-strip__panel">
+    <p class="signal-strip__label">Attention Logic</p>
+    <p class="signal-strip__body">활성 정의 누락, 저장소 메타데이터 누락, 최근 실패 빌드가 있으면 우선 대상에 포함합니다.</p>
+  </article>
+  <article class="signal-strip__panel">
+    <p class="signal-strip__label">Registration Flow</p>
+    <p class="signal-strip__body">저장소와 빌드를 같은 작업 맥락에서 연결해 초기 온보딩 누락을 줄입니다.</p>
+  </article>
+  <article class="signal-strip__panel">
+    <p class="signal-strip__label">Operator View</p>
+    <p class="signal-strip__body">목록, 주의 보드, 실패 빌드 히스토리를 동시에 배치해 확인 동선을 짧게 유지합니다.</p>
+  </article>
+</section>
+
 <section
-  class="registration-layout{% if not registrationOpen %} registration-layout--collapsed{% endif %}"
+  class="registration-layout registration-layout--signal{% if not registrationOpen %} registration-layout--collapsed{% endif %}"
   id="project-registration-panel"
   {% if not registrationOpen %}hidden{% endif %}
+  data-reveal
 >
-  <article class="panel registration-panel" id="project-registration">
+  <article class="panel registration-panel registration-panel--signal" id="project-registration">
     <div class="panel__header">
-      <h2 class="panel__title">프로젝트 등록</h2>
-      <span class="badge">Main Page Entry</span>
+      <div>
+        <p class="panel__eyebrow">Workspace</p>
+        <h2 class="panel__title">프로젝트 등록</h2>
+      </div>
+      <div class="panel__header-actions">
+        <span class="badge">Main Page Entry</span>
+        <button class="action-button action-button--ghost action-button--compact" type="button" data-toggle-registration>
+          접기
+        </button>
+      </div>
     </div>
     <p class="panel__body">
       신규 프로젝트를 등록하고 여러 저장소를 연결할 수 있습니다. 빌드는 반드시 등록한 저장소 중 하나를 지정해서 연결합니다.
@@ -105,7 +176,10 @@
 
       <section class="repeater-section">
         <div class="repeater-section__header">
-          <h3 class="repeater-section__title">저장소</h3>
+          <div>
+            <p class="panel__eyebrow">Repositories</p>
+            <h3 class="repeater-section__title">저장소</h3>
+          </div>
           <button class="action-button action-button--ghost" type="button" data-add-repository>저장소 추가</button>
         </div>
         <div class="repeater-stack" data-repository-stack>
@@ -132,7 +206,10 @@
 
       <section class="repeater-section">
         <div class="repeater-section__header">
-          <h3 class="repeater-section__title">빌드</h3>
+          <div>
+            <p class="panel__eyebrow">Build Plans</p>
+            <h3 class="repeater-section__title">빌드</h3>
+          </div>
           <button class="action-button action-button--ghost" type="button" data-add-build>빌드 추가</button>
         </div>
         <div class="repeater-stack" data-build-stack>
@@ -174,9 +251,12 @@
     </form>
   </article>
 
-  <aside class="panel registration-hints">
+  <aside class="panel registration-hints registration-hints--signal">
     <div class="panel__header">
-      <h2 class="panel__title">입력 가이드</h2>
+      <div>
+        <p class="panel__eyebrow">Checklist</p>
+        <h2 class="panel__title">입력 가이드</h2>
+      </div>
     </div>
     <ul class="meta-list">
       <li>
@@ -245,245 +325,36 @@
   </div>
 </template>
 
-<script>
-  (function () {
-    const registrationPanel = document.getElementById("project-registration-panel");
-    const toggleRegistrationButton = document.querySelector("[data-toggle-registration]");
-    const repositoryTemplate = document.getElementById("repository-row-template");
-    const buildTemplate = document.getElementById("build-row-template");
-    const repositoryStack = document.querySelector("[data-repository-stack]");
-    const buildStack = document.querySelector("[data-build-stack]");
-    const addRepositoryButton = document.querySelector("[data-add-repository]");
-    const addBuildButton = document.querySelector("[data-add-build]");
-    if (registrationPanel && toggleRegistrationButton) {
-      toggleRegistrationButton.addEventListener("click", function () {
-        const isHidden = registrationPanel.hasAttribute("hidden");
-        if (isHidden) {
-          registrationPanel.removeAttribute("hidden");
-          registrationPanel.classList.remove("registration-layout--collapsed");
-          toggleRegistrationButton.setAttribute("aria-expanded", "true");
-          registrationPanel.scrollIntoView({ behavior: "smooth", block: "start" });
-        } else {
-          registrationPanel.setAttribute("hidden", "");
-          registrationPanel.classList.add("registration-layout--collapsed");
-          toggleRegistrationButton.setAttribute("aria-expanded", "false");
-        }
-      });
-    }
-
-    if (repositoryTemplate && repositoryStack && addRepositoryButton) {
-      addRepositoryButton.addEventListener("click", function () {
-        repositoryStack.appendChild(repositoryTemplate.content.cloneNode(true));
-      });
-    }
-
-    if (buildTemplate && buildStack && addBuildButton) {
-      addBuildButton.addEventListener("click", function () {
-        buildStack.appendChild(buildTemplate.content.cloneNode(true));
-      });
-    }
-
-    document.querySelectorAll("[data-open-dialog]").forEach(function (button) {
-      button.addEventListener("click", function () {
-        const dialogId = button.getAttribute("data-open-dialog");
-        const dialog = document.getElementById(dialogId);
-        if (dialog && typeof dialog.showModal === "function") {
-          dialog.showModal();
-        }
-      });
-    });
-
-    document.querySelectorAll("[data-close-repository-dialog]").forEach(function (button) {
-      button.addEventListener("click", function () {
-        const dialog = button.closest("dialog");
-        if (dialog) {
-          dialog.close();
-        }
-      });
-    });
-
-    function syncDashboardHeights() {
-      const dashboardSection = document.querySelector("[data-dashboard-section]");
-      const projectListPanel = document.querySelector("[data-project-list-panel]");
-      if (!dashboardSection || !projectListPanel) {
-        return;
-      }
-      dashboardSection.style.setProperty("--dashboard-list-height", projectListPanel.offsetHeight + "px");
-    }
-
-    syncDashboardHeights();
-    window.addEventListener("load", syncDashboardHeights);
-    window.addEventListener("resize", syncDashboardHeights);
-  }());
-</script>
-
-<section class="kpi-grid" id="project-list-panel">
-  <article class="stat-card">
+<section class="kpi-grid kpi-grid--signal" data-reveal>
+  <article class="stat-card stat-card--signal">
     <span class="stat-card__label">Projects</span>
     <p class="stat-card__value">{{ summary.totalProjects }}</p>
     <p class="stat-card__meta">현재 운영 DB에 적재된 프로젝트 수</p>
   </article>
-  <article class="stat-card">
+  <article class="stat-card stat-card--signal">
     <span class="stat-card__label">Build Plans</span>
     <p class="stat-card__value">{{ summary.totalBuildPlans }}</p>
     <p class="stat-card__meta">전체 프로젝트에 연결된 빌드 플랜 수</p>
   </article>
-  <article class="stat-card">
+  <article class="stat-card stat-card--signal">
     <span class="stat-card__label">Needs Attention</span>
     <p class="stat-card__value">{{ summary.attentionProjects }}</p>
     <p class="stat-card__meta">저장소 누락, 메타데이터 경고, 마지막 빌드 실패가 있는 프로젝트 수</p>
   </article>
 </section>
 
-<section class="section-grid section-grid--dashboard" data-dashboard-section>
-  <div class="panel panel--project-list" data-project-list-panel>
-    <div class="panel__header">
-      <h2 class="panel__title">프로젝트 리스트</h2>
-      <span class="badge">{{ pageObj.start_index }}-{{ pageObj.end_index }} / {{ pageObj.paginator.count }}</span>
-    </div>
-    {% if projects %}
-    <table class="project-table">
-      <thead>
-        <tr>
-          <th>Project</th>
-          <th>Bitbucket</th>
-          <th>대표 저장소</th>
-          <th>저장소</th>
-          <th>상태</th>
-          <th></th>
-        </tr>
-      </thead>
-      <tbody>
-      {% for project in projects %}
-        <tr>
-          <td>
-            <span class="project-table__title">{{ project.jiraProjectKey }}</span>
-            <span class="project-table__sub">운영 메타데이터 프로젝트</span>
-          </td>
-          <td><span class="chip">{{ project.bitbucketProjectKey }}</span></td>
-          <td>
-            {% with dialog_id='representative-dialog-'|add:project.jiraProjectKey %}
-            {% if project.representativeRepoSlug %}
-            <button class="chip chip--neutral chip-button chip-button--truncate" type="button" data-open-dialog="{{ dialog_id }}">
-              <span class="chip-button__text">{{ project.representativeRepoSlug }}</span>
-            </button>
-            <dialog class="repository-dialog" id="{{ dialog_id }}">
-              <div class="repository-dialog__body">
-                <div class="panel__header">
-                  <h3 class="panel__title">{{ project.jiraProjectKey }} 대표 저장소</h3>
-                  <button class="chip chip--neutral chip-button" type="button" data-close-repository-dialog>닫기</button>
-                </div>
-                <ul class="meta-list repository-dialog__list">
-                  <li>{{ project.representativeRepoSlug }}</li>
-                </ul>
-              </div>
-            </dialog>
-            {% else %}
-            <span class="chip chip--warning">대표 저장소 미지정</span>
-            {% endif %}
-            {% endwith %}
-          </td>
-          <td>
-            {% with dialog_id='repo-dialog-'|add:project.jiraProjectKey %}
-            <button class="chip chip--neutral chip-button" type="button" data-open-dialog="{{ dialog_id }}">
-              {{ project.repositoryCount }}
-            </button>
-            <dialog class="repository-dialog" id="{{ dialog_id }}">
-              <div class="repository-dialog__body">
-                <div class="panel__header">
-                  <h3 class="panel__title">{{ project.jiraProjectKey }} 저장소</h3>
-                  <button class="chip chip--neutral chip-button" type="button" data-close-repository-dialog>닫기</button>
-                </div>
-                <ul class="meta-list repository-dialog__list">
-                  {% for repo_slug in project.repositorySlugs %}
-                  <li>{{ repo_slug }}</li>
-                  {% empty %}
-                  <li>등록된 저장소가 없습니다.</li>
-                  {% endfor %}
-                </ul>
-              </div>
-            </dialog>
-            {% endwith %}
-          </td>
-          <td class="project-table__status-cell">
-            {% if project.failedBuildCount %}
-            <span class="status-light status-light--danger" aria-label="빌드 실패" title="빌드 실패"></span>
-            {% elif project.warningTags %}
-            <span class="status-light status-light--warning" aria-label="경고" title="경고"></span>
-            {% else %}
-            <span class="status-light status-light--success" aria-label="정상" title="정상"></span>
-            {% endif %}
-          </td>
-          <td><a class="chip chip--neutral" href="{% url 'project-detail' project.jiraProjectKey %}{% if request.GET.urlencode %}?{{ request.GET.urlencode }}{% endif %}">상세 보기</a></td>
-        </tr>
-      {% endfor %}
-      </tbody>
-    </table>
-    <div class="project-compact-list">
-      {% for project in projects %}
-      <article class="project-compact-item">
-        <div class="project-compact-item__main">
-          <div>
-            <h3 class="project-compact-item__title">{{ project.jiraProjectKey }}</h3>
-            <p class="project-compact-item__sub">운영 메타데이터 프로젝트</p>
-          </div>
-          <div class="chip-row">
-            {% if project.generationReady %}
-            <span class="chip chip--success">Specs 생성 가능</span>
-            {% else %}
-            <span class="chip chip--warning">Specs 준비 필요</span>
-            {% endif %}
-            {% if project.warningTags %}
-              <span class="chip chip--warning">{{ project.warningTags.0 }}</span>
-              {% if project.warningTags|length > 1 %}
-              <span class="chip chip--neutral">+{{ project.warningTags|length|add:"-1" }}</span>
-              {% endif %}
-            {% else %}
-              <span class="chip chip--success">정상</span>
-            {% endif %}
-          </div>
-        </div>
-        <div class="project-compact-item__actions">
-          <a class="chip chip--neutral" href="{% url 'project-detail' project.jiraProjectKey %}{% if request.GET.urlencode %}?{{ request.GET.urlencode }}{% endif %}">상세 보기</a>
-        </div>
-      </article>
-      {% endfor %}
-    </div>
-    {% if pageObj.paginator.num_pages > 1 %}
-    <nav class="pagination" aria-label="프로젝트 리스트 페이지">
-      {% if pageObj.has_previous %}
-      <a class="pagination__link" href="?{{ paginationBaseQuery }}page={{ pageObj.previous_page_number }}">이전</a>
-      {% else %}
-      <span class="pagination__link pagination__link--disabled">이전</span>
-      {% endif %}
-
-      {% for page_number in pageObj.paginator.page_range %}
-        {% if page_number == pageObj.number %}
-        <span class="pagination__link pagination__link--active">{{ page_number }}</span>
-        {% else %}
-        <a class="pagination__link" href="?{{ paginationBaseQuery }}page={{ page_number }}">{{ page_number }}</a>
-        {% endif %}
-      {% endfor %}
-
-      {% if pageObj.has_next %}
-      <a class="pagination__link" href="?{{ paginationBaseQuery }}page={{ pageObj.next_page_number }}">다음</a>
-      {% else %}
-      <span class="pagination__link pagination__link--disabled">다음</span>
-      {% endif %}
-    </nav>
-    {% endif %}
-    {% else %}
-    <div class="empty-state">
-        <h3 class="empty-state__title">등록된 프로젝트가 없습니다.</h3>
-        <p class="empty-state__body">운영 DB에 프로젝트 메타데이터를 적재한 뒤 다시 확인해 주세요.</p>
-    </div>
-    {% endif %}
+<section class="ops-grid" data-dashboard-section>
+  <div class="ops-grid__primary">
+    {% include "ui/_project_list_panel.html" %}
   </div>
 
-  <div class="panel-stack panel-stack--dashboard">
-    <aside class="panel panel--stacked panel--dashboard-side" data-dashboard-side-panel id="attention-panel">
+  <div class="ops-grid__secondary">
+    <aside class="panel panel--stacked panel--dashboard-side panel--signal-side" data-dashboard-side-panel id="attention-panel" data-reveal>
       <div class="panel__header">
-        <h2 class="panel__title">주의 필요 프로젝트</h2>
+        <div>
+          <p class="panel__eyebrow">Attention Board</p>
+          <h2 class="panel__title">주의 필요 프로젝트</h2>
+        </div>
       </div>
       <p class="panel__body">
         등록 정보가 완전하지 않거나 마지막 빌드가 실패한 프로젝트만 표시합니다.
@@ -517,9 +388,12 @@
       </ul>
     </aside>
 
-    <aside class="panel panel--stacked panel--dashboard-side" data-dashboard-side-panel id="failed-build-panel">
+    <aside class="panel panel--stacked panel--dashboard-side panel--signal-side" data-dashboard-side-panel id="failed-build-panel" data-reveal>
       <div class="panel__header">
-        <h2 class="panel__title">최근 실패 빌드</h2>
+        <div>
+          <p class="panel__eyebrow">Failure Feed</p>
+          <h2 class="panel__title">최근 실패 빌드</h2>
+        </div>
       </div>
       <ul class="failed-build-list failed-build-list--scroll">
         {% for build in failedBuilds %}
@@ -542,4 +416,161 @@
     </aside>
   </div>
 </section>
+
+<script>
+  (function () {
+    const registrationPanel = document.getElementById("project-registration-panel");
+    const toggleRegistrationButton = document.querySelector("[data-toggle-registration]");
+    const scrollLinks = document.querySelectorAll("[data-scroll-link]");
+    const repositoryTemplate = document.getElementById("repository-row-template");
+    const buildTemplate = document.getElementById("build-row-template");
+    const repositoryStack = document.querySelector("[data-repository-stack]");
+    const buildStack = document.querySelector("[data-build-stack]");
+    const addRepositoryButton = document.querySelector("[data-add-repository]");
+    const addBuildButton = document.querySelector("[data-add-build]");
+
+    function scrollWithHeaderOffset(target) {
+      if (!target) {
+        return;
+      }
+      const header = document.querySelector(".app-header");
+      const headerHeight = header ? header.offsetHeight : 0;
+      const top = window.scrollY + target.getBoundingClientRect().top - headerHeight - 20;
+      window.scrollTo({ top: Math.max(top, 0), behavior: "smooth" });
+    }
+
+    function bindRepositoryDialogs(root) {
+      root.querySelectorAll("[data-open-dialog]").forEach(function (button) {
+        button.addEventListener("click", function () {
+          const dialogId = button.getAttribute("data-open-dialog");
+          const dialog = document.getElementById(dialogId);
+          if (dialog && typeof dialog.showModal === "function") {
+            dialog.showModal();
+          }
+        });
+      });
+
+      root.querySelectorAll("[data-close-repository-dialog]").forEach(function (button) {
+        button.addEventListener("click", function () {
+          const dialog = button.closest("dialog");
+          if (dialog) {
+            dialog.close();
+          }
+        });
+      });
+    }
+
+    function syncDashboardHeights() {
+      const dashboardSection = document.querySelector("[data-dashboard-section]");
+      const projectListPanel = document.querySelector("[data-project-list-panel]");
+      if (!dashboardSection || !projectListPanel) {
+        return;
+      }
+      const currentHeight = projectListPanel.offsetHeight;
+      const previousHeight = parseFloat(dashboardSection.style.getPropertyValue("--dashboard-list-height")) || 0;
+      dashboardSection.style.setProperty("--dashboard-list-height", Math.max(previousHeight, currentHeight) + "px");
+    }
+
+    async function handlePaginationClick(event) {
+      const link = event.target.closest(".pagination a.pagination__link");
+      if (!link) {
+        return;
+      }
+
+      event.preventDefault();
+      const url = new URL(link.href, window.location.origin);
+      url.searchParams.set("partial", "project-list");
+
+      const response = await fetch(url.toString(), {
+        headers: {
+          "X-Requested-With": "XMLHttpRequest",
+        },
+      });
+      if (!response.ok) {
+        window.location.href = link.href;
+        return;
+      }
+
+      const html = await response.text();
+      const wrapper = document.createElement("div");
+      wrapper.innerHTML = html.trim();
+      const nextPanel = wrapper.firstElementChild;
+      const currentPanel = document.querySelector("[data-project-list-container]");
+      if (!nextPanel || !currentPanel) {
+        window.location.href = link.href;
+        return;
+      }
+
+      currentPanel.replaceWith(nextPanel);
+      bindRepositoryDialogs(nextPanel);
+      initPartialPagination();
+      syncDashboardHeights();
+      window.history.pushState({}, "", link.href);
+    }
+
+    function initPartialPagination() {
+      const panel = document.querySelector("[data-project-list-container]");
+      if (!panel || panel.dataset.paginationBound === "true") {
+        return;
+      }
+      panel.addEventListener("click", handlePaginationClick);
+      panel.dataset.paginationBound = "true";
+    }
+
+    if (registrationPanel && toggleRegistrationButton) {
+      document.querySelectorAll("[data-toggle-registration]").forEach(function (button) {
+        button.addEventListener("click", function () {
+          const isHidden = registrationPanel.hasAttribute("hidden");
+          if (isHidden) {
+            registrationPanel.removeAttribute("hidden");
+            registrationPanel.classList.remove("registration-layout--collapsed");
+            document.querySelectorAll("[data-toggle-registration]").forEach(function (toggle) {
+              toggle.setAttribute("aria-expanded", "true");
+            });
+            scrollWithHeaderOffset(registrationPanel);
+          } else {
+            registrationPanel.setAttribute("hidden", "");
+            registrationPanel.classList.add("registration-layout--collapsed");
+            document.querySelectorAll("[data-toggle-registration]").forEach(function (toggle) {
+              toggle.setAttribute("aria-expanded", "false");
+            });
+          }
+        });
+      });
+    }
+
+    scrollLinks.forEach(function (link) {
+      link.addEventListener("click", function (event) {
+        const selector = link.getAttribute("href");
+        if (!selector || selector.charAt(0) !== "#") {
+          return;
+        }
+        const target = document.querySelector(selector);
+        if (!target) {
+          return;
+        }
+        event.preventDefault();
+        scrollWithHeaderOffset(target);
+      });
+    });
+
+    if (repositoryTemplate && repositoryStack && addRepositoryButton) {
+      addRepositoryButton.addEventListener("click", function () {
+        repositoryStack.appendChild(repositoryTemplate.content.cloneNode(true));
+      });
+    }
+
+    if (buildTemplate && buildStack && addBuildButton) {
+      addBuildButton.addEventListener("click", function () {
+        buildStack.appendChild(buildTemplate.content.cloneNode(true));
+      });
+    }
+
+    bindRepositoryDialogs(document);
+    initPartialPagination();
+    syncDashboardHeights();
+    window.addEventListener("load", syncDashboardHeights);
+    window.addEventListener("resize", syncDashboardHeights);
+  }());
+</script>
 {% endblock %}

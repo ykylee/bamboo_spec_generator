@@ -11,7 +11,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;600;700&family=Noto+Serif+KR:wght@600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="{% static 'ui/app.css' %}">
   </head>
-  <body>
+  <body class="{% block body_class %}{% endblock %}">
     <header class="app-header">
       <div class="app-header__inner">
         <div class="app-header__brand-group">
@@ -214,8 +214,21 @@
             const keyword = (input.value || "").trim().toLowerCase();
             let visibleCount = 0;
 
+            if (!keyword) {
+              items.forEach(function (item) {
+                item.hidden = true;
+              });
+              if (results) {
+                results.hidden = true;
+              }
+              if (empty) {
+                empty.hidden = true;
+              }
+              return;
+            }
+
             items.forEach(function (item) {
-              const matches = !keyword || item.dataset.searchText.indexOf(keyword) !== -1;
+              const matches = item.dataset.searchText.indexOf(keyword) !== -1;
               item.hidden = !matches;
               if (matches) {
                 visibleCount += 1;
@@ -230,8 +243,18 @@
             }
           }
 
-          input.addEventListener("focus", updateProjectSearch);
+          input.addEventListener("focus", function () {
+            if ((input.value || "").trim()) {
+              updateProjectSearch();
+            }
+          });
           input.addEventListener("input", updateProjectSearch);
+          input.addEventListener("search", updateProjectSearch);
+          input.addEventListener("blur", function () {
+            if (!(input.value || "").trim()) {
+              updateProjectSearch();
+            }
+          });
           input.addEventListener("keydown", function (event) {
             if (event.key !== "Enter") {
               return;
@@ -251,6 +274,8 @@
               results.hidden = true;
             }
           });
+
+          updateProjectSearch();
         }
       }());
     </script>

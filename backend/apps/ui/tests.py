@@ -120,6 +120,9 @@ class ProjectViewTest(TestCase):
         self.assertContains(response, "Specs 생성 가능")
         self.assertContains(response, "SAMPLE")
         self.assertContains(response, "프로젝트 등록")
+        self.assertContains(response, "주의가 필요한 프로젝트를 먼저 보여줍니다.")
+        self.assertContains(response, "프로젝트 리스트")
+        self.assertContains(response, "최근 실패 빌드")
         self.assertContains(response, "<th>저장소</th>", html=False)
         self.assertContains(response, 'data-open-dialog="repo-dialog-SAMPLE"', html=False)
         self.assertContains(response, 'data-open-dialog="representative-dialog-SAMPLE"', html=False)
@@ -149,6 +152,7 @@ class ProjectViewTest(TestCase):
         response = self.client.get("/")
 
         self.assertEqual(200, response.status_code)
+        self.assertContains(response, "주의가 필요한 프로젝트를 먼저 보여줍니다.")
         self.assertContains(response, "등록된 프로젝트가 없습니다.")
         self.assertContains(response, "실패 상태 빌드가 없습니다.")
 
@@ -241,6 +245,30 @@ class ProjectViewTest(TestCase):
         self.assertEqual("PAG10", projects[0]["jiraProjectKey"])
         self.assertEqual("q=PAG&", response.context["paginationBaseQuery"])
         self.assertContains(response, "?q=PAG&amp;page=1")
+
+    def test_project_list_partial_request_returns_only_list_panel(self) -> None:
+        for index in range(11):
+            self._create_project_with_build(
+                jira_project_key=f"AJX{index:02d}",
+                bitbucket_project_key="AJAX",
+                repo_slug=f"ajax-repo-{index:02d}",
+                build_name=f"Ajax Build {index:02d}",
+                build_id=f"ajax-build-{index:02d}",
+                plan_key=f"AJAX{index:02d}",
+                with_active_definition=True,
+            )
+
+        response = self.client.get(
+            "/",
+            {"page": "2", "partial": "project-list"},
+            HTTP_X_REQUESTED_WITH="XMLHttpRequest",
+        )
+
+        self.assertEqual(200, response.status_code)
+        self.assertContains(response, 'data-project-list-container', html=False)
+        self.assertContains(response, "AJX10")
+        self.assertNotContains(response, "<!doctype html>", html=False)
+        self.assertNotContains(response, "Operations Radar")
 
     def test_project_list_shows_latest_failed_build_panel(self) -> None:
         self._create_project_with_build(
