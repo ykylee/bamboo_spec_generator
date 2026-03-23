@@ -50,6 +50,20 @@
 - 검증 후 `python3 backend/manage.py runserver 0.0.0.0:8030 --noreload`
 - Tailscale 주소로 실제 화면 확인
 
+## 남은 이슈
+
+1. Coverity/Bamboo 저장소 연결 정책 세분화
+- 현재 `Repository Linkage Mode`는 시스템 전역 설정이다.
+- 일부 플랜만 `create_if_missing`를 사용하고 나머지는 `linked`를 유지하는 플랜별 제어는 아직 없다.
+
+2. `cloneUrl` 노출 정리
+- 현재는 `linked` 모드에서도 `git clone URL template`가 설정되어 있으면 `cloneUrl` 값 자체는 계산된다.
+- 실제 생성 경로에는 직접 영향이 없지만 UI와 디버깅 출력에서 혼동 여지가 있어 정리가 필요하다.
+
+3. Bamboo end-to-end 재검증
+- 운영 UI에서 `linked`와 `create_if_missing`를 전환하면서 실제 Bamboo publish까지 다시 확인할 필요가 있다.
+- linked repository 존재 여부, generic Git fallback, 생성된 Plan repository 형태를 함께 확인한다.
+
 ## 참고 파일
 
 - `backend/apps/buildmeta/selectors/definitions.py`
