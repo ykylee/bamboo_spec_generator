@@ -16,6 +16,7 @@ class ExecutionStartIn(Schema):
     branchKind: str
     commitHash: str
     buildNumber: str
+    buildKey: str = ""
     startedAt: datetime | None = None
 
 
@@ -23,6 +24,7 @@ class ExecutionStartOut(Schema):
     buildVersionId: str
     buildExecutionId: str
     version: str
+    buildKey: str = ""
     reusedExistingVersion: bool
 
 

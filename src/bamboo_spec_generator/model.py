@@ -10,6 +10,7 @@ class RepositoryDefinition:
     repo_slug: str
     linkage_mode: str
     application_link: str | None
+    clone_url: str | None
     branches: list[str]
 
 

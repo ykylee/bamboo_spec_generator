@@ -5,7 +5,15 @@ import os
 
 from django.test import TestCase
 
-from apps.buildmeta.models import BuildPlan, BuildPlanDefinition, BuildVersion, Project, ProjectBuild, ProjectRepository
+from apps.buildmeta.models import (
+    BuildPlan,
+    BuildPlanBuildInfo,
+    BuildVersion,
+    Project,
+    ProjectBuild,
+    ProjectRepository,
+    SystemSetting,
+)
 from apps.buildmeta.services.executions import finish_execution, start_execution
 
 
@@ -17,7 +25,7 @@ class ApiSmokeTest(TestCase):
             bitbucket_project_key="SAMPLE",
             representative_repo_slug="sample-app-api",
         )
-        ProjectRepository.objects.create(
+        repository = ProjectRepository.objects.create(
             project=self.project,
             repo_slug="sample-app-api",
             coverity_project="sample-app",
@@ -27,56 +35,21 @@ class ApiSmokeTest(TestCase):
         self.plan = BuildPlan.objects.create(build_id="sample-app-api", plan_key="SAMPAPI")
         ProjectBuild.objects.create(
             project=self.project,
+            repository=repository,
             build_plan=self.plan,
             build_name="backend",
             build_type="python",
+            runtime_stack="java",
         )
-        definition = BuildPlanDefinition.objects.create(
+        BuildPlanBuildInfo.objects.create(
             build_plan=self.plan,
-            project=self.project,
-            year="2026",
-            source_kind=BuildPlanDefinition.SOURCE_KIND_JSON,
-            definition_hash="sha256:abc123",
-            is_active=True,
-            definition_json={
-                "year": "2026",
-                "buildId": "sample-app-api",
-                "name": "Sample App API",
-                "planKey": "SAMPAPI",
-                "description": "Sample App API build plan",
-                "language": "java",
-                "compiler": "maven",
-                "repository": {
-                    "provider": "bitbucket",
-                    "projectKey": "SAMPLE",
-                    "repoSlug": "sample-app-api",
-                    "linkageMode": "linked",
-                    "applicationLink": "BITBUCKET_SERVER",
-                    "branches": ["dev", "release", "master"],
-                },
-                "requirements": {
-                    "os": "linux",
-                    "extraCapabilities": [],
-                },
-                "build": {
-                    "subPath": "services/sample-app-api",
-                    "prepareCommand": "mvn -B dependency:go-offline",
-                    "buildCommand": "mvn -B clean package",
-                    "staticAnalysis": {
-                        "customTool": {
-                            "commands": ["custom-tool analyze {buildCommand}"],
-                        }
-                    },
-                    "runtimeRequirements": {
-                        "commands": ["mvn", "coverity", "custom-tool", "trigger-plan"],
-                        "envVars": ["PATH", "JAVA_HOME"],
-                    },
-                    "postBuildTrigger": {
-                        "type": "plan",
-                        "targetPlanKey": "POSTBUILD",
-                    },
-                },
-            },
+            build_key="api-linux",
+            operating_system="linux",
+            pre_process="mvn -B dependency:go-offline",
+            build_command="mvn -B clean package",
+            language="java",
+            compiler="maven",
+            build_sub_path="services/sample-app-api",
         )
         self.auth_headers = {"HTTP_AUTHORIZATION": "Bearer test-token"}
 
@@ -86,9 +59,9 @@ class ApiSmokeTest(TestCase):
         self.assertEqual(200, response.status_code)
         payload = response.json()
         self.assertEqual("SAMPAPI", payload["planKey"])
-        self.assertEqual("2026", payload["year"])
         self.assertEqual("sample-app-api", payload["definition"]["buildId"])
         self.assertEqual("BITBUCKET_SERVER", payload["definition"]["repository"]["applicationLink"])
+        self.assertEqual("services/sample-app-api", payload["definition"]["build"]["subPath"])
 
     def test_prepare_context_endpoint(self) -> None:
         response = self.client.get("/api/v1/build-plans/SAMPAPI/prepare-context", **self.auth_headers)
@@ -99,6 +72,39 @@ class ApiSmokeTest(TestCase):
         self.assertEqual("sample-app-api", payload["variables"]["BITBUCKET_REPO_SLUG"])
         self.assertEqual("BITBUCKET_SERVER", payload["variables"]["BITBUCKET_APPLICATION_LINK"])
         self.assertEqual("BITBUCKET_SERVER", payload["currentRepository"]["applicationLink"])
+        self.assertEqual("linked", payload["currentRepository"]["linkageMode"])
+
+    def test_prepare_context_endpoint_uses_create_if_missing_when_git_clone_template_exists(self) -> None:
+        SystemSetting.objects.create(
+            key=SystemSetting.KEY_GIT_CLONE_URL_TEMPLATE,
+            value="https://git.example.com/scm/{project_key_lower}/{repo_slug}.git",
+        )
+        SystemSetting.objects.create(
+            key=SystemSetting.KEY_REPOSITORY_LINKAGE_MODE,
+            value="create_if_missing",
+        )
+
+        response = self.client.get("/api/v1/build-plans/SAMPAPI/prepare-context", **self.auth_headers)
+
+        self.assertEqual(200, response.status_code)
+        payload = response.json()
+        self.assertEqual("create_if_missing", payload["currentRepository"]["linkageMode"])
+        self.assertEqual(
+            "https://git.example.com/scm/sample/sample-app-api.git",
+            payload["currentRepository"]["cloneUrl"],
+        )
+        self.assertEqual("create_if_missing", payload["variables"]["currentRepository.linkageMode"])
+
+    def test_prepare_context_endpoint_keeps_linked_mode_when_only_git_clone_template_exists(self) -> None:
+        SystemSetting.objects.create(
+            key=SystemSetting.KEY_GIT_CLONE_URL_TEMPLATE,
+            value="https://git.example.com/scm/{project_key_lower}/{repo_slug}.git",
+        )
+
+        response = self.client.get("/api/v1/build-plans/SAMPAPI/prepare-context", **self.auth_headers)
+
+        self.assertEqual(200, response.status_code)
+        payload = response.json()
         self.assertEqual("linked", payload["currentRepository"]["linkageMode"])
 
     def test_execution_start_and_finish_endpoints(self) -> None:
@@ -215,3 +221,188 @@ class ApiSmokeTest(TestCase):
         list_response = self.client.get("/api/v1/build-plans/SAMPAPI/executions", **self.auth_headers)
         list_payload = list_response.json()
         self.assertEqual("coverity", list_payload[0]["staticAnalysisResults"][0]["toolName"])
+
+    def test_project_list_and_detail_include_generation_readiness(self) -> None:
+        response = self.client.get("/api/v1/projects/", **self.auth_headers)
+
+        self.assertEqual(200, response.status_code)
+        payload = response.json()
+        self.assertEqual(1, len(payload))
+        self.assertTrue(payload[0]["generationReady"])
+        self.assertEqual(0, payload[0]["activeDefinitionCount"])
+
+        detail_response = self.client.get("/api/v1/projects/SAMPLE", **self.auth_headers)
+        self.assertEqual(200, detail_response.status_code)
+        detail_payload = detail_response.json()
+        self.assertTrue(detail_payload["generation"]["generationReady"])
+        self.assertEqual("", detail_payload["builds"][0]["activeDefinitionYear"])
+
+    def test_project_create_endpoint_registers_project_with_builds(self) -> None:
+        response = self.client.post(
+            "/api/v1/projects/",
+            data=json.dumps(
+                {
+                    "jiraProjectKey": "NEWPROJ",
+                    "bitbucketProjectKey": "NEWPROJ",
+                    "representativeRepoSlug": "new-service",
+                    "repositories": [
+                        {
+                            "repoSlug": "new-service",
+                            "coverityProject": "new-service",
+                            "coverityStream": "new-service-dev",
+                            "isRepresentative": True,
+                        }
+                    ],
+                    "builds": [
+                        {
+                            "buildName": "api",
+                            "buildType": "python",
+                            "runtimeStack": "python3.12",
+                            "buildId": "new-service-api",
+                            "planKey": "NEWSVCAPI",
+                            "repositorySlug": "new-service",
+                        }
+                    ],
+                }
+            ),
+            content_type="application/json",
+            **self.auth_headers,
+        )
+
+        self.assertEqual(200, response.status_code)
+        payload = response.json()
+        self.assertEqual("NEWPROJ", payload["jiraProjectKey"])
+        self.assertFalse(payload["generation"]["generationReady"])
+        self.assertEqual(["빌드 정보 없음 1"], payload["generation"]["generationReadinessIssues"])
+
+    def test_coverity_system_settings_endpoints(self) -> None:
+        response = self.client.put(
+            "/api/v1/system-settings/coverity",
+            data=json.dumps(
+                {
+                    "connectUrl": "https://coverity.example.com",
+                    "onNewCert": "trust",
+                    "commitEnabled": True,
+                    "repositoryLinkageMode": "create_if_missing",
+                    "gitCloneUrlTemplate": "https://git.example.com/scm/{project_key_lower}/{repo_slug}.git",
+                }
+            ),
+            content_type="application/json",
+            **self.auth_headers,
+        )
+
+        self.assertEqual(200, response.status_code)
+        payload = response.json()
+        self.assertEqual("https://coverity.example.com", payload["connectUrl"])
+        self.assertTrue(payload["commitEnabled"])
+        self.assertEqual("create_if_missing", payload["repositoryLinkageMode"])
+        self.assertEqual(
+            "https://git.example.com/scm/{project_key_lower}/{repo_slug}.git",
+            payload["gitCloneUrlTemplate"],
+        )
+        self.assertEqual("https://coverity.example.com", SystemSetting.objects.get(key="coverity.connect.url").value)
+
+    def test_specs_draft_initialize_endpoint_creates_build_info(self) -> None:
+        response = self.client.post(
+            "/api/v1/system-settings/specs-drafts/initialize?resetExisting=true",
+            content_type="application/json",
+            **self.auth_headers,
+        )
+
+        self.assertEqual(200, response.status_code)
+        payload = response.json()
+        self.assertEqual(0, payload["initializedCount"])
+        self.assertEqual(1, payload["updatedCount"])
+        build_info = BuildPlanBuildInfo.objects.get(build_plan=self.plan)
+        self.assertEqual("linux", build_info.operating_system)
+        self.assertEqual("services/sample-app-api", build_info.build_sub_path)
+
+    def test_specs_draft_initialize_endpoint_preserves_multiple_build_infos(self) -> None:
+        BuildPlanBuildInfo.objects.create(
+            build_plan=self.plan,
+            build_key="api-windows",
+            operating_system="windows",
+            pre_process="setup.bat",
+            build_command="mvn -B verify -Pwindows",
+            clean_command="mvn -B clean",
+            analysis_excluded_files="generated/**",
+            language="java",
+            compiler="maven",
+            coverity_stream="",
+            build_sub_path="services/windows",
+        )
+
+        response = self.client.post(
+            "/api/v1/system-settings/specs-drafts/initialize?resetExisting=true",
+            content_type="application/json",
+            **self.auth_headers,
+        )
+
+        self.assertEqual(200, response.status_code)
+        payload = response.json()
+        self.assertEqual(2, payload["updatedCount"])
+        self.assertEqual(2, BuildPlanBuildInfo.objects.filter(build_plan=self.plan).count())
+        self.assertEqual({"api-linux", "api-windows"}, set(self.plan.build_infos.values_list("build_key", flat=True)))
+
+    def test_specs_draft_initialize_plan_endpoint_refreshes_existing_build_info(self) -> None:
+        self.plan.definitions.all().delete()
+        BuildPlanBuildInfo.objects.create(
+            build_plan=self.plan,
+            build_key="main",
+            operating_system="",
+            language="",
+            compiler="",
+            coverity_stream="",
+            build_sub_path="",
+        )
+
+        response = self.client.post(
+            f"/api/v1/system-settings/specs-drafts/initialize/{self.plan.plan_key}",
+            content_type="application/json",
+            **self.auth_headers,
+        )
+
+        self.assertEqual(200, response.status_code)
+        payload = response.json()
+        self.assertEqual(2, payload["updatedCount"])
+        build_info = BuildPlanBuildInfo.objects.get(build_plan=self.plan, build_key="main")
+        self.assertEqual(".", build_info.build_sub_path)
+        self.assertEqual("sample-app-dev", build_info.coverity_stream)
+
+    def test_project_update_endpoint_updates_metadata_and_links(self) -> None:
+        response = self.client.put(
+            "/api/v1/projects/SAMPLE",
+            data=json.dumps(
+                {
+                    "bitbucketProjectKey": "SAMPLE2",
+                    "representativeRepoSlug": "sample-app-api",
+                    "repositories": [
+                        {
+                            "repoSlug": "sample-app-api",
+                            "coverityProject": "sample-app",
+                            "coverityStream": "sample-app-release",
+                            "isRepresentative": True,
+                        }
+                    ],
+                    "builds": [
+                        {
+                            "buildName": "backend-api",
+                            "buildType": "java",
+                            "runtimeStack": "java17",
+                            "buildId": "sample-app-api",
+                            "planKey": "SAMPAPI",
+                            "repositorySlug": "sample-app-api",
+                        }
+                    ],
+                }
+            ),
+            content_type="application/json",
+            **self.auth_headers,
+        )
+
+        self.assertEqual(200, response.status_code)
+        payload = response.json()
+        self.assertEqual("SAMPLE2", payload["bitbucketProjectKey"])
+        self.assertEqual("backend-api", payload["builds"][0]["buildName"])
+        self.assertEqual("sample-app-release", payload["repositories"][0]["coverityStream"])
+        self.assertEqual("sample-app-api", payload["builds"][0]["repositorySlug"])

@@ -12,11 +12,15 @@
 
 이 문서는 제품의 상세 설계를 한 곳에 모은다. 범위는 JSON 입력 스키마, 저장소 연결 및 브랜치 트리거, 작업 하위 경로, MSBuild 보정, 스크립트 자산 렌더링, 빌드 메타데이터 DB 모델, 운영 백엔드/API/조회 UI 설계, 그리고 장기 확장 범위인 배포/릴리스 관리 상세 설계다.
 
+함수 단위 또는 특정 구현 흐름의 상세 설계가 필요할 때는 `detailed_designs/` 아래에 별도 문서를 추가한다.
+
 ## 구현 범위 구분
 
 - 1~5장은 현재 구현과 직접 연결되는 상세 설계다.
 - 6~12장은 향후 DB 및 운영 메타데이터 확장을 위한 상세 설계다.
 - 저장소 연결의 `branches`, `create_if_missing`, `applicationLink`는 현재 Java Specs 생성까지 반영된다. 남은 범위는 운영 환경별 application link 값 공급과 세부 운영 정책 확정이다.
+- 현재 추가된 함수 단위 상세 설계:
+  - [프로젝트 등록 및 Specs 생성 준비도](./detailed_designs/project_registration_and_generation_readiness.md)
 
 ## 1. 입력 JSON 설계
 

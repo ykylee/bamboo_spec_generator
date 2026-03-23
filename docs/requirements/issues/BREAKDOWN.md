@@ -2,7 +2,7 @@
 
 ## 개요
 
-현재 통합 요구사항을 Jira 등록 가능한 단위로 분해한 초안이다. 현재는 생성기 본체 범위의 Epic 1건과 빌드 메타데이터 DB 확장 범위의 Epic 1건으로 나뉜다.
+현재 통합 요구사항을 Jira 등록 가능한 단위로 분해한 초안이다. 현재는 생성기 본체 범위의 Epic 1건, 빌드 메타데이터 DB 확장 범위의 Epic 1건, 운영 관리 기능 확장 범위의 Epic 1건으로 나뉜다.
 
 ## 전체 구현 상태
 
@@ -24,6 +24,13 @@
 9. STORY-14 JSON 적재 및 동기화 경로 구현
 10. STORY-15 빌드 실행 결과 저장 모델 구현
 11. STORY-16 버전 및 변경 이력 추적 구현
+12. STORY-21 프로젝트 등록 기능 도입
+13. STORY-22 프로젝트 정보 조회 및 수정 기능 확장
+14. STORY-23 사용자 및 권한 관리 기능 도입
+15. STORY-24 빌드 현황 조회 기능 확장
+16. STORY-25 Bamboo 시스템 운영 현황 조회 기능 도입
+17. STORY-26 운영 관리 API 표준화
+18. STORY-27 빌드 등록 구조 및 지원 옵션 정의
 
 ## EPIC-01 생성기 본체
 
@@ -122,3 +129,48 @@
 - [STORY-18 준비 스테이지 DB 변수 조회 및 프로젝트 메타데이터 확장](./STORY-18-prepare-stage-db-context-and-project-metadata.md)
 - [STORY-19 Django 운영 백엔드 및 Admin 기반 관리 구조 도입](./STORY-19-django-backend-and-admin.md)
 - [STORY-20 Ninja API 및 조회용 프론트엔드 도입](./STORY-20-ninja-api-and-readonly-frontend.md)
+
+## EPIC-03 통합 CI/CD 운영 관리 기능 확장
+
+### 개요
+
+생성기와 메타데이터 저장소를 넘어, 운영 콘솔로서 필요한 프로젝트 등록/관리, 사용자 관리, 빌드 현황 조회, Bamboo 시스템 운영 현황 조회 기능을 추가하기 위한 Jira 초안이다. 모든 기능은 API 우선 원칙을 따른다.
+
+### 구현 상태
+
+- 현재 부분 구현:
+  - STORY-21
+  - STORY-22
+  - STORY-24
+  - STORY-26
+- 현재 요구사항 정의 및 일부 UI 반영:
+  - STORY-27
+- 현재 미구현:
+  - STORY-23
+  - STORY-25
+
+### 우선순위
+
+- `높음`: STORY-21, STORY-24, STORY-26, STORY-27
+- `중간`: STORY-22, STORY-23, STORY-25
+
+### 추천 구현 순서
+
+1. STORY-26 운영 관리 API 표준화
+2. STORY-21 프로젝트 등록 기능 도입
+3. STORY-27 빌드 등록 구조 및 지원 옵션 정의
+4. STORY-22 프로젝트 정보 조회 및 수정 기능 확장
+5. STORY-24 빌드 현황 조회 기능 확장
+6. STORY-25 Bamboo 시스템 운영 현황 조회 기능 도입
+7. STORY-23 사용자 및 권한 관리 기능 도입
+
+### 이슈 목록
+
+- [EPIC-03 통합 CI/CD 운영 관리 기능 확장](./EPIC-03-cicd-operations-management.md)
+- [STORY-21 프로젝트 등록 기능 도입](./STORY-21-project-registration.md)
+- [STORY-22 프로젝트 정보 조회 및 수정 기능 확장](./STORY-22-project-read-update.md)
+- [STORY-23 사용자 및 권한 관리 기능 도입](./STORY-23-user-management-and-authorization.md)
+- [STORY-24 빌드 현황 조회 기능 확장](./STORY-24-build-status-observability.md)
+- [STORY-25 Bamboo 시스템 운영 현황 조회 기능 도입](./STORY-25-bamboo-system-operations-visibility.md)
+- [STORY-26 운영 관리 API 표준화](./STORY-26-operations-api-standardization.md)
+- [STORY-27 빌드 등록 구조 및 지원 언어/컴파일러 선택 방식 정의](./STORY-27-build-registration-structure-and-supported-options.md)

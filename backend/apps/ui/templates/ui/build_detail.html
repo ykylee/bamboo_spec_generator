@@ -1,0 +1,641 @@
+{% extends "ui/base.html" %}
+
+{% block title %}{% if build %}{{ build.buildName }} | Bamboo Spec Generator{% else %}빌드 없음 | Bamboo Spec Generator{% endif %}{% endblock %}
+{% block body_class %}page-resource-detail{% endblock %}
+{% block page_heading %}{% if build %}{{ build.buildName }} 상세{% else %}빌드 상세{% endif %}{% endblock %}
+
+{% block content %}
+{% if project and build %}
+<section class="signal-hero signal-hero--workspace">
+  <div class="signal-hero__content">
+    <p class="signal-hero__eyebrow">Build Plan Workspace</p>
+    <h1 class="hero__title">{{ build.buildName }}</h1>
+    <p class="signal-hero__body">빌드 상세에서는 플랜 공통 메타데이터를 관리하고, 플랜 아래 여러 종류의 `빌드 정보`를 따로 등록해 환경구성과 분석 집계 기준을 분리합니다.</p>
+    <div class="hero__actions">
+      <button
+        class="action-button"
+        type="button"
+        data-toggle-build-plan-metadata
+        aria-expanded="{% if metadataOpen %}true{% else %}false{% endif %}"
+        aria-controls="build-plan-metadata-panel"
+      >
+        빌드 플랜 수정
+      </button>
+      <a
+        class="action-button action-button--ghost"
+        href="{% url 'project-build-detail' project.jiraProjectKey build.planKey %}?add_build_info=open#build-info-add-panel"
+      >
+        빌드 정보 등록
+      </a>
+      <form method="post" action="{% url 'project-build-detail' project.jiraProjectKey build.planKey %}">
+        {% csrf_token %}
+        <input type="hidden" name="form_kind" value="refresh_specs_draft">
+        <button class="action-button action-button--ghost" type="submit">Specs 초안 다시 채우기</button>
+      </form>
+      {% if repository %}
+      <a class="action-button action-button--ghost" href="{% url 'project-repository-detail' project.jiraProjectKey repository.repoSlug %}">저장소 상세</a>
+      {% endif %}
+    </div>
+    {% if draftRefreshMessage %}
+    <div class="form-alert form-alert--success">{{ draftRefreshMessage }}</div>
+    {% endif %}
+    {% if draftRefreshError %}
+    <div class="form-alert form-alert--error">{{ draftRefreshError }}</div>
+    {% endif %}
+    <div class="chip-row">
+      <span class="chip">{{ build.planKey }}</span>
+      <span class="chip chip--neutral">{{ build.buildId }}</span>
+      <span class="chip chip--neutral">{{ build.staticAnalysisToolVersion|default:"정적분석 미지정" }}</span>
+      <span class="chip chip--neutral">{{ build.buildInfoCount }} build infos</span>
+      {% if build.coverityProject %}
+      <span class="chip chip--success">{{ build.coverityProject }}</span>
+      {% endif %}
+    </div>
+  </div>
+  <div class="signal-hero__board" aria-label="빌드 상세 보드">
+    <article class="signal-metric signal-metric--primary">
+      <span class="signal-metric__label">Plan Key</span>
+      <strong class="signal-metric__value signal-metric__value--compact">{{ build.planKey }}</strong>
+      <p class="signal-metric__meta">플랜 식별자</p>
+    </article>
+    <article class="signal-metric">
+      <span class="signal-metric__label">Build Info</span>
+      <strong class="signal-metric__value">{{ build.buildInfoCount }}</strong>
+      <p class="signal-metric__meta">플랜 아래 등록된 빌드 환경구성 수</p>
+    </article>
+    <article class="signal-metric">
+      <span class="signal-metric__label">Static Analysis</span>
+      <strong class="signal-metric__value signal-metric__value--compact">{{ build.staticAnalysisToolVersion|default:"-" }}</strong>
+      <p class="signal-metric__meta">플랜 단위 정적분석 도구 버전</p>
+    </article>
+    <article class="signal-metric signal-metric--list">
+      <div class="signal-metric__header">
+        <span class="signal-metric__label">Operator Notes</span>
+        <span class="badge">Build Plan</span>
+      </div>
+      <ul class="signal-queue">
+        <li class="signal-queue__item"><strong>플랜 메타데이터</strong><span>정적분석 도구 버전과 Coverity Project는 이 화면에서 관리합니다.</span></li>
+        <li class="signal-queue__item"><strong>빌드 정보</strong><span>빌드키별 Job 구성을 이 화면의 등록 패널과 상세 편집으로 관리합니다.</span></li>
+        <li class="signal-queue__item"><strong>Preview</strong><span>아래에서 실제로 구성될 Bamboo Plan과 Job 구성을 바로 확인할 수 있습니다.</span></li>
+      </ul>
+    </article>
+  </div>
+</section>
+
+<section class="registration-layout registration-layout--signal{% if not metadataOpen %} registration-layout--collapsed{% endif %}" id="build-plan-metadata-panel" {% if not metadataOpen %}hidden{% endif %}>
+  <article class="panel registration-panel registration-panel--signal">
+    <div class="panel__header">
+      <div>
+        <p class="panel__eyebrow">Build Plan Metadata</p>
+        <h2 class="panel__title">빌드 메타데이터 수정</h2>
+      </div>
+      <div class="panel__header-actions">
+        <span class="badge">Plan Scoped</span>
+        <button
+          class="action-button action-button--ghost"
+          type="button"
+          data-toggle-build-plan-metadata
+          aria-expanded="{% if metadataOpen %}true{% else %}false{% endif %}"
+          aria-controls="build-plan-metadata-panel"
+        >
+          접기
+        </button>
+      </div>
+    </div>
+    <p class="panel__body">플랜 공통 메타데이터는 이 패널에서 관리하고, 빌드 환경구성은 아래 등록 패널에서 따로 관리합니다.</p>
+    {% if metadataError %}
+    <div class="form-alert form-alert--error">{{ metadataError }}</div>
+    {% endif %}
+
+    <datalist id="static-analysis-tool-version-options">
+      {% for item in registrationSuggestions.staticAnalysisToolVersions %}
+      <option value="{{ item }}"></option>
+      {% endfor %}
+    </datalist>
+    <datalist id="coverity-project-options">
+      {% for item in registrationSuggestions.coverityProjects %}
+      <option value="{{ item }}"></option>
+      {% endfor %}
+    </datalist>
+
+    <form class="project-form" method="post" action="{% url 'project-build-detail' project.jiraProjectKey build.planKey %}">
+      {% csrf_token %}
+      <input type="hidden" name="form_kind" value="build_plan_metadata">
+      <div class="project-form__grid">
+        <label class="project-form__field">
+          <span class="project-form__label">정적분석 도구 버전</span>
+          {{ metadataForm.static_analysis_tool_version }}
+          {% if metadataForm.static_analysis_tool_version.errors %}<span class="project-form__error">{{ metadataForm.static_analysis_tool_version.errors|join:", " }}</span>{% endif %}
+        </label>
+        <label class="project-form__field">
+          <span class="project-form__label">Coverity Project</span>
+          {{ metadataForm.coverity_project }}
+          {% if metadataForm.coverity_project.errors %}<span class="project-form__error">{{ metadataForm.coverity_project.errors|join:", " }}</span>{% endif %}
+        </label>
+      </div>
+      <div class="project-form__actions">
+        <button class="action-button" type="submit">수정 저장</button>
+      </div>
+    </form>
+  </article>
+
+  <aside class="panel registration-hints registration-hints--signal">
+    <div class="panel__header">
+      <h2 class="panel__title">관리 기준</h2>
+    </div>
+    <ul class="meta-list">
+      <li><strong>정적분석 도구 버전</strong> 플랜 단위 공통 버전 문자열을 관리합니다.</li>
+      <li><strong>Coverity Project</strong> 저장소별 Coverity와 별도로, 빌드 플랜이 직접 참조하는 프로젝트명을 관리합니다.</li>
+      <li><strong>빌드 정보</strong> 빌드 환경구성은 이 화면 아래 Preview와 상세 편집으로 연결됩니다.</li>
+    </ul>
+  </aside>
+</section>
+
+<section class="registration-layout registration-layout--signal{% if not buildInfoOpen %} registration-layout--collapsed{% endif %}" id="build-info-add-panel" {% if not buildInfoOpen %}hidden{% endif %}>
+  <article class="panel registration-panel registration-panel--signal">
+    <div class="panel__header">
+      <div>
+        <p class="panel__eyebrow">Build Info Entry</p>
+        <h2 class="panel__title">빌드 정보 등록</h2>
+      </div>
+      <div class="panel__header-actions">
+        <span class="badge">{{ build.buildInfoCount }} Registered</span>
+        <a
+          class="action-button action-button--ghost"
+          href="{% url 'project-build-detail' project.jiraProjectKey build.planKey %}"
+        >
+          접기
+        </a>
+      </div>
+    </div>
+    <p class="panel__body">플랜 내부 개별 빌드 환경구성을 빌드키 단위로 등록합니다. 다른 등록 패널과 동일하게 필요할 때만 펼쳐 사용합니다.</p>
+    {% if buildInfoError %}
+    <div class="form-alert form-alert--error">{{ buildInfoError }}</div>
+    {% endif %}
+    <datalist id="coverity-stream-options">
+      {% for item in registrationSuggestions.coverityStreams %}
+      <option value="{{ item }}"></option>
+      {% endfor %}
+    </datalist>
+    <form class="project-form" method="post" action="{% url 'project-build-detail' project.jiraProjectKey build.planKey %}">
+      {% csrf_token %}
+      <input type="hidden" name="form_kind" value="build_info">
+      <div class="project-form__grid">
+        <label class="project-form__field">
+          <span class="project-form__label">빌드키</span>
+          {{ buildInfoForm.build_key }}
+          {% if buildInfoForm.build_key.errors %}<span class="project-form__error">{{ buildInfoForm.build_key.errors|join:", " }}</span>{% endif %}
+        </label>
+        <label class="project-form__field">
+          <span class="project-form__label">OS</span>
+          {{ buildInfoForm.operating_system }}
+        </label>
+        <label class="project-form__field">
+          <span class="project-form__label">언어</span>
+          {{ buildInfoForm.language }}
+        </label>
+        <label class="project-form__field">
+          <span class="project-form__label">컴파일러</span>
+          {{ buildInfoForm.compiler }}
+        </label>
+        <label class="project-form__field">
+          <span class="project-form__label">Coverity Stream</span>
+          {{ buildInfoForm.coverity_stream }}
+        </label>
+        <label class="project-form__field">
+          <span class="project-form__label">빌드 Sub Path</span>
+          {{ buildInfoForm.build_sub_path }}
+        </label>
+        <label class="project-form__field project-form__field--span-3">
+          <span class="project-form__label">Pre Process</span>
+          {{ buildInfoForm.pre_process }}
+        </label>
+        <label class="project-form__field project-form__field--span-3">
+          <span class="project-form__label">빌드 명령어</span>
+          {{ buildInfoForm.build_command }}
+        </label>
+        <label class="project-form__field project-form__field--span-3">
+          <span class="project-form__label">클린 명령어</span>
+          {{ buildInfoForm.clean_command }}
+        </label>
+        <label class="project-form__field project-form__field--span-3">
+          <span class="project-form__label">분석 제외 파일</span>
+          {{ buildInfoForm.analysis_excluded_files }}
+        </label>
+      </div>
+      <div class="project-form__actions">
+        <button class="action-button" type="submit">빌드 정보 등록</button>
+      </div>
+    </form>
+  </article>
+
+  <aside class="panel registration-hints registration-hints--signal">
+    <div class="panel__header">
+      <h2 class="panel__title">입력 기준</h2>
+    </div>
+    <ul class="meta-list">
+      <li><strong>빌드키</strong> 같은 플랜 안에서 개별 빌드를 구분하는 고유 키입니다.</li>
+      <li><strong>환경구성</strong> 명령어, 언어, 컴파일러, sub path를 빌드별로 분리해 관리합니다.</li>
+      <li><strong>실행 연결</strong> Bamboo 실행 시 `buildKey`를 넘기면 이 항목 기준으로 결과를 취합할 수 있습니다.</li>
+    </ul>
+  </aside>
+</section>
+
+{% if buildPlanPreview %}
+<section class="panel panel--signal-list plan-preview-panel">
+  <div class="panel__header">
+    <div>
+      <p class="panel__eyebrow">Bamboo Preview</p>
+      <h2 class="panel__title">예상 Bamboo Plan 구성</h2>
+    </div>
+    <div class="chip-row">
+      <span class="chip">{{ buildPlanPreview.plan.planKey }}</span>
+      <span class="chip chip--neutral">{{ buildPlanPreview.jobs|length }} jobs</span>
+      <span class="chip chip--success">등록 메타데이터 기준</span>
+    </div>
+  </div>
+
+  <div class="plan-preview">
+    <div class="plan-preview__rail">
+      <div class="plan-preview__summary">
+        <div>
+          <span class="plan-preview__label">Plan</span>
+          <strong>{{ buildPlanPreview.plan.buildName }}</strong>
+          <p>{{ buildPlanPreview.plan.buildId }} · {{ buildPlanPreview.repository.projectKey }}/{{ buildPlanPreview.repository.repoSlug }}</p>
+        </div>
+        <div class="plan-preview__meta-grid">
+          <div>
+            <span>Repository Link</span>
+            <strong>{{ buildPlanPreview.repository.linkageMode }}</strong>
+          </div>
+          <div>
+            <span>Branches</span>
+            <strong>{{ buildPlanPreview.repository.branches|join:", " }}</strong>
+          </div>
+          <div>
+            <span>Trigger</span>
+            <strong>{{ buildPlanPreview.staticAnalysis.postBuildTriggerTargetPlanKey|default:"미지정" }}</strong>
+          </div>
+          <div>
+            <span>Runtime Hints</span>
+            <strong>{{ buildPlanPreview.requirements.runtimeCommands|length }} commands</strong>
+          </div>
+        </div>
+      </div>
+
+      <ol class="plan-preview__stages">
+        {% for stage in buildPlanPreview.stages %}
+        <li class="plan-preview__stage plan-preview__stage--interactive" data-preview-stage data-stage-id="{{ stage.id }}">
+          <button
+            class="plan-preview__stage-button"
+            type="button"
+            data-stage-toggle
+            aria-expanded="{% if forloop.first %}true{% else %}false{% endif %}"
+            aria-controls="stage-jobs-{{ stage.id }}"
+          >
+            <div class="plan-preview__stage-head">
+              <span class="plan-preview__stage-index">{{ forloop.counter }}</span>
+              <div>
+                <strong>{{ stage.name }}</strong>
+                <p>{{ stage.summary }}</p>
+              </div>
+            </div>
+            <span class="badge">{{ stage.jobCount }} jobs</span>
+          </button>
+          <div class="plan-preview__stage-jobs" id="stage-jobs-{{ stage.id }}" {% if not forloop.first %}hidden{% endif %}>
+            {% for stageJob in stage.jobs %}
+            <button
+              class="plan-preview__job-button{% if forloop.parentloop.first and forloop.first %} is-active{% endif %}"
+              type="button"
+              data-job-select
+              data-job-id="{{ stageJob.jobId }}"
+              data-stage-id="{{ stage.id }}"
+            >
+              <span class="plan-preview__job-name">{{ stageJob.name }}</span>
+              <span class="plan-preview__job-meta">{{ stageJob.operatingSystem|default:"공통" }} · {{ stageJob.taskCount }} tasks</span>
+            </button>
+            {% endfor %}
+          </div>
+        </li>
+        {% endfor %}
+      </ol>
+    </div>
+
+    <div class="plan-preview__jobs plan-preview__inspector">
+      <div class="plan-preview__jobs-head">
+        <div>
+          <p class="panel__eyebrow">Task Inspector</p>
+          <h3 class="panel__title">플랜 내부 Job 구성</h3>
+        </div>
+        <p class="plan-preview__caption">스테이지를 누르면 포함된 Job이 펼쳐지고, Job을 누르면 해당 Task 목록과 산출물을 확인할 수 있습니다.</p>
+      </div>
+      <div class="job-preview-list job-preview-list--inspector">
+        {% for job in buildPlanPreview.jobs %}
+        <article class="job-preview-card{% if not forloop.first %} job-preview-card--hidden{% endif %}" data-job-panel data-job-id="{{ job.jobId }}">
+          <div class="job-preview-card__header">
+            <div>
+              <span class="job-preview-card__eyebrow">Job {{ forloop.counter }}</span>
+              <h4>{{ job.name }}</h4>
+            </div>
+            <div class="chip-row">
+              <span class="chip chip--neutral">{{ job.language|default:"언어 미지정" }}</span>
+              <span class="chip chip--neutral">{{ job.compiler|default:"컴파일러 미지정" }}</span>
+              <a class="chip chip--neutral" href="{{ job.detailUrl }}">수정</a>
+            </div>
+          </div>
+          <dl class="job-preview-card__grid">
+            <div>
+              <dt>OS</dt>
+              <dd>{{ job.operatingSystem|default:"미지정" }}</dd>
+            </div>
+            <div>
+              <dt>Build Key</dt>
+              <dd>{{ job.buildKey }}</dd>
+            </div>
+            <div>
+              <dt>Sub Path</dt>
+              <dd>{{ job.buildSubPath|default:"." }}</dd>
+            </div>
+            <div>
+              <dt>Coverity Stream</dt>
+              <dd>{{ job.coverityStream|default:"미지정" }}</dd>
+            </div>
+            <div>
+              <dt>Runs</dt>
+              <dd>{{ job.executionCount }}</dd>
+            </div>
+          </dl>
+          <div class="task-preview-list">
+            {% for taskGroup in job.taskGroups %}
+            <section class="task-preview-group">
+              <div class="task-preview-group__header">
+                <span class="job-preview-card__eyebrow">{{ taskGroup.stageName }}</span>
+              </div>
+              <ul class="task-preview-group__list">
+                {% for task in taskGroup.tasks %}
+                <li class="task-preview-item">
+                  <div>
+                    <strong>{{ task.name }}</strong>
+                    <p>{{ task.type }}</p>
+                  </div>
+                  <code>{{ task.detail }}</code>
+                </li>
+                {% endfor %}
+              </ul>
+            </section>
+            {% endfor %}
+          </div>
+          <div class="job-preview-card__footer">
+            <span class="job-preview-card__hint">분석 제외 파일: {{ job.analysisExcludedFiles|default:"없음" }}</span>
+            <div class="chip-row">
+              {% for source in job.sourceSummary %}
+              <span class="chip chip--neutral">{{ source.label }} · {{ source.value }}</span>
+              {% endfor %}
+            </div>
+          </div>
+        </article>
+        {% empty %}
+        <div class="empty-state empty-state--inline">
+          <h3 class="empty-state__title">아직 Job Preview가 없습니다.</h3>
+          <p class="empty-state__body">빌드 정보를 등록하면 이 영역에 Bamboo Job 구성이 생성됩니다.</p>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+</section>
+{% endif %}
+
+{% if buildPlanExportDraft %}
+<section class="panel panel--signal-list export-draft-panel">
+  <div class="panel__header">
+    <div>
+      <p class="panel__eyebrow">Specs Export Draft</p>
+      <h2 class="panel__title">Specs Export 초안</h2>
+    </div>
+    <div class="chip-row">
+      <span class="chip">{{ buildPlanExportDraft.summary.fileCount }} files</span>
+      <span class="chip chip--neutral">{{ buildPlanExportDraft.summary.jobCount }} jobs</span>
+    </div>
+  </div>
+  <p class="panel__body">Preview와 같은 실행 모델을 기준으로 렌더링한 실제 실행 파일 초안입니다. 중간 설명용 JSON은 제외하고, Job별 설정 파일과 스크립트만 노출합니다.</p>
+  <div class="export-draft-list">
+    {% for draftFile in buildPlanExportDraft.files %}
+    <details class="export-draft-item"{% if forloop.first %} open{% endif %}>
+      <summary class="export-draft-item__summary">
+        <div>
+          <strong>{{ draftFile.path }}</strong>
+          <p>{{ draftFile.label }}</p>
+        </div>
+        <span class="chip chip--neutral">{{ draftFile.language }}</span>
+      </summary>
+      <pre class="export-draft-item__code"><code>{{ draftFile.content }}</code></pre>
+    </details>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
+
+<section class="stat-grid">
+  <article class="stat-card stat-card--signal">
+    <span class="stat-card__label">Static Analysis</span>
+    <p class="stat-card__value stat-card__value--compact">{{ build.staticAnalysisToolVersion|default:"-" }}</p>
+    <p class="stat-card__meta">플랜 공통 정적분석 도구 버전</p>
+  </article>
+  <article class="stat-card stat-card--signal">
+    <span class="stat-card__label">Coverity Project</span>
+    <p class="stat-card__value stat-card__value--compact">{{ build.coverityProject|default:"-" }}</p>
+    <p class="stat-card__meta">빌드 플랜이 참조하는 Coverity 프로젝트</p>
+  </article>
+  <article class="stat-card stat-card--signal">
+    <span class="stat-card__label">Build Infos</span>
+    <p class="stat-card__value">{{ build.buildInfoCount }}</p>
+    <p class="stat-card__meta">등록된 빌드 환경구성 수</p>
+  </article>
+</section>
+
+<section class="detail-grid detail-grid--resource">
+  <article class="panel panel--signal-list">
+    <div class="panel__header">
+      <h2 class="panel__title">빌드 플랜 메타데이터</h2>
+    </div>
+    <ul class="meta-list">
+      <li><strong>Project</strong>{{ project.jiraProjectKey }}</li>
+      <li><strong>Build Name</strong>{{ build.buildName }}</li>
+      <li><strong>Build Type</strong>{{ build.buildType|default:"미지정" }}</li>
+      <li><strong>Runtime Stack</strong>{{ build.runtimeStack|default:"미지정" }}</li>
+      <li><strong>Build ID</strong>{{ build.buildId }}</li>
+      <li><strong>Plan Key</strong>{{ build.planKey }}</li>
+      <li><strong>정적분석 도구 버전</strong>{{ build.staticAnalysisToolVersion|default:"미지정" }}</li>
+      <li><strong>Coverity Project</strong>{{ build.coverityProject|default:"미지정" }}</li>
+    </ul>
+  </article>
+
+  <article class="panel panel--signal-list">
+    <div class="panel__header">
+      <h2 class="panel__title">연결 정보</h2>
+    </div>
+    <ul class="meta-list">
+      <li><strong>Repository</strong>{% if repository %}<a href="{% url 'project-repository-detail' project.jiraProjectKey repository.repoSlug %}">{{ repository.repoSlug }}</a>{% else %}미연결{% endif %}</li>
+      <li><strong>Latest Version</strong>{{ build.latestVersion|default:"미기록" }}</li>
+      <li><strong>Latest Result</strong>{% if build.latestSuccess %}성공{% elif build.latestSuccess == False %}실패{% else %}미기록{% endif %}</li>
+      <li><strong>Build Info</strong><a class="chip chip--neutral" href="{% url 'project-build-detail' project.jiraProjectKey build.planKey %}?add_build_info=open#build-info-add-panel">등록 패널 열기</a></li>
+    </ul>
+  </article>
+
+  <article class="panel panel--signal-list">
+    <div class="panel__header">
+      <h2 class="panel__title">운영 포인트</h2>
+    </div>
+    <ul class="meta-list">
+      <li><strong>메타데이터 상태</strong>{% if build.staticAnalysisToolVersion or build.coverityProject %}플랜 메타데이터가 일부 이상 채워져 있습니다.{% else %}플랜 메타데이터가 아직 비어 있습니다.{% endif %}</li>
+      <li><strong>빌드 정보 상태</strong>{% if build.buildInfoCount %}빌드 정보 {{ build.buildInfoCount }}건이 등록돼 있습니다.{% else %}아직 빌드 정보가 없습니다.{% endif %}</li>
+      <li><strong>저장소 연결</strong>{% if repository %}저장소 slug와 플랜이 연결돼 있습니다.{% else %}저장소 연결이 누락돼 있습니다.{% endif %}</li>
+      <li><strong>Preview 상태</strong>{% if buildPlanPreview %}등록된 프로젝트, 저장소, 플랜, 빌드 정보 기준 Preview를 표시 중입니다.{% else %}Preview를 생성할 수 없습니다.{% endif %}</li>
+    </ul>
+  </article>
+</section>
+
+<section class="panel panel--signal-list">
+  <div class="panel__header">
+    <div>
+      <p class="panel__eyebrow">Build Info Snapshot</p>
+      <h2 class="panel__title">등록된 빌드 정보</h2>
+    </div>
+    <a class="chip chip--neutral" href="{% url 'project-build-detail' project.jiraProjectKey build.planKey %}?add_build_info=open#build-info-add-panel">등록</a>
+  </div>
+  <ul class="entity-preview-list">
+    {% for buildInfo in buildInfoEntries %}
+    <li class="entity-preview-item">
+      <div>
+        <strong>{{ buildInfo.buildKey }}</strong>
+        <p>{{ buildInfo.operatingSystem|default:"OS 미지정" }} · {{ buildInfo.language|default:"언어 미지정" }} · {{ buildInfo.compiler|default:"컴파일러 미지정" }} · {{ buildInfo.coverityStream|default:"Coverity Stream 미지정" }}</p>
+      </div>
+      <div class="chip-row">
+        <span class="chip chip--neutral">{{ buildInfo.executionCount }} runs</span>
+        <a class="chip chip--neutral" href="{% url 'project-build-info-detail' project.jiraProjectKey build.planKey buildInfo.buildKey %}">상세</a>
+      </div>
+    </li>
+    {% empty %}
+    <li class="empty-state empty-state--inline">
+      <h3 class="empty-state__title">등록된 빌드 정보가 없습니다.</h3>
+      <p class="empty-state__body">플랜 안에서 여러 빌드가 돌 수 있다면 먼저 빌드키별 환경구성을 등록해 주세요.</p>
+    </li>
+    {% endfor %}
+  </ul>
+</section>
+{% elif project %}
+<section class="empty-state">
+  <h1 class="empty-state__title">빌드를 찾을 수 없습니다.</h1>
+  <p class="empty-state__body">요청한 Plan Key가 현재 프로젝트에 연결되어 있지 않습니다.</p>
+</section>
+{% else %}
+<section class="empty-state">
+  <h1 class="empty-state__title">프로젝트를 찾을 수 없습니다.</h1>
+  <p class="empty-state__body">프로젝트가 없어서 빌드 상세를 불러올 수 없습니다.</p>
+</section>
+{% endif %}
+<script>
+  (function () {
+    const panelConfigs = [
+      { panel: document.getElementById("build-plan-metadata-panel"), buttons: Array.from(document.querySelectorAll("[data-toggle-build-plan-metadata]")) },
+    ];
+
+    function scrollWithHeaderOffset(target) {
+      if (!target) {
+        return;
+      }
+      const header = document.querySelector(".app-header");
+      const headerHeight = header ? header.getBoundingClientRect().height : 0;
+      const targetTop = target.getBoundingClientRect().top + window.scrollY;
+      const offsetTop = Math.max(targetTop - headerHeight - 18, 0);
+      window.scrollTo({ top: offsetTop, behavior: "smooth" });
+    }
+
+    panelConfigs.forEach(function (config) {
+      if (!config.panel || !config.buttons.length) {
+        return;
+      }
+
+      function syncToggleButtons(isExpanded) {
+        config.buttons.forEach(function (button) {
+          button.setAttribute("aria-expanded", isExpanded ? "true" : "false");
+        });
+      }
+
+      function openPanel() {
+        config.panel.hidden = false;
+        config.panel.classList.add("registration-layout--collapsed");
+        requestAnimationFrame(function () {
+          requestAnimationFrame(function () {
+            config.panel.classList.remove("registration-layout--collapsed");
+            syncToggleButtons(true);
+            scrollWithHeaderOffset(config.panel);
+          });
+        });
+      }
+
+      function closePanel() {
+        config.panel.classList.add("registration-layout--collapsed");
+        syncToggleButtons(false);
+        window.setTimeout(function () {
+          if (config.panel.classList.contains("registration-layout--collapsed")) {
+            config.panel.hidden = true;
+          }
+        }, 280);
+      }
+
+      config.buttons.forEach(function (button) {
+        button.addEventListener("click", function () {
+          const isHidden = config.panel.hasAttribute("hidden");
+          if (isHidden) {
+            openPanel();
+          } else {
+            closePanel();
+          }
+        });
+      });
+    });
+  }());
+</script>
+<script>
+  (function () {
+    const stageItems = Array.from(document.querySelectorAll("[data-preview-stage]"));
+    const jobButtons = Array.from(document.querySelectorAll("[data-job-select]"));
+    const jobPanels = Array.from(document.querySelectorAll("[data-job-panel]"));
+
+    if (!stageItems.length || !jobButtons.length || !jobPanels.length) {
+      return;
+    }
+
+    function setActiveJob(jobId) {
+      jobButtons.forEach(function (button) {
+        button.classList.toggle("is-active", button.dataset.jobId === jobId);
+      });
+      jobPanels.forEach(function (panel) {
+        panel.classList.toggle("job-preview-card--hidden", panel.dataset.jobId !== jobId);
+      });
+    }
+
+    stageItems.forEach(function (item) {
+      const toggle = item.querySelector("[data-stage-toggle]");
+      const jobsPanel = item.querySelector(".plan-preview__stage-jobs");
+      if (!toggle || !jobsPanel) {
+        return;
+      }
+
+      toggle.addEventListener("click", function () {
+        const expanded = toggle.getAttribute("aria-expanded") === "true";
+        toggle.setAttribute("aria-expanded", expanded ? "false" : "true");
+        jobsPanel.hidden = expanded;
+      });
+    });
+
+    jobButtons.forEach(function (button) {
+      button.addEventListener("click", function () {
+        setActiveJob(button.dataset.jobId);
+      });
+    });
+  }());
+</script>
+{% endblock %}

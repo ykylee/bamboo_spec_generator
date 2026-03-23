@@ -1,0 +1,38 @@
+# coverity.yaml template
+# - 현재 저장소에서 파악된 build metadata 기준 골격만 반영한다.
+# - 실제 필드명/허용 옵션은 사용하는 Coverity 버전에 맞춰 다시 확인해야 한다.
+# - 이 파일은 generator에 연결된 최종 스키마가 아니라 수동 검토/보완용 초안이다.
+# - 공통 운영값(예: Coverity Connect URL)은 build별 값보다 DB의 SystemSetting으로 관리하는 방향을 우선한다.
+
+capture:
+  build:
+    build-command: "<fill-build-command>"
+    clean-command: "<optional-clean-command>"
+  files:
+    exclude-regex: "<exclude_files_regex>"
+  record-with-source: true
+
+analyze:
+  aggressiveness-level: low
+  callgraph-metrics: false
+  c-cpp-virtual: false
+  c-cpp-fnptr: false
+  checkers:
+    all: true
+    all-security: true
+    audit: true
+    c-family-security: true
+    rule: true
+    webapp-security:
+      aggressiveness-level: low
+      enabled: true
+  constraint-fpp: true
+  location: local
+
+commit:
+  enabled: <coverity-commit-enabled>
+  connect:
+    on-new-cert: "<coverity-on-new-cert>"
+    project: "<coverity-project>"
+    stream: "<coverity-stream>"
+    url: "<optional-coverity-connect-url>"

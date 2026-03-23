@@ -3,107 +3,466 @@
 {% block title %}
 {% if project %}{{ project.jiraProjectKey }} | Bamboo Spec Generator{% else %}프로젝트 없음 | Bamboo Spec Generator{% endif %}
 {% endblock %}
+{% block body_class %}page-project-detail{% endblock %}
 {% block page_heading %}{% if project %}{{ project.jiraProjectKey }} 상세{% else %}프로젝트 상세{% endif %}{% endblock %}
 
 {% block content %}
 {% if project %}
-<section class="hero">
-  <p class="hero__eyebrow">Project Detail</p>
-  <h1 class="hero__title">{{ project.jiraProjectKey }}</h1>
-  <p class="hero__body">
-    Bitbucket 프로젝트, 대표 저장소, 연결된 빌드 플랜 구성을 운영 메타데이터 기준으로 조회합니다. 관리 콘솔 스타일의 상세 패널로 재구성한 화면입니다.
-  </p>
-  <div class="chip-row">
-    <span class="chip">{{ project.bitbucketProjectKey }}</span>
-    <span class="chip chip--neutral">{{ project.representativeRepoSlug|default:"대표 저장소 미지정" }}</span>
-    <a class="chip chip--neutral" href="{% url 'project-list' %}{% if request.GET.urlencode %}?{{ request.GET.urlencode }}{% endif %}">목록으로</a>
+<section class="signal-hero signal-hero--workspace">
+  <div class="signal-hero__content">
+    <p class="signal-hero__eyebrow">Project Workspace</p>
+    <h1 class="hero__title">{{ project.jiraProjectKey }}</h1>
+    <p class="signal-hero__body">
+      프로젝트 메타데이터는 여기서 관리하고, 저장소와 빌드 플랜은 전용 인덱스와 상세 페이지로 분리해 운영 동선을 일정하게 맞췄습니다.
+    </p>
+    <div class="hero__actions">
+      <button
+        class="action-button"
+        type="button"
+        data-toggle-edit
+        aria-expanded="{% if editOpen %}true{% else %}false{% endif %}"
+        aria-controls="project-edit-panel"
+      >
+        프로젝트 수정
+      </button>
+      <button class="action-button action-button--ghost" type="button" data-toggle-repository-add aria-expanded="{% if repositoryAddOpen %}true{% else %}false{% endif %}" aria-controls="project-repository-add-panel">저장소 추가</button>
+      <button class="action-button action-button--ghost" type="button" data-toggle-build-add aria-expanded="{% if buildAddOpen %}true{% else %}false{% endif %}" aria-controls="project-build-add-panel">빌드 추가</button>
+    </div>
+    <div class="chip-row">
+      <span class="chip">{{ project.bitbucketProjectKey }}</span>
+      <span class="chip chip--neutral">{{ project.representativeRepoSlug|default:"대표 저장소 미지정" }}</span>
+      {% if project.generation.generationReady %}
+      <span class="chip chip--success">운영 준비</span>
+      {% else %}
+      <span class="chip chip--warning">연결 점검 필요</span>
+      {% endif %}
+      <a class="chip chip--neutral" href="{% url 'project-list' %}{% if request.GET.urlencode %}?{{ request.GET.urlencode }}{% endif %}">목록으로</a>
+    </div>
+  </div>
+  <div class="signal-hero__board" aria-label="프로젝트 상태 보드">
+    <article class="signal-metric signal-metric--primary">
+      <span class="signal-metric__label">Repositories</span>
+      <strong class="signal-metric__value">{{ project.repositories|length }}</strong>
+      <p class="signal-metric__meta">프로젝트에 연결된 저장소 인덱스 수</p>
+    </article>
+    <article class="signal-metric">
+      <span class="signal-metric__label">Build Plans</span>
+      <strong class="signal-metric__value">{{ project.builds|length }}</strong>
+      <p class="signal-metric__meta">연결된 빌드 플랜 수</p>
+    </article>
+    <article class="signal-metric signal-metric--list">
+      <div class="signal-metric__header">
+        <span class="signal-metric__label">Operator Notes</span>
+        <span class="badge">Split Views</span>
+      </div>
+      <ul class="signal-queue">
+        <li class="signal-queue__item"><strong>Project</strong><span>대표 저장소와 프로젝트 키 체계를 관리합니다.</span></li>
+        <li class="signal-queue__item"><strong>Repositories</strong><span>저장소 추가와 Coverity 메타데이터 점검을 분리했습니다.</span></li>
+        <li class="signal-queue__item"><strong>Builds</strong><span>플랜별 상세 화면에서 정의 상태를 바로 확인합니다.</span></li>
+      </ul>
+    </article>
   </div>
 </section>
 
-<section class="stat-grid">
-  <article class="stat-card">
-    <span class="stat-card__label">Repositories</span>
-    <p class="stat-card__value">{{ project.repositories|length }}</p>
-    <p class="stat-card__meta">프로젝트에 연결된 저장소 수</p>
-  </article>
-  <article class="stat-card">
-    <span class="stat-card__label">Build Plans</span>
-    <p class="stat-card__value">{{ project.builds|length }}</p>
-    <p class="stat-card__meta">현재 조회 가능한 빌드 플랜 수</p>
-  </article>
-</section>
-
-<section class="detail-grid">
-  <article class="panel">
+<section class="registration-layout registration-layout--signal{% if not editOpen %} registration-layout--collapsed{% endif %}" id="project-edit-panel" {% if not editOpen %}hidden{% endif %}>
+  <article class="panel registration-panel registration-panel--signal">
     <div class="panel__header">
-      <h2 class="panel__title">프로젝트 메타데이터</h2>
+      <div>
+        <p class="panel__eyebrow">Metadata</p>
+        <h2 class="panel__title">프로젝트 수정</h2>
+      </div>
+      <div class="panel__header-actions">
+        <span class="badge">Project Only</span>
+        <button class="action-button action-button--ghost" type="button" data-toggle-edit>접기</button>
+      </div>
+    </div>
+    <p class="panel__body">
+      프로젝트 키 체계와 대표 저장소만 여기서 관리합니다. 저장소와 빌드 플랜은 아래 인덱스 영역에서 바로 추가합니다.
+    </p>
+    {% if editError %}
+    <div class="form-alert form-alert--error">{{ editError }}</div>
+    {% endif %}
+
+    <datalist id="bitbucket-project-key-options">
+      {% for item in registrationSuggestions.bitbucketProjectKeys %}
+      <option value="{{ item }}"></option>
+      {% endfor %}
+    </datalist>
+    <datalist id="repository-slug-options">
+      {% for item in registrationSuggestions.repositorySlugs %}
+      <option value="{{ item }}"></option>
+      {% endfor %}
+    </datalist>
+
+    <form class="project-form" method="post" action="{% url 'project-detail' project.jiraProjectKey %}">
+      {% csrf_token %}
+      <input type="hidden" name="form_kind" value="project">
+      <div class="project-form__grid">
+        <label class="project-form__field">
+          <span class="project-form__label">Jira Project Key</span>
+          <input type="text" name="jira_project_key" value="{{ project.jiraProjectKey }}" readonly>
+        </label>
+        <label class="project-form__field">
+          <span class="project-form__label">Bitbucket Project Key</span>
+          {{ editForm.bitbucket_project_key }}
+          {% if editForm.bitbucket_project_key.errors %}<span class="project-form__error">{{ editForm.bitbucket_project_key.errors|join:", " }}</span>{% endif %}
+        </label>
+        <label class="project-form__field">
+          <span class="project-form__label">대표 저장소</span>
+          {{ editForm.representative_repo_slug }}
+          {% if editForm.representative_repo_slug.errors %}<span class="project-form__error">{{ editForm.representative_repo_slug.errors|join:", " }}</span>{% endif %}
+        </label>
+      </div>
+      <div class="project-form__actions">
+        <button class="action-button" type="submit">수정 저장</button>
+      </div>
+    </form>
+  </article>
+
+  <aside class="panel registration-hints registration-hints--signal">
+    <div class="panel__header">
+      <h2 class="panel__title">관리 분리</h2>
     </div>
     <ul class="meta-list">
       <li>
-        <strong>Jira Project Key</strong>
-        {{ project.jiraProjectKey }}
+        <strong>프로젝트 메타데이터</strong>
+        Bitbucket Project Key와 대표 저장소만 이 패널에서 관리합니다.
       </li>
       <li>
-        <strong>Bitbucket Project Key</strong>
-        {{ project.bitbucketProjectKey }}
+        <strong>저장소 관리</strong>
+        저장소 인덱스에서 추가 후 상세 페이지에서 연결 상태를 확인합니다.
       </li>
       <li>
-        <strong>Representative Repository</strong>
-        {{ project.representativeRepoSlug|default:"대표 저장소 미지정" }}
+        <strong>빌드 관리</strong>
+        빌드 플랜 인덱스에서 추가 후 상세 페이지에서 정의와 최신 상태를 봅니다.
+      </li>
+    </ul>
+  </aside>
+</section>
+
+<section class="registration-layout registration-layout--signal{% if not repositoryAddOpen %} registration-layout--collapsed{% endif %}" id="project-repository-add-panel" {% if not repositoryAddOpen %}hidden{% endif %}>
+  <article class="panel registration-panel registration-panel--signal">
+    <div class="panel__header">
+      <div>
+        <p class="panel__eyebrow">Repository Entry</p>
+        <h2 class="panel__title">저장소 추가</h2>
+      </div>
+      <div class="panel__header-actions">
+        <span class="badge">{{ project.repositories|length }} Registered</span>
+        <button class="action-button action-button--ghost" type="button" data-toggle-repository-add>접기</button>
+      </div>
+    </div>
+    <p class="panel__body">저장소 slug와 Coverity 메타데이터를 현재 프로젝트에 바로 연결합니다.</p>
+    {% if repositoryAddError %}
+    <div class="form-alert form-alert--error">{{ repositoryAddError }}</div>
+    {% endif %}
+
+    <datalist id="coverity-project-options">
+      {% for item in registrationSuggestions.coverityProjects %}
+      <option value="{{ item }}"></option>
+      {% endfor %}
+    </datalist>
+    <datalist id="coverity-stream-options">
+      {% for item in registrationSuggestions.coverityStreams %}
+      <option value="{{ item }}"></option>
+      {% endfor %}
+    </datalist>
+
+    <form class="project-form" method="post" action="{% url 'project-detail' project.jiraProjectKey %}">
+      {% csrf_token %}
+      <input type="hidden" name="form_kind" value="repository">
+      <div class="project-form__grid">
+        <label class="project-form__field">
+          <span class="project-form__label">저장소 Slug</span>
+          {{ repositoryAddForm.repo_slug }}
+          {% if repositoryAddForm.repo_slug.errors %}<span class="project-form__error">{{ repositoryAddForm.repo_slug.errors|join:", " }}</span>{% endif %}
+        </label>
+        <label class="project-form__field">
+          <span class="project-form__label">Coverity Project</span>
+          {{ repositoryAddForm.coverity_project }}
+          {% if repositoryAddForm.coverity_project.errors %}<span class="project-form__error">{{ repositoryAddForm.coverity_project.errors|join:", " }}</span>{% endif %}
+        </label>
+        <label class="project-form__field">
+          <span class="project-form__label">Coverity Stream</span>
+          {{ repositoryAddForm.coverity_stream }}
+          {% if repositoryAddForm.coverity_stream.errors %}<span class="project-form__error">{{ repositoryAddForm.coverity_stream.errors|join:", " }}</span>{% endif %}
+        </label>
+      </div>
+      <div class="project-form__actions">
+        <button class="action-button" type="submit">저장소 등록</button>
+      </div>
+    </form>
+  </article>
+
+  <aside class="panel registration-hints registration-hints--signal">
+    <div class="panel__header">
+      <h2 class="panel__title">입력 기준</h2>
+    </div>
+    <ul class="meta-list">
+      <li><strong>대표 저장소 변경</strong> 대표 저장소 지정은 프로젝트 메타데이터 패널에서 처리합니다.</li>
+      <li><strong>Coverity 정보</strong> 미입력 상태로도 저장 가능하지만 대시보드에서 주의 대상으로 보일 수 있습니다.</li>
+    </ul>
+  </aside>
+</section>
+
+<section class="registration-layout registration-layout--signal{% if not buildAddOpen %} registration-layout--collapsed{% endif %}" id="project-build-add-panel" {% if not buildAddOpen %}hidden{% endif %}>
+  <article class="panel registration-panel registration-panel--signal">
+    <div class="panel__header">
+      <div>
+        <p class="panel__eyebrow">Build Plan Entry</p>
+        <h2 class="panel__title">빌드 추가</h2>
+      </div>
+      <div class="panel__header-actions">
+        <span class="badge">{{ project.builds|length }} Registered</span>
+        <button class="action-button action-button--ghost" type="button" data-toggle-build-add>접기</button>
+      </div>
+    </div>
+    <p class="panel__body">빌드 식별자와 연결 저장소를 입력하면 프로젝트 빌드 인덱스에 추가됩니다.</p>
+    {% if buildAddError %}
+    <div class="form-alert form-alert--error">{{ buildAddError }}</div>
+    {% endif %}
+
+    <form class="project-form" method="post" action="{% url 'project-detail' project.jiraProjectKey %}">
+      {% csrf_token %}
+      <input type="hidden" name="form_kind" value="build">
+      <div class="project-form__grid project-form__grid--build">
+        <label class="project-form__field">
+          <span class="project-form__label">빌드 이름</span>
+          {{ buildAddForm.build_name }}
+          {% if buildAddForm.build_name.errors %}<span class="project-form__error">{{ buildAddForm.build_name.errors|join:", " }}</span>{% endif %}
+        </label>
+        <label class="project-form__field">
+          <span class="project-form__label">Build Type</span>
+          {{ buildAddForm.build_type }}
+          {% if buildAddForm.build_type.errors %}<span class="project-form__error">{{ buildAddForm.build_type.errors|join:", " }}</span>{% endif %}
+        </label>
+        <label class="project-form__field">
+          <span class="project-form__label">Runtime Stack</span>
+          {{ buildAddForm.runtime_stack }}
+          {% if buildAddForm.runtime_stack.errors %}<span class="project-form__error">{{ buildAddForm.runtime_stack.errors|join:", " }}</span>{% endif %}
+        </label>
+        <label class="project-form__field">
+          <span class="project-form__label">Build ID</span>
+          {{ buildAddForm.build_id }}
+          {% if buildAddForm.build_id.errors %}<span class="project-form__error">{{ buildAddForm.build_id.errors|join:", " }}</span>{% endif %}
+        </label>
+        <label class="project-form__field">
+          <span class="project-form__label">Plan Key</span>
+          {{ buildAddForm.plan_key }}
+          {% if buildAddForm.plan_key.errors %}<span class="project-form__error">{{ buildAddForm.plan_key.errors|join:", " }}</span>{% endif %}
+        </label>
+        <label class="project-form__field">
+          <span class="project-form__label">연결 저장소 Slug</span>
+          {{ buildAddForm.build_repository_slug }}
+          {% if buildAddForm.build_repository_slug.errors %}<span class="project-form__error">{{ buildAddForm.build_repository_slug.errors|join:", " }}</span>{% endif %}
+        </label>
+      </div>
+      <div class="project-form__actions">
+        <button class="action-button" type="submit">빌드 등록</button>
+      </div>
+    </form>
+  </article>
+
+  <aside class="panel registration-hints registration-hints--signal">
+    <div class="panel__header">
+      <h2 class="panel__title">입력 기준</h2>
+    </div>
+    <ul class="meta-list">
+      <li><strong>저장소 연결</strong> 빌드는 이미 등록된 저장소 slug 중 하나에 연결되어야 합니다.</li>
+      <li><strong>식별자 일관성</strong> Build ID와 Plan Key는 기존 빌드 플랜과 충돌하면 등록되지 않습니다.</li>
+    </ul>
+  </aside>
+</section>
+
+<section class="stat-grid">
+  <article class="stat-card stat-card--signal">
+    <span class="stat-card__label">Repositories</span>
+    <p class="stat-card__value">{{ project.repositories|length }}</p>
+    <p class="stat-card__meta">연결된 저장소 인덱스 수</p>
+  </article>
+  <article class="stat-card stat-card--signal">
+    <span class="stat-card__label">Build Plans</span>
+    <p class="stat-card__value">{{ project.builds|length }}</p>
+    <p class="stat-card__meta">프로젝트에 매핑된 빌드 플랜 수</p>
+  </article>
+</section>
+
+<section class="detail-grid detail-grid--project">
+  <article class="panel panel--signal-list">
+    <div class="panel__header">
+      <h2 class="panel__title">프로젝트 상태</h2>
+    </div>
+    <ul class="meta-list">
+      <li>
+        <strong>운영 상태</strong>
+        {% if project.generation.generationReady %}정상{% else %}점검 필요{% endif %}
+      </li>
+      <li>
+        <strong>점검 이슈</strong>
+        {% if project.generation.generationReadinessIssues %}
+          {{ project.generation.generationReadinessIssues|join:", " }}
+        {% else %}
+          없음
+        {% endif %}
       </li>
     </ul>
   </article>
 
-  <article class="panel">
+  <article class="panel panel--signal-list" id="repository-index">
     <div class="panel__header">
-      <h2 class="panel__title">저장소</h2>
-      <span class="badge">{{ project.repositories|length }}개</span>
+      <div>
+        <p class="panel__eyebrow">Repository Index</p>
+        <h2 class="panel__title">저장소 목록</h2>
+      </div>
+      <button class="chip chip--neutral chip-button" type="button" data-toggle-repository-add>추가</button>
     </div>
-    <ul class="repo-list">
-      {% for repository in project.repositories %}
-      <li class="repo-item">
-        <div class="repo-item__top">
-          <h3 class="repo-item__name">{{ repository.repoSlug }}</h3>
-          {% if repository.isRepresentative %}
-          <span class="chip chip--success">대표 저장소</span>
-          {% endif %}
+    <ul class="entity-preview-list">
+      {% for repository in repositoryEntries %}
+      <li class="entity-preview-item">
+        <div>
+          <strong>{{ repository.repoSlug }}</strong>
+          <p>{{ repository.coverityProject|default:"Coverity Project 미지정" }} · {{ repository.coverityStream|default:"Coverity Stream 미지정" }}</p>
         </div>
-        <p class="repo-item__meta">Coverity Project: {{ repository.coverityProject|default:"미지정" }}</p>
-        <p class="repo-item__meta">Coverity Stream: {{ repository.coverityStream|default:"미지정" }}</p>
+        <div class="chip-row">
+          {% if repository.isRepresentative %}
+          <span class="chip chip--success">대표</span>
+          {% endif %}
+          <a class="chip chip--neutral" href="{% url 'project-repository-detail' project.jiraProjectKey repository.repoSlug %}">상세</a>
+        </div>
       </li>
       {% empty %}
-      <li class="empty-state">
-        <h3 class="empty-state__title">저장소 정보가 없습니다.</h3>
-        <p class="empty-state__body">이 프로젝트에 연결된 저장소 메타데이터가 아직 적재되지 않았습니다.</p>
+      <li class="empty-state empty-state--inline">
+        <h3 class="empty-state__title">저장소가 없습니다.</h3>
+        <p class="empty-state__body">저장소 추가 메뉴에서 첫 저장소를 등록해 주세요.</p>
       </li>
       {% endfor %}
     </ul>
   </article>
 
-  <article class="panel">
+  <article class="panel panel--signal-list" id="build-index">
     <div class="panel__header">
-      <h2 class="panel__title">빌드 플랜</h2>
-      <span class="badge">{{ project.builds|length }}개</span>
+      <div>
+        <p class="panel__eyebrow">Build Index</p>
+        <h2 class="panel__title">빌드 목록</h2>
+      </div>
+      <button class="chip chip--neutral chip-button" type="button" data-toggle-build-add>추가</button>
     </div>
-    <ul class="build-list">
+    <ul class="entity-preview-list">
       {% for build in project.builds %}
-      <li class="build-item">
-        <div class="build-item__top">
-          <h3 class="build-item__name">{{ build.buildName }}</h3>
-          <span class="chip">{{ build.planKey }}</span>
+      <li class="entity-preview-item">
+        <div>
+          <strong>{{ build.buildName }}</strong>
+          <p>{{ build.planKey }} · {{ build.repositorySlug|default:"미연결" }}</p>
         </div>
-        <p class="build-item__meta">Build Type: {{ build.buildType|default:"미지정" }}</p>
-        <p class="build-item__meta">Runtime Stack: {{ build.runtimeStack|default:"미지정" }}</p>
+        <div class="chip-row">
+          <span class="chip chip--neutral">{{ build.buildInfoCount }} infos</span>
+          {% if build.latestSuccess == False %}
+          <span class="chip chip--warning">최근 실패</span>
+          {% else %}
+          <span class="chip chip--success">연결됨</span>
+          {% endif %}
+          <a class="chip chip--neutral" href="{% url 'project-build-detail' project.jiraProjectKey build.planKey %}">상세</a>
+        </div>
       </li>
       {% empty %}
-      <li class="empty-state">
-        <h3 class="empty-state__title">빌드 플랜 정보가 없습니다.</h3>
-        <p class="empty-state__body">프로젝트에 연결된 빌드 정의를 적재하면 이 영역에 목록이 표시됩니다.</p>
+      <li class="empty-state empty-state--inline">
+        <h3 class="empty-state__title">빌드가 없습니다.</h3>
+        <p class="empty-state__body">빌드 추가 메뉴에서 첫 빌드 플랜을 등록해 주세요.</p>
       </li>
       {% endfor %}
     </ul>
   </article>
 </section>
+
+<script>
+  (function () {
+    const panelConfigs = [
+      { panel: document.getElementById("project-edit-panel"), buttons: Array.from(document.querySelectorAll("[data-toggle-edit]")) },
+      { panel: document.getElementById("project-repository-add-panel"), buttons: Array.from(document.querySelectorAll("[data-toggle-repository-add]")) },
+      { panel: document.getElementById("project-build-add-panel"), buttons: Array.from(document.querySelectorAll("[data-toggle-build-add]")) },
+    ];
+
+    function scrollWithHeaderOffset(target) {
+      if (!target) {
+        return;
+      }
+
+      const header = document.querySelector(".app-header");
+      const headerHeight = header ? header.getBoundingClientRect().height : 0;
+      const targetTop = target.getBoundingClientRect().top + window.scrollY;
+      const offsetTop = Math.max(targetTop - headerHeight - 18, 0);
+      window.scrollTo({ top: offsetTop, behavior: "smooth" });
+    }
+
+    function resetPanel(panel) {
+      if (!panel) {
+        return;
+      }
+
+      const form = panel.querySelector(".project-form");
+      if (form) {
+        form.reset();
+      }
+      panel.querySelectorAll(".form-alert, .project-form__error").forEach(function (node) {
+        node.remove();
+      });
+
+      if (window.BambooUiEnhanceSuggestionInputs) {
+        window.BambooUiEnhanceSuggestionInputs(panel);
+      }
+    }
+
+    panelConfigs.forEach(function (config) {
+      if (!config.panel || !config.buttons.length) {
+        return;
+      }
+
+      function syncToggleButtons(isExpanded) {
+        config.buttons.forEach(function (button) {
+          button.setAttribute("aria-expanded", isExpanded ? "true" : "false");
+        });
+      }
+
+      function openPanel() {
+        config.panel.hidden = false;
+        config.panel.classList.add("registration-layout--collapsed");
+        requestAnimationFrame(function () {
+          requestAnimationFrame(function () {
+            config.panel.classList.remove("registration-layout--collapsed");
+            syncToggleButtons(true);
+            scrollWithHeaderOffset(config.panel);
+          });
+        });
+      }
+
+      function closePanel() {
+        resetPanel(config.panel);
+        config.panel.classList.add("registration-layout--collapsed");
+        syncToggleButtons(false);
+        window.setTimeout(function () {
+          if (config.panel.classList.contains("registration-layout--collapsed")) {
+            config.panel.hidden = true;
+          }
+        }, 280);
+      }
+
+      config.buttons.forEach(function (button) {
+        button.addEventListener("click", function () {
+          const isHidden = config.panel.hasAttribute("hidden");
+          if (isHidden) {
+            openPanel();
+          } else {
+            closePanel();
+          }
+        });
+      });
+    });
+
+    if (window.BambooUiEnhanceSuggestionInputs) {
+      window.BambooUiEnhanceSuggestionInputs(document);
+    }
+  }());
+</script>
 {% else %}
 <section class="empty-state">
   <h1 class="empty-state__title">프로젝트를 찾을 수 없습니다.</h1>

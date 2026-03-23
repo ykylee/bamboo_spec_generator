@@ -1,0 +1,146 @@
+<section class="panel panel--project-list panel--signal-list" data-project-list-panel data-project-list-container>
+  <div class="panel__header">
+    <div>
+      <p class="panel__eyebrow">Live Index</p>
+      <h2 class="panel__title">프로젝트 리스트</h2>
+    </div>
+    <span class="badge">{{ pageObj.start_index }}-{{ pageObj.end_index }} / {{ pageObj.paginator.count }}</span>
+  </div>
+  {% if projects %}
+  <table class="project-table">
+    <thead>
+      <tr>
+        <th>Project</th>
+        <th>Bitbucket</th>
+        <th>대표 저장소</th>
+        <th>저장소</th>
+        <th>상태</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for project in projects %}
+      <tr>
+        <td>
+          <span class="project-table__title">{{ project.jiraProjectKey }}</span>
+          <span class="project-table__sub">운영 메타데이터 프로젝트</span>
+        </td>
+        <td><span class="chip">{{ project.bitbucketProjectKey }}</span></td>
+        <td>
+          {% with dialog_id='representative-dialog-'|add:project.jiraProjectKey %}
+          {% if project.representativeRepoSlug %}
+          <button class="chip chip--neutral chip-button chip-button--truncate" type="button" data-open-dialog="{{ dialog_id }}">
+            <span class="chip-button__text">{{ project.representativeRepoSlug }}</span>
+          </button>
+          <dialog class="repository-dialog" id="{{ dialog_id }}">
+            <div class="repository-dialog__body">
+              <div class="panel__header">
+                <h3 class="panel__title">{{ project.jiraProjectKey }} 대표 저장소</h3>
+                <button class="chip chip--neutral chip-button" type="button" data-close-repository-dialog>닫기</button>
+              </div>
+              <ul class="meta-list repository-dialog__list">
+                <li>{{ project.representativeRepoSlug }}</li>
+              </ul>
+            </div>
+          </dialog>
+          {% else %}
+          <span class="chip chip--warning">대표 저장소 미지정</span>
+          {% endif %}
+          {% endwith %}
+        </td>
+        <td>
+          {% with dialog_id='repo-dialog-'|add:project.jiraProjectKey %}
+          <button class="chip chip--neutral chip-button" type="button" data-open-dialog="{{ dialog_id }}">
+            {{ project.repositoryCount }}
+          </button>
+          <dialog class="repository-dialog" id="{{ dialog_id }}">
+            <div class="repository-dialog__body">
+              <div class="panel__header">
+                <h3 class="panel__title">{{ project.jiraProjectKey }} 저장소</h3>
+                <button class="chip chip--neutral chip-button" type="button" data-close-repository-dialog>닫기</button>
+              </div>
+              <ul class="meta-list repository-dialog__list">
+                {% for repo_slug in project.repositorySlugs %}
+                <li>{{ repo_slug }}</li>
+                {% empty %}
+                <li>등록된 저장소가 없습니다.</li>
+                {% endfor %}
+              </ul>
+            </div>
+          </dialog>
+          {% endwith %}
+        </td>
+        <td class="project-table__status-cell">
+          {% if project.failedBuildCount %}
+          <span class="status-light status-light--danger" aria-label="빌드 실패" title="빌드 실패"></span>
+          {% elif project.warningTags %}
+          <span class="status-light status-light--warning" aria-label="경고" title="경고"></span>
+          {% else %}
+          <span class="status-light status-light--success" aria-label="정상" title="정상"></span>
+          {% endif %}
+        </td>
+        <td><a class="chip chip--neutral" href="{% url 'project-detail' project.jiraProjectKey %}{% if request.GET.urlencode %}?{{ request.GET.urlencode }}{% endif %}">상세 보기</a></td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  <div class="project-compact-list">
+    {% for project in projects %}
+    <article class="project-compact-item">
+      <div class="project-compact-item__main">
+        <div>
+          <h3 class="project-compact-item__title">{{ project.jiraProjectKey }}</h3>
+          <p class="project-compact-item__sub">운영 메타데이터 프로젝트</p>
+        </div>
+        <div class="chip-row">
+          {% if project.generationReady %}
+          <span class="chip chip--success">운영 준비</span>
+          {% else %}
+          <span class="chip chip--warning">연결 점검 필요</span>
+          {% endif %}
+          {% if project.warningTags %}
+            <span class="chip chip--warning">{{ project.warningTags.0 }}</span>
+            {% if project.warningTags|length > 1 %}
+            <span class="chip chip--neutral">+{{ project.warningTags|length|add:"-1" }}</span>
+            {% endif %}
+          {% else %}
+            <span class="chip chip--success">정상</span>
+          {% endif %}
+        </div>
+      </div>
+      <div class="project-compact-item__actions">
+        <a class="chip chip--neutral" href="{% url 'project-detail' project.jiraProjectKey %}{% if request.GET.urlencode %}?{{ request.GET.urlencode }}{% endif %}">상세 보기</a>
+      </div>
+    </article>
+    {% endfor %}
+  </div>
+  {% if pageObj.paginator.num_pages > 1 %}
+  <nav class="pagination" aria-label="프로젝트 리스트 페이지">
+    {% if pageObj.has_previous %}
+    <a class="pagination__link" href="?{{ paginationBaseQuery }}page={{ pageObj.previous_page_number }}">이전</a>
+    {% else %}
+    <span class="pagination__link pagination__link--disabled">이전</span>
+    {% endif %}
+
+    {% for page_number in pageObj.paginator.page_range %}
+      {% if page_number == pageObj.number %}
+      <span class="pagination__link pagination__link--active">{{ page_number }}</span>
+      {% else %}
+      <a class="pagination__link" href="?{{ paginationBaseQuery }}page={{ page_number }}">{{ page_number }}</a>
+      {% endif %}
+    {% endfor %}
+
+    {% if pageObj.has_next %}
+    <a class="pagination__link" href="?{{ paginationBaseQuery }}page={{ pageObj.next_page_number }}">다음</a>
+    {% else %}
+    <span class="pagination__link pagination__link--disabled">다음</span>
+    {% endif %}
+  </nav>
+  {% endif %}
+  {% else %}
+  <div class="empty-state">
+    <h3 class="empty-state__title">등록된 프로젝트가 없습니다.</h3>
+    <p class="empty-state__body">운영 DB에 프로젝트 메타데이터를 적재한 뒤 다시 확인해 주세요.</p>
+  </div>
+  {% endif %}
+</section>

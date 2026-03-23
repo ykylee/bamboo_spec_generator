@@ -27,6 +27,16 @@ SUPPORTED_OS = {"windows", "linux"}
 SUPPORTED_REPOSITORY_PROVIDERS = {"bitbucket"}
 SUPPORTED_LINKAGE_MODES = {"linked", "create_if_missing"}
 DEFAULT_REPOSITORY_BRANCHES = {"dev", "release", "master"}
+NO_BUILD_LANGUAGES = {"python"}
+
+
+def is_no_build_language(*, language: str, compiler: str) -> bool:
+    normalized_language = (language or "").strip().lower()
+    normalized_compiler = (compiler or "").strip().lower()
+    return (
+        normalized_language in NO_BUILD_LANGUAGES
+        or normalized_compiler in {"python"}
+    )
 
 
 def validate_build_definitions(build_definitions: list[BuildDefinition]) -> None:
@@ -74,18 +84,21 @@ def validate_build_definitions(build_definitions: list[BuildDefinition]) -> None
                 f"Build '{build.build_id}' repository.linkageMode '{build.repository.linkage_mode}' is not supported."
             )
         if build.repository.linkage_mode == "create_if_missing":
-            if build.repository.application_link is None or not build.repository.application_link.strip():
+            has_application_link = build.repository.application_link is not None and build.repository.application_link.strip()
+            has_clone_url = build.repository.clone_url is not None and build.repository.clone_url.strip()
+            if not has_application_link and not has_clone_url:
                 raise ValidationError(
-                    f"Build '{build.build_id}' must define repository.applicationLink when linkageMode is create_if_missing."
+                    f"Build '{build.build_id}' must define repository.applicationLink or repository.cloneUrl when linkageMode is create_if_missing."
                 )
         if not DEFAULT_REPOSITORY_BRANCHES.issubset(set(build.repository.branches)):
             raise ValidationError(
                 f"Build '{build.build_id}' repository.branches must include dev, release, and master."
             )
-        if not build.build.prepare_command.strip():
-            raise ValidationError(f"Build '{build.build_id}' must define prepareCommand.")
-        if not build.build.build_command.strip():
-            raise ValidationError(f"Build '{build.build_id}' must define buildCommand.")
+        if not is_no_build_language(language=build.language, compiler=build.compiler):
+            if not build.build.prepare_command.strip():
+                raise ValidationError(f"Build '{build.build_id}' must define prepareCommand.")
+            if not build.build.build_command.strip():
+                raise ValidationError(f"Build '{build.build_id}' must define buildCommand.")
         if not build.build.sub_path.strip():
             raise ValidationError(f"Build '{build.build_id}' must define build.subPath when provided.")
         if not _is_valid_sub_path(build.build.sub_path):

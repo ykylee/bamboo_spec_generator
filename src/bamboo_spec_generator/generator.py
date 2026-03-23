@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from .coverity import generate_coverity_yaml
 from .java_assets import load_python_wrapper_method
 from .model import BuildDefinition
 from .script_renderer import render_python_scripts
@@ -35,8 +36,8 @@ import com.atlassian.bamboo.specs.api.builders.plan.Stage;
 import com.atlassian.bamboo.specs.api.builders.plan.branches.PlanBranchManagement;
 import com.atlassian.bamboo.specs.api.builders.project.Project;
 import com.atlassian.bamboo.specs.api.builders.requirement.Requirement;
-import com.atlassian.bamboo.specs.api.builders.repository.VcsRepositoryBranch;
 import com.atlassian.bamboo.specs.builders.repository.bitbucket.server.BitbucketServerRepository;
+import com.atlassian.bamboo.specs.builders.repository.git.GitRepository;
 import com.atlassian.bamboo.specs.builders.trigger.BitbucketServerTrigger;
 import com.atlassian.bamboo.specs.builders.task.ScriptTask;
 import com.atlassian.bamboo.specs.builders.task.VcsCheckoutTask;
@@ -52,6 +53,7 @@ public class {class_name} {{
     private static final String[] REPOSITORY_BRANCH_TRIGGER_POLICY = new String[] {{{repository_branch_policy_entries}}};
     private static final String REPOSITORY_BRANCH_MATCHING_PATTERN = "{_escape_java(_repository_branch_matching_pattern(build))}";
     private static final String BITBUCKET_APPLICATION_LINK = "{_escape_java(_bitbucket_application_link(build))}";
+    private static final String GIT_CLONE_URL = "{_escape_java(_git_clone_url(build))}";
     private static final String PYTHON_COMMAND = "{python_command}";
     private static final String SCRIPT_DIRECTORY = ".bamboo-specs";
     private static final String PREPARE_BUILD_SCRIPT = {_java_text_block(python_scripts["prepare_build.py"], 4)};
@@ -73,7 +75,6 @@ public class {class_name} {{
         return new Plan(project, "{description}", PLAN_KEY)
             .description("{description}")
 {repository_attachment_chain}
-            .repositoryBranches(repositoryBranches())
             .planBranchManagement(planBranchManagement())
             .triggers(repositoryTrigger())
             .stages(
@@ -82,12 +83,6 @@ public class {class_name} {{
                 staticAnalysisStage(),
                 triggerFollowUpStage()
             );
-    }}
-
-    private VcsRepositoryBranch[] repositoryBranches() {{
-        return new VcsRepositoryBranch[] {{
-{_repository_branches_builder(build, 3)}
-        }};
     }}
 
     private PlanBranchManagement planBranchManagement() {{
@@ -156,18 +151,6 @@ public class {class_name} {{
 {python_wrapper_method}
 }}
 """
-
-
-def generate_coverity_yaml(build: BuildDefinition) -> str:
-    coverity_language = _coverity_language(build.language)
-    return (
-        "capture:\n"
-        "  build:\n"
-        f'    build-command: "{_escape_yaml(build.build.build_command)}"\n'
-        "  languages:\n"
-        "    include:\n"
-        f"      - {coverity_language}\n"
-    )
 
 
 def generate_registry_java(builds: list[BuildDefinition], package_name: str) -> str:
@@ -302,17 +285,6 @@ def generate_python_scripts(build: BuildDefinition) -> dict[str, str]:
     return render_python_scripts(build)
 
 
-def _coverity_language(language: str) -> str:
-    mapping = {
-        "java": "java",
-        "nodejs": "javascript",
-        "node.js": "javascript",
-        "javascript": "javascript",
-        "python": "python",
-    }
-    return mapping.get(language.lower(), language.lower())
-
-
 def _requirements_chain(build: BuildDefinition, indent_size: int) -> str:
     indent = " " * indent_size
     lines = [f'{indent}.requirements(Requirement.equals("operating.system", "{_normalize_os(build.requirements.os)}"))']
@@ -392,6 +364,10 @@ def _repository_metadata_comment(build: BuildDefinition) -> str:
         comment_lines.append(
             f"        // create_if_missing uses Bamboo application link: {_bitbucket_application_link(build)}"
         )
+        if _git_clone_url(build):
+            comment_lines.append(
+                f"        // create_if_missing fallback clone URL: {_git_clone_url(build)}"
+            )
     return "\n".join(comment_lines)
 
 
@@ -414,19 +390,11 @@ def _repository_branch_matching_pattern(build: BuildDefinition) -> str:
     return "^(" + "|".join(escaped_branches) + ")$"
 
 
-def _repository_branches_builder(build: BuildDefinition, indent_size: int) -> str:
-    indent = " " * indent_size
-    entries = []
-    for branch in build.repository.branches:
-        entries.append(
-            f'{indent}new VcsRepositoryBranch(LINKED_REPOSITORY, "{_escape_java(branch)}").branchDisplayName("{_escape_java(branch)}")'
-        )
-    return ",\n".join(entries)
-
-
 def _repository_attachment_chain(build: BuildDefinition) -> str:
     if build.repository.linkage_mode == "create_if_missing":
-        return "            .planRepositories(createPlanRepository())"
+        if _git_clone_url(build):
+            return "            .planRepositories(createGitPlanRepository())"
+        return "            .planRepositories(createBitbucketPlanRepository())"
     return "            .linkedRepositories(LINKED_REPOSITORY)"
 
 
@@ -434,8 +402,18 @@ def _repository_factory_method(build: BuildDefinition) -> str:
     if build.repository.linkage_mode != "create_if_missing":
         return ""
 
+    if _git_clone_url(build):
+        default_branch = build.repository.branches[0] if build.repository.branches else "dev"
+        return f"""    private GitRepository createGitPlanRepository() {{
+        return new GitRepository()
+            .name(LINKED_REPOSITORY)
+            .url(GIT_CLONE_URL)
+            .branch("{_escape_java(default_branch)}");
+    }}
+"""
+
     default_branch = build.repository.branches[0] if build.repository.branches else "dev"
-    return f"""    private BitbucketServerRepository createPlanRepository() {{
+    return f"""    private BitbucketServerRepository createBitbucketPlanRepository() {{
         return new BitbucketServerRepository()
             .name(LINKED_REPOSITORY)
             .server(new ApplicationLink().name(BITBUCKET_APPLICATION_LINK))
@@ -450,6 +428,12 @@ def _bitbucket_application_link(build: BuildDefinition) -> str:
     if build.repository.application_link and build.repository.application_link.strip():
         return build.repository.application_link
     return "BITBUCKET_SERVER"
+
+
+def _git_clone_url(build: BuildDefinition) -> str:
+    if build.repository.clone_url and build.repository.clone_url.strip():
+        return build.repository.clone_url
+    return ""
 
 
 

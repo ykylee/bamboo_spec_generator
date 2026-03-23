@@ -1,0 +1,103 @@
+{% extends "ui/base.html" %}
+
+{% block title %}{% if repository %}{{ repository.repoSlug }} | Bamboo Spec Generator{% else %}저장소 없음 | Bamboo Spec Generator{% endif %}{% endblock %}
+{% block body_class %}page-resource-detail{% endblock %}
+{% block page_heading %}{% if repository %}{{ repository.repoSlug }} 상세{% else %}저장소 상세{% endif %}{% endblock %}
+
+{% block content %}
+{% if project and repository %}
+<section class="signal-hero signal-hero--workspace">
+  <div class="signal-hero__content">
+    <p class="signal-hero__eyebrow">Repository Detail</p>
+    <h1 class="hero__title">{{ repository.repoSlug }}</h1>
+    <p class="signal-hero__body">저장소 메타데이터와 연결된 빌드 플랜을 메인 대시보드와 같은 시그널 패턴으로 풀었습니다.</p>
+  <div class="hero__actions">
+    <a class="action-button" href="{% url 'project-detail' project.jiraProjectKey %}">프로젝트 상세</a>
+  </div>
+    <div class="chip-row">
+      <span class="chip">{{ project.jiraProjectKey }}</span>
+      {% if repository.isRepresentative %}
+      <span class="chip chip--success">대표 저장소</span>
+      {% endif %}
+      <span class="chip chip--neutral">{{ linkedBuilds|length }} Linked Builds</span>
+    </div>
+  </div>
+  <div class="signal-hero__board" aria-label="저장소 상세 보드">
+    <article class="signal-metric signal-metric--primary">
+      <span class="signal-metric__label">Linked Builds</span>
+      <strong class="signal-metric__value">{{ linkedBuilds|length }}</strong>
+      <p class="signal-metric__meta">이 저장소에 연결된 빌드 수</p>
+    </article>
+    <article class="signal-metric">
+      <span class="signal-metric__label">Coverity Project</span>
+      <strong class="signal-metric__value signal-metric__value--compact">{{ repository.coverityProject|default:"-" }}</strong>
+      <p class="signal-metric__meta">정적 분석 프로젝트 메타데이터</p>
+    </article>
+    <article class="signal-metric">
+      <span class="signal-metric__label">Coverity Stream</span>
+      <strong class="signal-metric__value signal-metric__value--compact">{{ repository.coverityStream|default:"-" }}</strong>
+      <p class="signal-metric__meta">현재 저장소 스트림</p>
+    </article>
+  </div>
+</section>
+
+<section class="detail-grid detail-grid--resource">
+  <article class="panel panel--signal-list">
+    <div class="panel__header">
+      <h2 class="panel__title">저장소 메타데이터</h2>
+    </div>
+    <ul class="meta-list">
+      <li><strong>Project</strong>{{ project.jiraProjectKey }}</li>
+      <li><strong>Repository Slug</strong>{{ repository.repoSlug }}</li>
+      <li><strong>Coverity Project</strong>{{ repository.coverityProject|default:"미지정" }}</li>
+      <li><strong>Coverity Stream</strong>{{ repository.coverityStream|default:"미지정" }}</li>
+    </ul>
+  </article>
+
+  <article class="panel panel--span-2 panel--signal-list">
+    <div class="panel__header">
+      <div>
+        <p class="panel__eyebrow">Linked Plans</p>
+        <h2 class="panel__title">연결된 빌드</h2>
+      </div>
+      <span class="badge">{{ linkedBuilds|length }} Items</span>
+    </div>
+    {% if linkedBuilds %}
+    <ul class="entity-preview-list">
+      {% for build in linkedBuilds %}
+      <li class="entity-preview-item">
+        <div>
+          <strong>{{ build.buildName }}</strong>
+          <p>{{ build.planKey }} · {{ build.buildType|default:"미지정" }} · {{ build.runtimeStack|default:"미지정" }}</p>
+        </div>
+        <div class="chip-row">
+          {% if build.latestSuccess == False %}
+          <span class="chip chip--warning">최근 실패</span>
+          {% else %}
+          <span class="chip chip--success">연결됨</span>
+          {% endif %}
+          <a class="chip chip--neutral" href="{% url 'project-build-detail' project.jiraProjectKey build.planKey %}">빌드 상세</a>
+        </div>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <div class="empty-state empty-state--inline">
+      <h3 class="empty-state__title">연결된 빌드가 없습니다.</h3>
+      <p class="empty-state__body">프로젝트 상세의 빌드 추가 패널에서 새 빌드를 연결할 수 있습니다.</p>
+    </div>
+    {% endif %}
+  </article>
+</section>
+{% elif project %}
+<section class="empty-state">
+  <h1 class="empty-state__title">저장소를 찾을 수 없습니다.</h1>
+  <p class="empty-state__body">요청한 저장소 slug가 현재 프로젝트에 연결되어 있지 않습니다.</p>
+</section>
+{% else %}
+<section class="empty-state">
+  <h1 class="empty-state__title">프로젝트를 찾을 수 없습니다.</h1>
+  <p class="empty-state__body">프로젝트가 없어서 저장소 상세를 불러올 수 없습니다.</p>
+</section>
+{% endif %}
+{% endblock %}

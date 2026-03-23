@@ -1,12 +1,13 @@
 # bamboo_spec_generator
 
-이 저장소는 아직 초기 구성 단계입니다. 현재 루트에는 최소한의 `README.md`만 있으며, 빌드나 테스트 도구는 아직 추가되지 않았습니다.
+이 저장소는 Python 기반 Bamboo Specs 생성기와 Django/Ninja 운영 백엔드를 함께 포함합니다. 루트에는 문서, 입력 샘플, 생성 결과물, 테스트, 백엔드/생성기 코드가 공존합니다.
 
 ## 프로젝트 구조
 
-- 주요 구현 구조가 정해지기 전까지는 루트 파일 수를 최소화합니다.
-- 첫 구현이 들어오면 애플리케이션 코드는 `src/` 또는 `app/` 같은 전용 디렉터리 아래에 둡니다.
-- 테스트 도구가 추가되면 테스트 코드는 `tests/` 또는 해당 언어의 일반적인 위치 규칙에 맞춰 배치합니다.
+- 생성기 애플리케이션 코드는 `src/bamboo_spec_generator/` 아래에 둡니다.
+- 운영 백엔드 코드는 `backend/` 아래에 둡니다.
+- 테스트 코드는 기본적으로 `tests/` 또는 각 Django 앱의 `tests.py`에 둡니다.
+- 문서는 `docs/` 아래에 두고, 요구사항/설계 문서는 기존 디렉터리 체계를 유지합니다.
 - 특정 하위 시스템에만 다른 규칙이 필요할 때만 하위 디렉터리에 더 구체적인 `AGENTS.md`를 추가합니다.
 
 ## 작업 방식
@@ -24,13 +25,14 @@
 
 ## 명령어
 
-- 현재 이 저장소에는 정해진 설치, 빌드, 린트, 테스트 명령이 없습니다.
-- 관련 프로젝트 파일이 생기기 전까지 특정 언어 런타임이나 패키지 매니저를 가정하지 않습니다.
-- 도구가 추가되면 아래 형식으로 표준 명령을 기록합니다.
-- Install: `별도 설치 없음`
+- 현재 표준 패키징 설정 파일은 없지만, Python 실행과 Django 관리 명령을 기준으로 작업합니다.
+- 백엔드와 UI E2E 의존성은 각각 `requirements-backend.txt`, `requirements-playwright.txt`로 관리합니다.
+- Install: `python3 -m pip install -r requirements-backend.txt`
 - Build: `PYTHONPATH=. python3 -m src.bamboo_spec_generator.cli`
 - Lint: `현재 별도 린트 명령 없음`
 - Test: `PYTHONPATH=. python3 -m unittest discover -s tests`
+- Test: `(cd backend && python3 manage.py test --settings=config.settings.test)`
+- Check: `(cd backend && python3 manage.py check)`
 
 ## 코드 스타일
 
@@ -43,8 +45,8 @@
 ## 테스트
 
 - 테스트 프레임워크가 생긴 뒤에는 동작이 바뀌는 변경에 맞춰 테스트를 추가하거나 갱신합니다.
-- 자동 테스트 구성이 아직 없다면 최종 보고에 수동으로 확인한 내용을 명시합니다.
-- 실행 가능한 테스트 명령이 없을 때는 충분히 검증되었다고 단정하지 않습니다.
+- 자동 테스트 전부가 통과하지 않으면 어떤 명령이 실패했는지 최종 보고에 구체적으로 남깁니다.
+- 실행 가능한 테스트 명령이 없거나 일부만 확인했을 때는 충분히 검증되었다고 단정하지 않습니다.
 
 ## 보안 및 설정
 

@@ -1,0 +1,77 @@
+{% extends "ui/base.html" %}
+
+{% block title %}Coverity Settings | Bamboo Spec Generator{% endblock %}
+{% block page_heading %}Coverity 운영 설정{% endblock %}
+
+{% block content %}
+<section class="signal-hero signal-hero--workspace">
+  <div class="signal-hero__content">
+    <p class="signal-hero__eyebrow">System Settings</p>
+    <h1 class="hero__title">Coverity 운영 설정</h1>
+    <p class="signal-hero__body">Coverity 공통값과 Git clone URL 템플릿 같은 시스템 운영 설정을 관리합니다. 이 값은 Specs Export 초안과 Bamboo 저장소 연결 fallback에 사용됩니다.</p>
+  </div>
+</section>
+
+<section class="detail-grid detail-grid--resource">
+  <article class="panel panel--signal-list">
+    <div class="panel__header">
+      <h2 class="panel__title">공통 설정</h2>
+    </div>
+    {% if message %}
+    <div class="form-alert form-alert--success">{{ message }}</div>
+    {% endif %}
+    {% if error %}
+    <div class="form-alert form-alert--error">{{ error }}</div>
+    {% endif %}
+    <form class="project-form" method="post">
+      {% csrf_token %}
+      <input type="hidden" name="form_kind" value="coverity_settings">
+      <div class="project-form__grid">
+        <label class="project-form__field project-form__field--span-3">
+          <span class="project-form__label">Coverity Connect URL</span>
+          {{ form.connect_url }}
+        </label>
+        <label class="project-form__field">
+          <span class="project-form__label">on-new-cert</span>
+          {{ form.on_new_cert }}
+        </label>
+        <label class="project-form__field">
+          <span class="project-form__label">Commit Enabled</span>
+          {{ form.commit_enabled }}
+        </label>
+        <label class="project-form__field">
+          <span class="project-form__label">Repository Linkage Mode</span>
+          {{ form.repository_linkage_mode }}
+        </label>
+        <label class="project-form__field project-form__field--span-3">
+          <span class="project-form__label">Git Clone URL Template</span>
+          {{ form.git_clone_url_template }}
+        </label>
+      </div>
+      <div class="project-form__actions">
+        <button class="action-button" type="submit">설정 저장</button>
+      </div>
+    </form>
+  </article>
+
+  <article class="panel panel--signal-list">
+    <div class="panel__header">
+      <h2 class="panel__title">샘플 Draft 초기화</h2>
+    </div>
+    <p class="panel__body">현재 DB에 등록된 프로젝트, 저장소, 플랜 메타데이터를 기준으로 BuildInfo 초안 데이터를 다시 생성합니다. 기존 BuildInfo는 현재 기준으로 재정렬됩니다.</p>
+    <form method="post">
+      {% csrf_token %}
+      <input type="hidden" name="form_kind" value="init_specs_drafts">
+      <button class="action-button" type="submit">샘플 Draft 재초기화</button>
+    </form>
+    {% if initSummary %}
+    <ul class="meta-list">
+      <li><strong>Initialized</strong>{{ initSummary.initializedCount }}</li>
+      <li><strong>Updated</strong>{{ initSummary.updatedCount }}</li>
+      <li><strong>Removed</strong>{{ initSummary.removedCount }}</li>
+      <li><strong>Skipped</strong>{{ initSummary.skippedCount }}</li>
+    </ul>
+    {% endif %}
+  </article>
+</section>
+{% endblock %}

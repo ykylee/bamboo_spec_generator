@@ -10,9 +10,11 @@ venv/
 .DS_Store
 .idea/
 .vscode/
+.omx/
 
 # Generated artifacts
 bamboo-specs/
+bamboo-specs-*/
 output/
 .playwright-cli/
 

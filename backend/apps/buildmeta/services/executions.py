@@ -4,7 +4,7 @@ from datetime import datetime
 
 from django.db import transaction
 
-from apps.buildmeta.models import BuildExecution, BuildPlan, BuildVersion, StaticAnalysisResult
+from apps.buildmeta.models import BuildExecution, BuildPlan, BuildPlanBuildInfo, BuildVersion, StaticAnalysisResult
 
 
 INITIAL_VERSION_BY_BRANCH = {
@@ -31,12 +31,14 @@ def start_execution(
     branch_kind: str,
     commit_hash: str,
     build_number: str,
+    build_key: str = "",
     started_at: datetime | None = None,
 ) -> dict:
     plan = BuildPlan.objects.select_for_update().select_related("latest_version").get(plan_key=plan_key)
+    build_info = _resolve_build_info(plan=plan, build_key=build_key)
     existing_execution = (
         BuildExecution.objects.select_related("build_version")
-        .filter(build_plan=plan, build_number=build_number)
+        .filter(build_plan=plan, build_number=build_number, build_info=build_info)
         .order_by("-created_at")
         .first()
     )
@@ -52,6 +54,7 @@ def start_execution(
             "buildVersionId": str(version.id),
             "buildExecutionId": str(existing_execution.id),
             "version": version.version_text,
+            "buildKey": build_info.build_key if build_info is not None else "",
             "reusedExistingVersion": True,
         }
 
@@ -78,6 +81,7 @@ def start_execution(
 
     execution = BuildExecution.objects.create(
         build_plan=plan,
+        build_info=build_info,
         build_version=version,
         build_number=build_number,
         commit_hash=commit_hash,
@@ -93,8 +97,19 @@ def start_execution(
         "buildVersionId": str(version.id),
         "buildExecutionId": str(execution.id),
         "version": version.version_text,
+        "buildKey": build_info.build_key if build_info is not None else "",
         "reusedExistingVersion": reused_existing_version,
     }
+
+
+def _resolve_build_info(*, plan: BuildPlan, build_key: str) -> BuildPlanBuildInfo | None:
+    normalized_key = build_key.strip()
+    if not normalized_key:
+        return None
+    build_info = BuildPlanBuildInfo.objects.filter(build_plan=plan, build_key=normalized_key).first()
+    if build_info is None:
+        raise ValueError(f"Build info '{normalized_key}' is not registered for plan '{plan.plan_key}'.")
+    return build_info
 
 
 def record_static_analysis_results(*, execution_id: str, static_analysis_results: list[dict]) -> dict:
