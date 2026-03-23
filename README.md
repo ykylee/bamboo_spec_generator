@@ -14,10 +14,11 @@
 - 테스트는 `unittest` 기반으로 일부 포함되어 있습니다.
 - 실제 Bamboo 서버 import 및 실행까지는 아직 검증되지 않았습니다.
 - Django/Ninja 기반 운영 백엔드 스캐폴딩, migration, 기본 API/UI, SQLite/PostgreSQL 스위치, 개발용 DB 초기화 명령이 추가되었습니다.
+- 운영 공통 설정을 저장하기 위한 `SystemSetting` 모델이 추가되었으며, Coverity Connect URL 같은 전역값을 DB로 관리할 수 있습니다.
 - 운영 API는 프로젝트 목록/상세 조회 외에 프로젝트 등록/수정 upsert를 지원하며, 프로젝트별 Specs 생성 준비도와 활성 정의 연결 상태를 함께 반환합니다.
 - 조회용 웹 UI는 Django 템플릿 기반으로 프로젝트 목록/상세 화면을 제공하며, 메인 페이지에서 프로젝트 등록이 가능합니다.
 - 프로젝트 등록 UI는 여러 저장소를 한 번에 입력할 수 있고, 각 빌드는 반드시 특정 저장소 slug에 연결되도록 구성되어 있습니다.
-- `backend/manage.py check`, `migrate`, Django 테스트 기준의 기본 동작은 검증되었습니다.
+- `backend/manage.py check`, `migrate` 기준의 기본 백엔드 진입점은 확인되었습니다.
 
 ## 아직 미구현인 범위
 
@@ -373,6 +374,13 @@ python3 manage.py init_postgres_db --force
 ```bash
 cd backend
 DJANGO_SETTINGS_MODULE=config.settings.test python3 manage.py test apps.api apps.buildmeta
+```
+
+전체 Django 테스트 실행:
+
+```bash
+cd backend
+python3 manage.py test --settings=config.settings.test
 ```
 
 운영 UI response 테스트 실행:

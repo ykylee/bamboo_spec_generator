@@ -15,18 +15,30 @@ from apps.buildmeta.models import (
     BuildPlan,
     BuildPlanBuildInfo,
     BuildPlanDefinition,
-    StaticAnalysisResult,
     BuildVersion,
     Project,
     ProjectBuild,
     ProjectRepository,
+    StaticAnalysisResult,
+    SystemSetting,
 )
 from apps.buildmeta.selectors.definitions import (
     get_active_definition_by_plan_key,
     get_build_plan_export_draft,
     get_build_plan_preview,
 )
-from apps.buildmeta.services import create_project, load_definition_import_records, sync_definition_records, update_project
+from apps.buildmeta.services import (
+    build_git_clone_url,
+    create_project,
+    get_coverity_system_settings,
+    get_system_setting,
+    initialize_specs_draft_data,
+    initialize_specs_draft_for_plan,
+    load_definition_import_records,
+    set_system_setting,
+    sync_definition_records,
+    update_project,
+)
 from apps.buildmeta.services.executions import finish_execution, record_static_analysis_results, start_execution
 from src.bamboo_spec_generator.parser import parse_build_definition_payload
 from src.bamboo_spec_generator.validator import ValidationError, is_no_build_language, validate_build_definitions
@@ -241,22 +253,41 @@ class DefinitionSelectorTest(TestCase):
         )
         self.plan = BuildPlan.objects.create(build_id="sample-app-api", plan_key="SAMPAPI")
 
-    def test_active_definition_uses_explicit_year_from_active_record(self) -> None:
-        BuildPlanDefinition.objects.create(
-            build_plan=self.plan,
+    def test_active_definition_endpoint_synthesizes_definition_from_registered_metadata(self) -> None:
+        repository = ProjectRepository.objects.create(
             project=self.project,
-            year="2026",
-            source_kind=BuildPlanDefinition.SOURCE_KIND_JSON,
-            definition_hash="sha256:abc123",
-            is_active=True,
-            definition_json={"buildId": "sample-app-api", "planKey": "SAMPAPI"},
+            repo_slug="sample-app-api",
+            coverity_project="sample-app-api",
+            coverity_stream="sample-app-api-dev",
+            is_representative=True,
+        )
+        ProjectBuild.objects.create(
+            project=self.project,
+            repository=repository,
+            build_plan=self.plan,
+            build_name="Sample API",
+            build_type="maven",
+            runtime_stack="java",
+        )
+        BuildPlanBuildInfo.objects.create(
+            build_plan=self.plan,
+            build_key="api-linux",
+            operating_system="linux",
+            pre_process="mvn -B dependency:go-offline",
+            build_command="mvn -B clean package",
+            language="java",
+            compiler="maven",
+            build_sub_path="services/sample-app-api",
         )
 
         payload = get_active_definition_by_plan_key("SAMPAPI")
 
         self.assertIsNotNone(payload)
         assert payload is not None
-        self.assertEqual("2026", payload["year"])
+        self.assertEqual("sample-app-api", payload["definition"]["buildId"])
+        self.assertEqual("BITBUCKET_SERVER", payload["definition"]["repository"]["applicationLink"])
+        self.assertEqual("services/sample-app-api", payload["definition"]["build"]["subPath"])
+
 
     def test_build_plan_preview_maps_build_infos_to_jobs(self) -> None:
         repository = ProjectRepository.objects.create(
@@ -273,38 +304,6 @@ class DefinitionSelectorTest(TestCase):
             build_name="Sample API",
             build_type="maven",
             runtime_stack="java",
-        )
-        BuildPlanDefinition.objects.create(
-            build_plan=self.plan,
-            project=self.project,
-            year="2026",
-            source_kind=BuildPlanDefinition.SOURCE_KIND_JSON,
-            definition_hash="sha256:preview123",
-            is_active=True,
-            definition_json={
-                "buildId": "sample-app-api",
-                "name": "Sample API",
-                "planKey": "SAMPAPI",
-                "language": "java",
-                "compiler": "maven",
-                "repository": {
-                    "provider": "bitbucket",
-                    "projectKey": "SAMPLE",
-                    "repoSlug": "sample-app-api",
-                    "linkageMode": "create_if_missing",
-                    "applicationLink": "BITBUCKET_DC",
-                    "branches": ["dev", "release", "master"],
-                },
-                "requirements": {"os": "linux", "extraCapabilities": ["python"]},
-                "build": {
-                    "subPath": "services/sample-app-api",
-                    "prepareCommand": "mvn -B dependency:go-offline",
-                    "buildCommand": "mvn -B clean package",
-                    "staticAnalysis": {"customTool": {"commands": ["custom-tool analyze {buildCommand}"]}},
-                    "runtimeRequirements": {"commands": ["mvn", "coverity"], "envVars": ["JAVA_HOME"]},
-                    "postBuildTrigger": {"type": "plan", "targetPlanKey": "POSTBUILD"},
-                },
-            },
         )
         BuildPlanBuildInfo.objects.create(
             build_plan=self.plan,
@@ -326,6 +325,7 @@ class DefinitionSelectorTest(TestCase):
             language="java",
             compiler="maven",
             coverity_stream="sample-api-win",
+            build_sub_path="services/sample-app-api",
         )
 
         payload = get_build_plan_preview("SAMPAPI")
@@ -363,38 +363,6 @@ class DefinitionSelectorTest(TestCase):
             build_type="maven",
             runtime_stack="java",
         )
-        BuildPlanDefinition.objects.create(
-            build_plan=self.plan,
-            project=self.project,
-            year="2026",
-            source_kind=BuildPlanDefinition.SOURCE_KIND_JSON,
-            definition_hash="sha256:export123",
-            is_active=True,
-            definition_json={
-                "buildId": "sample-app-api",
-                "name": "Sample API",
-                "planKey": "SAMPAPI",
-                "language": "java",
-                "compiler": "maven",
-                "repository": {
-                    "provider": "bitbucket",
-                    "projectKey": "SAMPLE",
-                    "repoSlug": "sample-app-api",
-                    "linkageMode": "create_if_missing",
-                    "applicationLink": "BITBUCKET_DC",
-                    "branches": ["dev", "release", "master"],
-                },
-                "requirements": {"os": "linux", "extraCapabilities": []},
-                "build": {
-                    "subPath": "services/sample-app-api",
-                    "prepareCommand": "mvn -B dependency:go-offline",
-                    "buildCommand": "mvn -B clean package",
-                    "staticAnalysis": {"customTool": {"commands": ["custom-tool analyze {buildCommand}"]}},
-                    "runtimeRequirements": {"commands": ["mvn", "coverity"], "envVars": ["JAVA_HOME"]},
-                    "postBuildTrigger": {"type": "plan", "targetPlanKey": "POSTBUILD"},
-                },
-            },
-        )
         BuildPlanBuildInfo.objects.create(
             build_plan=self.plan,
             build_key="api-linux",
@@ -413,11 +381,14 @@ class DefinitionSelectorTest(TestCase):
         self.assertIsNotNone(payload)
         assert payload is not None
         self.assertEqual("SAMPAPI", payload["summary"]["planKey"])
-        self.assertTrue(any(file["path"].endswith("plan-preview.json") for file in payload["files"]))
         self.assertTrue(any(file["path"].endswith("coverity.yaml") for file in payload["files"]))
         self.assertTrue(any(file["path"].endswith("prepare_build.py") for file in payload["files"]))
+        self.assertTrue(any(file["path"].endswith("run_coverity.py") for file in payload["files"]))
+        self.assertTrue(any(file["path"].endswith("run_custom_analysis.py") for file in payload["files"]))
+        self.assertTrue(any(file["path"].endswith("trigger_follow_up.py") for file in payload["files"]))
+        self.assertFalse(any(file["path"].endswith("manifest.json") for file in payload["files"]))
         self.assertTrue(any("mvn -B verify" in file["content"] for file in payload["files"]))
-        self.assertTrue(any('"operatingSystem": "linux"' in file["content"] for file in payload["files"]))
+        self.assertTrue(any(file["path"].endswith("run_build.sh") for file in payload["files"]))
 
     def test_build_plan_preview_omits_build_stage_for_python_without_build_commands(self) -> None:
         repository = ProjectRepository.objects.create(
@@ -434,38 +405,6 @@ class DefinitionSelectorTest(TestCase):
             build_name="Sample Script",
             build_type="python",
             runtime_stack="python3.12",
-        )
-        BuildPlanDefinition.objects.create(
-            build_plan=self.plan,
-            project=self.project,
-            year="2026",
-            source_kind=BuildPlanDefinition.SOURCE_KIND_JSON,
-            definition_hash="sha256:script123",
-            is_active=True,
-            definition_json={
-                "buildId": "sample-app-script",
-                "name": "Sample Script",
-                "planKey": "SAMPAPI",
-                "language": "python",
-                "compiler": "python",
-                "repository": {
-                    "provider": "bitbucket",
-                    "projectKey": "SAMPLE",
-                    "repoSlug": "sample-app-script",
-                    "linkageMode": "linked",
-                    "applicationLink": "BITBUCKET_DC",
-                    "branches": ["dev", "release", "master"],
-                },
-                "requirements": {"os": "linux", "extraCapabilities": []},
-                "build": {
-                    "subPath": ".",
-                    "prepareCommand": "",
-                    "buildCommand": "",
-                    "staticAnalysis": {"customTool": {"commands": ["custom-tool analyze {buildCommand}"]}},
-                    "runtimeRequirements": {"commands": ["python", "coverity"], "envVars": ["PYTHONPATH"]},
-                    "postBuildTrigger": {"type": "plan", "targetPlanKey": "POSTBUILD"},
-                },
-            },
         )
         BuildPlanBuildInfo.objects.create(
             build_plan=self.plan,
@@ -491,6 +430,123 @@ class DefinitionSelectorTest(TestCase):
         export_payload = get_build_plan_export_draft("SAMPAPI")
         assert export_payload is not None
         self.assertFalse(any(file["path"].endswith("run_build.py") for file in export_payload["files"]))
+
+
+class SystemSettingServiceTest(TestCase):
+    def test_get_system_setting_returns_default_when_missing(self) -> None:
+        self.assertEqual("", get_system_setting("missing"))
+        self.assertEqual("fallback", get_system_setting("missing", default="fallback"))
+
+    def test_set_system_setting_upserts_value(self) -> None:
+        set_system_setting(key="coverity.connect.url", value="https://coverity.example.com", description="Coverity URL")
+        set_system_setting(key="coverity.connect.url", value="https://coverity.internal", description="Updated")
+
+        self.assertEqual(1, SystemSetting.objects.count())
+        setting = SystemSetting.objects.get(key="coverity.connect.url")
+        self.assertEqual("https://coverity.internal", setting.value)
+        self.assertEqual("Updated", setting.description)
+
+    def test_get_coverity_system_settings_reads_known_keys(self) -> None:
+        set_system_setting(key=SystemSetting.KEY_COVERITY_CONNECT_URL, value="https://coverity.example.com")
+        set_system_setting(key=SystemSetting.KEY_COVERITY_ON_NEW_CERT, value="trust")
+        set_system_setting(key=SystemSetting.KEY_COVERITY_COMMIT_ENABLED, value="true")
+        set_system_setting(
+            key=SystemSetting.KEY_GIT_CLONE_URL_TEMPLATE,
+            value="https://git.example.com/scm/{project_key_lower}/{repo_slug}.git",
+        )
+
+        payload = get_coverity_system_settings()
+
+        self.assertEqual("https://coverity.example.com", payload["connectUrl"])
+        self.assertEqual("trust", payload["onNewCert"])
+        self.assertTrue(payload["commitEnabled"])
+        self.assertEqual(
+            "https://git.example.com/scm/{project_key_lower}/{repo_slug}.git",
+            payload["gitCloneUrlTemplate"],
+        )
+
+    def test_build_git_clone_url_uses_template_placeholders(self) -> None:
+        set_system_setting(
+            key=SystemSetting.KEY_GIT_CLONE_URL_TEMPLATE,
+            value="https://git.example.com/scm/{project_key_lower}/{repo_slug}.git",
+        )
+
+        payload = build_git_clone_url(project_key="CCC", repo_slug="cccrepo")
+
+        self.assertEqual("https://git.example.com/scm/ccc/cccrepo.git", payload)
+
+
+class SpecsDraftInitializationServiceTest(TestCase):
+    def test_initialize_specs_draft_data_creates_build_info_from_registered_metadata(self) -> None:
+        project = Project.objects.create(
+            jira_project_key="SAMPLE",
+            bitbucket_project_key="SAMPLE",
+            representative_repo_slug="sample-app-api",
+        )
+        repository = ProjectRepository.objects.create(
+            project=project,
+            repo_slug="sample-app-api",
+            is_representative=True,
+        )
+        plan = BuildPlan.objects.create(build_id="sample-app-api", plan_key="SAMPAPI")
+        ProjectBuild.objects.create(
+            project=project,
+            repository=repository,
+            build_plan=plan,
+            build_name="Sample API",
+            build_type="maven",
+            runtime_stack="java",
+        )
+
+        summary = initialize_specs_draft_data(reset_existing=True)
+
+        self.assertEqual(1, summary["initializedCount"])
+        build_info = BuildPlanBuildInfo.objects.get(build_plan=plan)
+        self.assertEqual("linux", build_info.operating_system)
+        self.assertEqual("java", build_info.language)
+        self.assertEqual("maven", build_info.compiler)
+        self.assertEqual(".", build_info.build_sub_path)
+
+    def test_initialize_specs_draft_for_plan_normalizes_existing_build_info_without_definition(self) -> None:
+        project = Project.objects.create(
+            jira_project_key="CCC",
+            bitbucket_project_key="CCC",
+            representative_repo_slug="ccc-build",
+        )
+        repository = ProjectRepository.objects.create(
+            project=project,
+            repo_slug="ccc-build",
+            coverity_stream="ccc",
+            is_representative=True,
+        )
+        plan = BuildPlan.objects.create(build_id="ccc-build", plan_key="CCCBUILD")
+        ProjectBuild.objects.create(
+            project=project,
+            repository=repository,
+            build_plan=plan,
+            build_name="CCC Build",
+            build_type="python",
+            runtime_stack="python3.12",
+        )
+        BuildPlanBuildInfo.objects.create(
+            build_plan=plan,
+            build_key="main",
+            operating_system="",
+            language="",
+            compiler="",
+            coverity_stream="",
+            build_sub_path="",
+        )
+
+        summary = initialize_specs_draft_for_plan(plan_key="CCCBUILD", reset_existing=False)
+
+        self.assertEqual(1, summary["updatedCount"])
+        build_info = BuildPlanBuildInfo.objects.get(build_plan=plan, build_key="main")
+        self.assertEqual("linux", build_info.operating_system)
+        self.assertEqual("python", build_info.language)
+        self.assertEqual("python", build_info.compiler)
+        self.assertEqual("ccc", build_info.coverity_stream)
+        self.assertEqual(".", build_info.build_sub_path)
 
 
 class ValidatorExceptionTest(SimpleTestCase):
@@ -948,7 +1004,7 @@ class InitPostgresDbCommandTest(SimpleTestCase):
 
 
 class ProjectServiceTest(TestCase):
-    def test_create_project_marks_generation_ready_without_active_definitions(self) -> None:
+    def test_create_project_marks_generation_not_ready_without_build_infos(self) -> None:
         payload = create_project(
             {
                 "jiraProjectKey": "OPS",
@@ -976,8 +1032,9 @@ class ProjectServiceTest(TestCase):
         )
 
         self.assertEqual("OPS", payload["jiraProjectKey"])
-        self.assertTrue(payload["generation"]["generationReady"])
-        self.assertEqual([], payload["generation"]["generationReadinessIssues"])
+        self.assertFalse(payload["generation"]["generationReady"])
+        self.assertEqual(["빌드 정보 없음 1"], payload["generation"]["generationReadinessIssues"])
+        self.assertEqual(0, payload["generation"]["activeDefinitionCount"])
         self.assertEqual(1, Project.objects.count())
         self.assertEqual(1, BuildPlan.objects.count())
         self.assertEqual(1, ProjectBuild.objects.count())

@@ -11,6 +11,7 @@ from apps.buildmeta.models import (
     Project,
     ProjectBuild,
     ProjectRepository,
+    SystemSetting,
 )
 
 
@@ -125,7 +126,7 @@ class ProjectViewTest(TestCase):
         response = self.client.get("/")
 
         self.assertEqual(200, response.status_code)
-        self.assertContains(response, "운영 준비")
+        self.assertContains(response, "연결 점검 필요")
         self.assertContains(response, "SAMPLE")
         self.assertContains(response, "프로젝트 등록")
         self.assertContains(response, "주의가 필요한 프로젝트를 먼저 보여줍니다.")
@@ -135,7 +136,7 @@ class ProjectViewTest(TestCase):
         self.assertContains(response, 'data-open-dialog="repo-dialog-SAMPLE"', html=False)
         self.assertContains(response, 'data-open-dialog="representative-dialog-SAMPLE"', html=False)
         self.assertContains(response, ">sample-app-api<", html=False)
-        self.assertContains(response, 'class="status-light status-light--success"', html=False)
+        self.assertContains(response, 'class="status-light status-light--warning"', html=False)
         self.assertContains(response, "Needs Attention")
         self.assertContains(response, 'class="project-compact-list"', html=False)
         self.assertContains(response, 'id="project-nav-search"', html=False)
@@ -210,6 +211,68 @@ class ProjectViewTest(TestCase):
         self.assertEqual(["Fail API"], [plan["buildName"] for plan in query_response.context["plans"]])
         self.assertEqual(["Fail API"], [plan["buildName"] for plan in failed_response.context["plans"]])
 
+    def test_coverity_settings_page_renders(self) -> None:
+        response = self.client.get("/settings/coverity/")
+
+        self.assertEqual(200, response.status_code)
+        self.assertContains(response, "Coverity 운영 설정")
+        self.assertContains(response, "샘플 Draft 재초기화")
+
+    def test_coverity_settings_page_updates_settings(self) -> None:
+        response = self.client.post(
+            "/settings/coverity/",
+            {
+                "form_kind": "coverity_settings",
+                "connect_url": "https://coverity.example.com",
+                "on_new_cert": "trust",
+                "commit_enabled": "on",
+                "git_clone_url_template": "https://git.example.com/scm/{project_key_lower}/{repo_slug}.git",
+            },
+        )
+
+        self.assertEqual(200, response.status_code)
+        self.assertContains(response, "Coverity 운영 설정을 저장했습니다.")
+        self.assertEqual("https://coverity.example.com", SystemSetting.objects.get(key="coverity.connect.url").value)
+        self.assertEqual(
+            "https://git.example.com/scm/{project_key_lower}/{repo_slug}.git",
+            SystemSetting.objects.get(key="repository.git.clone_url_template").value,
+        )
+
+    def test_coverity_settings_page_initializes_specs_drafts(self) -> None:
+        response = self.client.post(
+            "/settings/coverity/",
+            {
+                "form_kind": "init_specs_drafts",
+            },
+        )
+
+        self.assertEqual(200, response.status_code)
+        self.assertContains(response, "등록된 샘플의 Specs 초안 데이터를 현재 기준으로 다시 초기화했습니다.")
+        self.assertTrue(BuildPlanBuildInfo.objects.filter(build_plan__plan_key="SAMPAPI").exists())
+
+    def test_project_build_detail_refreshes_specs_draft_for_plan(self) -> None:
+        BuildPlanDefinition.objects.filter(build_plan__plan_key="SAMPAPI").delete()
+        BuildPlanBuildInfo.objects.create(
+            build_plan=BuildPlan.objects.get(plan_key="SAMPAPI"),
+            build_key="api-linux",
+            operating_system="",
+            language="",
+            compiler="",
+            coverity_stream="",
+            build_sub_path="",
+        )
+
+        response = self.client.post(
+            "/projects/SAMPLE/builds/SAMPAPI/",
+            data={"form_kind": "refresh_specs_draft"},
+        )
+
+        self.assertEqual(200, response.status_code)
+        self.assertContains(response, "이 플랜의 Specs 초안 데이터를 현재 기준으로 다시 채웠습니다.")
+        build_info = BuildPlanBuildInfo.objects.get(build_plan__plan_key="SAMPAPI", build_key="api-linux")
+        self.assertEqual(".", build_info.build_sub_path)
+        self.assertEqual("sample-app-api-dev", build_info.coverity_stream)
+
     def test_project_list_filters_by_query_across_project_keys_and_repo_slug(self) -> None:
         self._create_project_with_build(
             jira_project_key="OPS",
@@ -252,10 +315,18 @@ class ProjectViewTest(TestCase):
 
         response = self.client.get("/", {"status": "attention"})
 
-        self.assertEqual(["ATTN"], [project["jiraProjectKey"] for project in response.context["projects"]])
+        self.assertEqual(["ATTN", "SAMPLE"], [project["jiraProjectKey"] for project in response.context["projects"]])
         self.assertContains(response, "연결 점검 필요")
 
     def test_project_list_filters_healthy_status(self) -> None:
+        BuildPlanBuildInfo.objects.create(
+            build_plan=BuildPlan.objects.get(plan_key="SAMPAPI"),
+            build_key="api-linux",
+            operating_system="linux",
+            language="python",
+            compiler="python",
+            coverity_stream="sample-app-api-dev",
+        )
         self._create_project_with_build(
             jira_project_key="ATTN",
             bitbucket_project_key="ATTN",
@@ -270,7 +341,7 @@ class ProjectViewTest(TestCase):
         response = self.client.get("/", {"status": "healthy"})
 
         self.assertEqual(["SAMPLE"], [project["jiraProjectKey"] for project in response.context["projects"]])
-        self.assertContains(response, "운영 준비")
+        self.assertContains(response, "정상")
 
     def test_project_list_paginates_ten_projects_and_preserves_query_parameters(self) -> None:
         for index in range(11):
@@ -365,7 +436,7 @@ class ProjectViewTest(TestCase):
 
         self.assertEqual(200, response.status_code)
         self.assertContains(response, "프로젝트 상태")
-        self.assertContains(response, "정상")
+        self.assertContains(response, "연결 점검 필요")
         self.assertContains(response, "프로젝트 수정")
         self.assertContains(response, "저장소 추가")
         self.assertContains(response, "빌드 추가")
@@ -758,7 +829,9 @@ class ProjectViewTest(TestCase):
         self.assertContains(response, "플랜 내부 Job 구성")
         self.assertContains(response, "Post Process")
         self.assertContains(response, "Specs Export 초안")
-        self.assertContains(response, "plan-preview.json")
+        self.assertContains(response, "Specs 초안 다시 채우기")
+        self.assertContains(response, "drafts/SAMPAPI/jobs/api-linux/coverity.yaml")
+        self.assertNotContains(response, "plan-preview.json")
         self.assertContains(response, "linux")
         self.assertContains(response, 'data-preview-stage', html=False)
         self.assertContains(response, 'data-job-select', html=False)
@@ -829,6 +902,7 @@ class ProjectViewTest(TestCase):
         self.assertContains(response, "Run Build")
         self.assertContains(response, "Register Build Start")
         self.assertContains(response, "drafts/SAMPAPI/jobs/api-linux/coverity.yaml")
+        self.assertNotContains(response, "plan-preview.json")
         self.assertContains(response, "linux")
 
     def test_project_build_detail_omits_build_stage_for_python_without_build_command(self) -> None:

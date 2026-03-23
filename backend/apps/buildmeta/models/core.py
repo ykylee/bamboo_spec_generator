@@ -14,6 +14,26 @@ class TimestampedModel(models.Model):
         abstract = True
 
 
+class SystemSetting(TimestampedModel):
+    KEY_COVERITY_CONNECT_URL = "coverity.connect.url"
+    KEY_COVERITY_ON_NEW_CERT = "coverity.connect.on_new_cert"
+    KEY_COVERITY_COMMIT_ENABLED = "coverity.commit.enabled"
+    KEY_GIT_CLONE_URL_TEMPLATE = "repository.git.clone_url_template"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    key = models.CharField(max_length=128, unique=True)
+    value = models.TextField(blank=True)
+    description = models.TextField(blank=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["key"], name="ix_system_setting_key"),
+        ]
+
+    def __str__(self) -> str:
+        return self.key
+
+
 class Project(TimestampedModel):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     jira_project_key = models.CharField(max_length=64, unique=True)

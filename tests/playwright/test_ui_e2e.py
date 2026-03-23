@@ -343,7 +343,7 @@ class UiPlaywrightE2ETest(unittest.TestCase):
         self.assertEqual(f"{self.base_url}/projects/OPS/", self.page.url)
         self.assertTrue(self.Project.objects.filter(jira_project_key="OPS").exists())
         self.assertEqual("OPS", self.page.locator(".hero__title").inner_text())
-        self.assertTrue(self.page.get_by_text("운영 준비").is_visible())
+        self.assertTrue(self.page.get_by_text("연결 점검 필요").is_visible())
         self.assertTrue(self.page.locator("#project-repository-add-panel").count() == 1)
         self.assertTrue(self.page.locator("#project-build-add-panel").count() == 1)
 
@@ -468,6 +468,7 @@ class UiPlaywrightE2ETest(unittest.TestCase):
         self.assertTrue(self.page.get_by_text("Publish Report", exact=True).is_visible())
         self.assertTrue(self.page.get_by_role("heading", name="Specs Export 초안").is_visible())
         self.assertTrue(self.page.get_by_text("drafts/SAMPAPI/jobs/api-linux/coverity.yaml").is_visible())
+        self.assertFalse(self.page.get_by_text("plan-preview.json").first.is_visible())
         self.page.locator(f'a[href="/projects/SAMPLE/builds/SAMPAPI/infos/api-linux/"]').first.click()
         self.page.wait_for_url(f"{self.base_url}/projects/SAMPLE/builds/SAMPAPI/infos/api-linux/")
         self.assertTrue(self.page.get_by_role("heading", name="빌드 정보 수정").is_visible())

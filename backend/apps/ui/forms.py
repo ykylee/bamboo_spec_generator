@@ -102,3 +102,16 @@ class BuildInfoMetadataForm(forms.Form):
         widget=forms.TextInput(attrs={"list": "coverity-stream-options"}),
     )
     build_sub_path = forms.CharField(label="빌드 Sub Path", max_length=255, required=False)
+
+
+class CoveritySystemSettingsForm(forms.Form):
+    connect_url = forms.CharField(label="Coverity Connect URL", required=False)
+    on_new_cert = forms.CharField(label="on-new-cert", max_length=64, required=False, initial="trust")
+    commit_enabled = forms.BooleanField(label="Commit Enabled", required=False)
+    git_clone_url_template = forms.CharField(
+        label="Git Clone URL Template",
+        required=False,
+        widget=forms.TextInput(
+            attrs={"placeholder": "https://git.example.com/scm/{project_key_lower}/{repo_slug}.git"}
+        ),
+    )

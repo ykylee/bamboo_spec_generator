@@ -5,7 +5,15 @@ import os
 
 from django.test import TestCase
 
-from apps.buildmeta.models import BuildPlan, BuildPlanDefinition, BuildVersion, Project, ProjectBuild, ProjectRepository
+from apps.buildmeta.models import (
+    BuildPlan,
+    BuildPlanBuildInfo,
+    BuildVersion,
+    Project,
+    ProjectBuild,
+    ProjectRepository,
+    SystemSetting,
+)
 from apps.buildmeta.services.executions import finish_execution, start_execution
 
 
@@ -31,53 +39,17 @@ class ApiSmokeTest(TestCase):
             build_plan=self.plan,
             build_name="backend",
             build_type="python",
+            runtime_stack="java",
         )
-        definition = BuildPlanDefinition.objects.create(
+        BuildPlanBuildInfo.objects.create(
             build_plan=self.plan,
-            project=self.project,
-            year="2026",
-            source_kind=BuildPlanDefinition.SOURCE_KIND_JSON,
-            definition_hash="sha256:abc123",
-            is_active=True,
-            definition_json={
-                "year": "2026",
-                "buildId": "sample-app-api",
-                "name": "Sample App API",
-                "planKey": "SAMPAPI",
-                "description": "Sample App API build plan",
-                "language": "java",
-                "compiler": "maven",
-                "repository": {
-                    "provider": "bitbucket",
-                    "projectKey": "SAMPLE",
-                    "repoSlug": "sample-app-api",
-                    "linkageMode": "linked",
-                    "applicationLink": "BITBUCKET_SERVER",
-                    "branches": ["dev", "release", "master"],
-                },
-                "requirements": {
-                    "os": "linux",
-                    "extraCapabilities": [],
-                },
-                "build": {
-                    "subPath": "services/sample-app-api",
-                    "prepareCommand": "mvn -B dependency:go-offline",
-                    "buildCommand": "mvn -B clean package",
-                    "staticAnalysis": {
-                        "customTool": {
-                            "commands": ["custom-tool analyze {buildCommand}"],
-                        }
-                    },
-                    "runtimeRequirements": {
-                        "commands": ["mvn", "coverity", "custom-tool", "trigger-plan"],
-                        "envVars": ["PATH", "JAVA_HOME"],
-                    },
-                    "postBuildTrigger": {
-                        "type": "plan",
-                        "targetPlanKey": "POSTBUILD",
-                    },
-                },
-            },
+            build_key="api-linux",
+            operating_system="linux",
+            pre_process="mvn -B dependency:go-offline",
+            build_command="mvn -B clean package",
+            language="java",
+            compiler="maven",
+            build_sub_path="services/sample-app-api",
         )
         self.auth_headers = {"HTTP_AUTHORIZATION": "Bearer test-token"}
 
@@ -87,9 +59,9 @@ class ApiSmokeTest(TestCase):
         self.assertEqual(200, response.status_code)
         payload = response.json()
         self.assertEqual("SAMPAPI", payload["planKey"])
-        self.assertEqual("2026", payload["year"])
         self.assertEqual("sample-app-api", payload["definition"]["buildId"])
         self.assertEqual("BITBUCKET_SERVER", payload["definition"]["repository"]["applicationLink"])
+        self.assertEqual("services/sample-app-api", payload["definition"]["build"]["subPath"])
 
     def test_prepare_context_endpoint(self) -> None:
         response = self.client.get("/api/v1/build-plans/SAMPAPI/prepare-context", **self.auth_headers)
@@ -224,13 +196,13 @@ class ApiSmokeTest(TestCase):
         payload = response.json()
         self.assertEqual(1, len(payload))
         self.assertTrue(payload[0]["generationReady"])
-        self.assertEqual(1, payload[0]["activeDefinitionCount"])
+        self.assertEqual(0, payload[0]["activeDefinitionCount"])
 
         detail_response = self.client.get("/api/v1/projects/SAMPLE", **self.auth_headers)
         self.assertEqual(200, detail_response.status_code)
         detail_payload = detail_response.json()
         self.assertTrue(detail_payload["generation"]["generationReady"])
-        self.assertEqual("2026", detail_payload["builds"][0]["activeDefinitionYear"])
+        self.assertEqual("", detail_payload["builds"][0]["activeDefinitionYear"])
 
     def test_project_create_endpoint_registers_project_with_builds(self) -> None:
         response = self.client.post(
@@ -268,7 +240,71 @@ class ApiSmokeTest(TestCase):
         payload = response.json()
         self.assertEqual("NEWPROJ", payload["jiraProjectKey"])
         self.assertFalse(payload["generation"]["generationReady"])
-        self.assertEqual(["활성 정의 없음 1"], payload["generation"]["generationReadinessIssues"])
+        self.assertEqual(["빌드 정보 없음 1"], payload["generation"]["generationReadinessIssues"])
+
+    def test_coverity_system_settings_endpoints(self) -> None:
+        response = self.client.put(
+            "/api/v1/system-settings/coverity",
+            data=json.dumps(
+                {
+                    "connectUrl": "https://coverity.example.com",
+                    "onNewCert": "trust",
+                    "commitEnabled": True,
+                    "gitCloneUrlTemplate": "https://git.example.com/scm/{project_key_lower}/{repo_slug}.git",
+                }
+            ),
+            content_type="application/json",
+            **self.auth_headers,
+        )
+
+        self.assertEqual(200, response.status_code)
+        payload = response.json()
+        self.assertEqual("https://coverity.example.com", payload["connectUrl"])
+        self.assertTrue(payload["commitEnabled"])
+        self.assertEqual(
+            "https://git.example.com/scm/{project_key_lower}/{repo_slug}.git",
+            payload["gitCloneUrlTemplate"],
+        )
+        self.assertEqual("https://coverity.example.com", SystemSetting.objects.get(key="coverity.connect.url").value)
+
+    def test_specs_draft_initialize_endpoint_creates_build_info(self) -> None:
+        response = self.client.post(
+            "/api/v1/system-settings/specs-drafts/initialize?resetExisting=true",
+            content_type="application/json",
+            **self.auth_headers,
+        )
+
+        self.assertEqual(200, response.status_code)
+        payload = response.json()
+        self.assertEqual(1, payload["initializedCount"])
+        build_info = BuildPlanBuildInfo.objects.get(build_plan=self.plan)
+        self.assertEqual("linux", build_info.operating_system)
+        self.assertEqual(".", build_info.build_sub_path)
+
+    def test_specs_draft_initialize_plan_endpoint_refreshes_existing_build_info(self) -> None:
+        self.plan.definitions.all().delete()
+        BuildPlanBuildInfo.objects.create(
+            build_plan=self.plan,
+            build_key="main",
+            operating_system="",
+            language="",
+            compiler="",
+            coverity_stream="",
+            build_sub_path="",
+        )
+
+        response = self.client.post(
+            f"/api/v1/system-settings/specs-drafts/initialize/{self.plan.plan_key}",
+            content_type="application/json",
+            **self.auth_headers,
+        )
+
+        self.assertEqual(200, response.status_code)
+        payload = response.json()
+        self.assertEqual(2, payload["updatedCount"])
+        build_info = BuildPlanBuildInfo.objects.get(build_plan=self.plan, build_key="main")
+        self.assertEqual(".", build_info.build_sub_path)
+        self.assertEqual("sample-app-dev", build_info.coverity_stream)
 
     def test_project_update_endpoint_updates_metadata_and_links(self) -> None:
         response = self.client.put(

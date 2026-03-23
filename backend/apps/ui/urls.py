@@ -4,6 +4,7 @@ from django.urls import path
 
 from .views import (
     build_plan_list,
+    coverity_settings,
     project_build_detail,
     project_build_info_detail,
     project_build_info_list,
@@ -16,6 +17,7 @@ from .views import (
 urlpatterns = [
     path("", project_list, name="project-list"),
     path("build-plans/", build_plan_list, name="build-plan-list"),
+    path("settings/coverity/", coverity_settings, name="coverity-settings"),
     path("projects/<str:jira_project_key>/", project_detail, name="project-detail"),
     path(
         "projects/<str:jira_project_key>/repositories/<str:repo_slug>/",

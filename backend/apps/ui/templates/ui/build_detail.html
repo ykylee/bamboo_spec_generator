@@ -27,10 +27,21 @@
       >
         빌드 정보 등록
       </a>
+      <form method="post" action="{% url 'project-build-detail' project.jiraProjectKey build.planKey %}">
+        {% csrf_token %}
+        <input type="hidden" name="form_kind" value="refresh_specs_draft">
+        <button class="action-button action-button--ghost" type="submit">Specs 초안 다시 채우기</button>
+      </form>
       {% if repository %}
       <a class="action-button action-button--ghost" href="{% url 'project-repository-detail' project.jiraProjectKey repository.repoSlug %}">저장소 상세</a>
       {% endif %}
     </div>
+    {% if draftRefreshMessage %}
+    <div class="form-alert form-alert--success">{{ draftRefreshMessage }}</div>
+    {% endif %}
+    {% if draftRefreshError %}
+    <div class="form-alert form-alert--error">{{ draftRefreshError }}</div>
+    {% endif %}
     <div class="chip-row">
       <span class="chip">{{ build.planKey }}</span>
       <span class="chip chip--neutral">{{ build.buildId }}</span>
@@ -240,11 +251,7 @@
     <div class="chip-row">
       <span class="chip">{{ buildPlanPreview.plan.planKey }}</span>
       <span class="chip chip--neutral">{{ buildPlanPreview.jobs|length }} jobs</span>
-      {% if buildPlanPreview.plan.definitionConnected %}
-      <span class="chip chip--success">정의 데이터 연결</span>
-      {% else %}
-      <span class="chip chip--neutral">정의 데이터 없음</span>
-      {% endif %}
+      <span class="chip chip--success">등록 메타데이터 기준</span>
     </div>
   </div>
 
@@ -411,7 +418,7 @@
       <span class="chip chip--neutral">{{ buildPlanExportDraft.summary.jobCount }} jobs</span>
     </div>
   </div>
-  <p class="panel__body">현재 등록된 메타데이터를 기준으로 생성 가능한 draft 파일입니다. 실제 publish 전 검토용 초안이며, 각 Job 상세 수정 후 다시 확인하면 내용이 함께 바뀝니다.</p>
+  <p class="panel__body">Preview와 같은 실행 모델을 기준으로 렌더링한 실제 실행 파일 초안입니다. 중간 설명용 JSON은 제외하고, Job별 설정 파일과 스크립트만 노출합니다.</p>
   <div class="export-draft-list">
     {% for draftFile in buildPlanExportDraft.files %}
     <details class="export-draft-item"{% if forloop.first %} open{% endif %}>
@@ -484,7 +491,7 @@
       <li><strong>메타데이터 상태</strong>{% if build.staticAnalysisToolVersion or build.coverityProject %}플랜 메타데이터가 일부 이상 채워져 있습니다.{% else %}플랜 메타데이터가 아직 비어 있습니다.{% endif %}</li>
       <li><strong>빌드 정보 상태</strong>{% if build.buildInfoCount %}빌드 정보 {{ build.buildInfoCount }}건이 등록돼 있습니다.{% else %}아직 빌드 정보가 없습니다.{% endif %}</li>
       <li><strong>저장소 연결</strong>{% if repository %}저장소 slug와 플랜이 연결돼 있습니다.{% else %}저장소 연결이 누락돼 있습니다.{% endif %}</li>
-      <li><strong>Preview 상태</strong>{% if buildPlanPreview and buildPlanPreview.plan.definitionConnected %}정의 데이터와 빌드 정보를 결합한 Bamboo Preview를 확인할 수 있습니다.{% elif buildPlanPreview %}정의 데이터 없이 기본 메타데이터 기준 Preview를 표시 중입니다.{% else %}Preview를 생성할 수 없습니다.{% endif %}</li>
+      <li><strong>Preview 상태</strong>{% if buildPlanPreview %}등록된 프로젝트, 저장소, 플랜, 빌드 정보 기준 Preview를 표시 중입니다.{% else %}Preview를 생성할 수 없습니다.{% endif %}</li>
     </ul>
   </article>
 </section>

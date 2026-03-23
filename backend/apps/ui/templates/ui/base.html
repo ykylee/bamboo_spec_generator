@@ -45,7 +45,7 @@
           <a class="app-header__nav-link{% if request.resolver_match.url_name == 'project-list' or request.resolver_match.url_name == 'project-detail' or request.resolver_match.url_name == 'project-repository-detail' %} app-header__nav-link--active{% endif %}" href="{% url 'project-list' %}">프로젝트</a>
           <a class="app-header__nav-link{% if request.resolver_match.url_name == 'build-plan-list' or request.resolver_match.url_name == 'project-build-detail' or request.resolver_match.url_name == 'project-build-info-list' or request.resolver_match.url_name == 'project-build-info-detail' %} app-header__nav-link--active{% endif %}" href="{% url 'build-plan-list' %}">빌드 플랜</a>
           <span class="app-header__nav-link app-header__nav-link--muted">실행 이력</span>
-          <span class="app-header__nav-link app-header__nav-link--muted">정적 분석</span>
+          <a class="app-header__nav-link{% if request.resolver_match.url_name == 'coverity-settings' %} app-header__nav-link--active{% endif %}" href="{% url 'coverity-settings' %}">운영 설정</a>
         </nav>
         <div class="app-header__search" data-project-search>
           <label class="app-header__search-label" for="project-nav-search">프로젝트 검색</label>
@@ -126,15 +126,14 @@
             </span>
             <span class="sidebar__nav-text">실행 이력</span>
           </span>
-          <span class="sidebar__nav-item sidebar__nav-item--muted">
+          <a class="sidebar__nav-item{% if request.resolver_match.url_name == 'coverity-settings' %} sidebar__nav-item--active{% else %} sidebar__nav-item--muted{% endif %}" href="{% url 'coverity-settings' %}">
             <span class="sidebar__nav-icon" aria-hidden="true">
               <svg viewBox="0 0 20 20" focusable="false">
-                <path d="M4 14.5 7.5 11 10 13l5-6"/>
-                <path d="M4 16.5h12"/>
+                <path d="M10 3 12 6.5 16 7l-3 3 1 4-4-2.5L6 14l1-4-3-3 4-.5z"/>
               </svg>
             </span>
-            <span class="sidebar__nav-text">정적 분석</span>
-          </span>
+            <span class="sidebar__nav-text">운영 설정</span>
+          </a>
         </nav>
 
         <section class="sidebar__section">

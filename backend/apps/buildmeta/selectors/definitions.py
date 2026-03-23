@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-import copy
-import json
 import sys
 from pathlib import Path
 
 from django.core.exceptions import ObjectDoesNotExist
+from django.utils import timezone
 
 from apps.buildmeta.models import BuildPlan
+from apps.buildmeta.services.system_settings import build_git_clone_url, get_coverity_system_settings
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 if str(REPO_ROOT) not in sys.path:
@@ -19,31 +19,24 @@ from src.bamboo_spec_generator.script_renderer import render_python_launcher_scr
 from src.bamboo_spec_generator.validator import is_no_build_language  # noqa: E402
 
 
-def _resolve_active_definition(plan: BuildPlan):
-    return plan.definitions.filter(is_active=True).order_by("-created_at").first()
-
-
-def _repository_application_link(repository_payload: dict) -> str:
-    application_link = repository_payload.get("applicationLink", "")
-    if isinstance(application_link, str) and application_link.strip():
-        return application_link
-    return "BITBUCKET_SERVER"
-
-
 def get_active_definition_by_plan_key(plan_key: str) -> dict | None:
     try:
-        plan = BuildPlan.objects.prefetch_related("definitions").get(plan_key=plan_key)
+        plan = (
+            BuildPlan.objects.select_related("project_build__project", "project_build__repository")
+            .prefetch_related("build_infos")
+            .get(plan_key=plan_key)
+        )
     except ObjectDoesNotExist:
         return None
-    active_definition = _resolve_active_definition(plan)
-    if active_definition is None:
+    if not hasattr(plan, "project_build"):
         return None
-    payload = dict(active_definition.definition_json)
+    build_info = _resolve_primary_build_info(plan)
+    payload = _build_definition_payload_from_registration(plan=plan, build_info=build_info)
     return {
         "planKey": plan.plan_key,
         "buildId": plan.build_id,
-        "year": active_definition.year,
-        "definitionVersion": active_definition.definition_hash,
+        "year": str(timezone.now().year),
+        "definitionVersion": "",
         "definition": payload,
     }
 
@@ -53,7 +46,6 @@ def get_prepare_context_by_plan_key(plan_key: str) -> dict | None:
         plan = (
             BuildPlan.objects.select_related("project_build__project")
             .prefetch_related("project_build__project__repositories")
-            .prefetch_related("definitions")
             .get(plan_key=plan_key)
         )
     except ObjectDoesNotExist:
@@ -64,14 +56,9 @@ def get_prepare_context_by_plan_key(plan_key: str) -> dict | None:
 
     project_build = plan.project_build
     project = project_build.project
-    active_definition = _resolve_active_definition(plan)
-    definition_payload = active_definition.definition_json if active_definition else {}
-    repository_payload = definition_payload.get("repository", {})
-    repo_slug = repository_payload.get("repoSlug", "")
-    application_link = _repository_application_link(repository_payload)
     repositories = list(project.repositories.all())
+    current_repository = getattr(project_build, "repository", None)
 
-    current_repository = next((repo for repo in repositories if repo.repo_slug == repo_slug), None)
     if current_repository is None:
         current_repository = next((repo for repo in repositories if repo.is_representative), None)
     if current_repository is None and repositories:
@@ -88,8 +75,16 @@ def get_prepare_context_by_plan_key(plan_key: str) -> dict | None:
             "repoSlug": current_repository.repo_slug if current_repository else "",
             "coverityProject": current_repository.coverity_project if current_repository else "",
             "coverityStream": current_repository.coverity_stream if current_repository else "",
-            "applicationLink": application_link,
-            "linkageMode": repository_payload.get("linkageMode", "linked"),
+            "applicationLink": "BITBUCKET_SERVER",
+            "cloneUrl": (
+                build_git_clone_url(
+                    project_key=project.bitbucket_project_key,
+                    repo_slug=current_repository.repo_slug,
+                )
+                if current_repository
+                else ""
+            ),
+            "linkageMode": "linked",
         },
         "projectBuild": {
             "buildName": project_build.build_name,
@@ -103,7 +98,15 @@ def get_prepare_context_by_plan_key(plan_key: str) -> dict | None:
             "JIRA_PROJECT_KEY": project.jira_project_key,
             "BITBUCKET_PROJECT_KEY": project.bitbucket_project_key,
             "BITBUCKET_REPO_SLUG": current_repository.repo_slug if current_repository else "",
-            "BITBUCKET_APPLICATION_LINK": application_link,
+            "BITBUCKET_APPLICATION_LINK": "BITBUCKET_SERVER",
+            "BITBUCKET_CLONE_URL": (
+                build_git_clone_url(
+                    project_key=project.bitbucket_project_key,
+                    repo_slug=current_repository.repo_slug,
+                )
+                if current_repository
+                else ""
+            ),
             "REPRESENTATIVE_REPO_SLUG": project.representative_repo_slug,
             "COVERITY_PROJECT": current_repository.coverity_project if current_repository else "",
             "COVERITY_STREAM": current_repository.coverity_stream if current_repository else "",
@@ -117,7 +120,7 @@ def get_build_plan_preview(plan_key: str) -> dict | None:
     try:
         plan = (
             BuildPlan.objects.select_related("project_build__project", "project_build__repository")
-            .prefetch_related("definitions", "build_infos", "build_infos__executions")
+            .prefetch_related("build_infos", "build_infos__executions")
             .get(plan_key=plan_key)
         )
     except ObjectDoesNotExist:
@@ -126,18 +129,10 @@ def get_build_plan_preview(plan_key: str) -> dict | None:
     if not hasattr(plan, "project_build"):
         return None
 
-    active_definition = _resolve_active_definition(plan)
-    definition_payload = active_definition.definition_json if active_definition else {}
-    repository_payload = definition_payload.get("repository", {})
-    requirements_payload = definition_payload.get("requirements", {})
-    build_payload = definition_payload.get("build", {})
-    static_analysis_payload = build_payload.get("staticAnalysis", {})
-    custom_tool_payload = static_analysis_payload.get("customTool", {})
-    runtime_requirements_payload = build_payload.get("runtimeRequirements", {})
-    post_build_trigger_payload = build_payload.get("postBuildTrigger", {})
     repository = getattr(plan.project_build, "repository", None)
     project = plan.project_build.project
     build_infos = list(plan.build_infos.all().order_by("build_key"))
+    plan_definition = _build_definition_for_plan_summary(plan=plan, build_infos=build_infos)
 
     prepare_job = {
         "jobId": "plan-prepare",
@@ -153,7 +148,7 @@ def get_build_plan_preview(plan_key: str) -> dict | None:
         "coverityStream": "",
         "buildSubPath": "",
         "analysisExcludedFiles": "",
-        "repositorySlug": repository.repo_slug if repository else repository_payload.get("repoSlug", ""),
+        "repositorySlug": repository.repo_slug if repository else "",
         "executionCount": 0,
         "detailUrl": "",
         "taskGroups": [
@@ -181,12 +176,13 @@ def get_build_plan_preview(plan_key: str) -> dict | None:
 
     jobs = []
     for build_info in build_infos:
-        operating_system = build_info.operating_system or requirements_payload.get("os", "")
-        build_command = build_info.build_command or build_payload.get("buildCommand", "")
-        pre_process = build_info.pre_process or build_payload.get("prepareCommand", "")
-        clean_command = build_info.clean_command
-        language = build_info.language or definition_payload.get("language", "")
-        compiler = build_info.compiler or definition_payload.get("compiler", "")
+        build_definition = _build_definition_for_export(plan=plan, build_info=build_info)
+        operating_system = build_definition.requirements.os
+        build_command = build_definition.build.build_command
+        pre_process = build_definition.build.prepare_command
+        clean_command = build_info.clean_command.strip()
+        language = build_definition.language
+        compiler = build_definition.compiler
         has_build_stage = not (
             is_no_build_language(language=language, compiler=compiler)
             and not build_command.strip()
@@ -195,7 +191,7 @@ def get_build_plan_preview(plan_key: str) -> dict | None:
         )
         coverity_stream = build_info.coverity_stream or (repository.coverity_stream if repository else "")
         analysis_excluded_files = build_info.analysis_excluded_files
-        custom_commands = list(custom_tool_payload.get("commands", []))
+        custom_commands = list(build_definition.build.static_analysis.custom_tool_commands)
         rendered_custom_commands = [command.replace("{buildCommand}", build_command) for command in custom_commands]
 
         jobs.append(
@@ -211,9 +207,9 @@ def get_build_plan_preview(plan_key: str) -> dict | None:
                 "cleanCommand": clean_command,
                 "hasBuildStage": has_build_stage,
                 "coverityStream": coverity_stream,
-                "buildSubPath": build_info.build_sub_path or build_payload.get("subPath", "."),
+                "buildSubPath": build_definition.build.sub_path,
                 "analysisExcludedFiles": analysis_excluded_files,
-                "repositorySlug": repository.repo_slug if repository else repository_payload.get("repoSlug", ""),
+                "repositorySlug": repository.repo_slug if repository else "",
                 "executionCount": build_info.executions.count(),
                 "detailUrl": f"/projects/{project.jira_project_key}/builds/{plan.plan_key}/infos/{build_info.build_key}/",
                 "taskGroups": [
@@ -226,7 +222,11 @@ def get_build_plan_preview(plan_key: str) -> dict | None:
                                     {
                                         "name": "Checkout Source",
                                         "type": "checkout",
-                                        "detail": f"{project.bitbucket_project_key}/{repository.repo_slug}" if repository else "Repository 미연결",
+                                        "detail": (
+                                            f"{project.bitbucket_project_key}/{repository.repo_slug}"
+                                            if repository
+                                            else "Repository 미연결"
+                                        ),
                                     },
                                     {
                                         "name": "Pre Process",
@@ -261,7 +261,11 @@ def get_build_plan_preview(plan_key: str) -> dict | None:
                             {
                                 "name": "Checkout Source",
                                 "type": "checkout",
-                                "detail": f"{project.bitbucket_project_key}/{repository.repo_slug}" if repository else "Repository 미연결",
+                                "detail": (
+                                    f"{project.bitbucket_project_key}/{repository.repo_slug}"
+                                    if repository
+                                    else "Repository 미연결"
+                                ),
                             },
                             {
                                 "name": "Coverity Scan",
@@ -284,19 +288,11 @@ def get_build_plan_preview(plan_key: str) -> dict | None:
                 "sourceSummary": [
                     {
                         "label": "OS/언어/컴파일러",
-                        "value": (
-                            "빌드 정보"
-                            if build_info.operating_system or build_info.language or build_info.compiler
-                            else "정의 데이터"
-                        ),
+                        "value": "빌드 정보" if build_info.operating_system or build_info.language or build_info.compiler else "플랜 메타데이터",
                     },
                     {
                         "label": "명령어",
-                        "value": (
-                            "빌드 정보"
-                            if build_info.pre_process or build_info.build_command or build_info.clean_command
-                            else "정의 데이터"
-                        ),
+                        "value": "빌드 정보" if build_info.pre_process or build_info.build_command or build_info.clean_command else "기본값",
                     },
                     {
                         "label": "경로/Stream",
@@ -323,7 +319,7 @@ def get_build_plan_preview(plan_key: str) -> dict | None:
         "coverityStream": "",
         "buildSubPath": "",
         "analysisExcludedFiles": "",
-        "repositorySlug": repository.repo_slug if repository else repository_payload.get("repoSlug", ""),
+        "repositorySlug": repository.repo_slug if repository else "",
         "executionCount": 0,
         "detailUrl": "",
         "taskGroups": [
@@ -334,13 +330,13 @@ def get_build_plan_preview(plan_key: str) -> dict | None:
                     {
                         "name": "Trigger Follow-up",
                         "type": "trigger",
-                        "detail": post_build_trigger_payload.get("targetPlanKey", "") or "미지정",
+                        "detail": plan_definition.build.post_build_trigger.target_plan_key or "미지정",
                     }
                 ],
             }
         ],
         "sourceSummary": [
-            {"label": "트리거", "value": "정의 데이터"},
+            {"label": "트리거", "value": "플랜 메타데이터"},
         ],
     }
 
@@ -413,29 +409,29 @@ def get_build_plan_preview(plan_key: str) -> dict | None:
             "buildName": plan.project_build.build_name,
             "staticAnalysisToolVersion": plan.static_analysis_tool_version,
             "coverityProject": plan.coverity_project,
-            "definitionVersion": active_definition.definition_hash if active_definition else "",
-            "definitionYear": active_definition.year if active_definition else "",
-            "definitionConnected": active_definition is not None,
+            "definitionVersion": "",
+            "definitionYear": "",
+            "definitionConnected": False,
         },
         "repository": {
-            "provider": repository_payload.get("provider", "bitbucket"),
-            "projectKey": repository_payload.get("projectKey", project.bitbucket_project_key),
-            "repoSlug": repository_payload.get("repoSlug", repository.repo_slug if repository else ""),
-            "linkageMode": repository_payload.get("linkageMode", "linked"),
-            "applicationLink": _repository_application_link(repository_payload),
-            "branches": list(repository_payload.get("branches", ["dev", "release", "master"])),
+            "provider": plan_definition.repository.provider,
+            "projectKey": plan_definition.repository.project_key,
+            "repoSlug": plan_definition.repository.repo_slug,
+            "linkageMode": plan_definition.repository.linkage_mode,
+            "applicationLink": plan_definition.repository.application_link or "BITBUCKET_SERVER",
+            "branches": list(plan_definition.repository.branches),
         },
         "requirements": {
-            "extraCapabilities": list(requirements_payload.get("extraCapabilities", [])),
-            "runtimeCommands": list(runtime_requirements_payload.get("commands", [])),
-            "runtimeEnvVars": list(runtime_requirements_payload.get("envVars", [])),
+            "extraCapabilities": list(plan_definition.requirements.extra_capabilities),
+            "runtimeCommands": list(plan_definition.build.runtime_requirements.commands),
+            "runtimeEnvVars": list(plan_definition.build.runtime_requirements.env_vars),
         },
         "stages": stages,
         "jobs": [prepare_job] + jobs + [trigger_job],
         "staticAnalysis": {
-            "customToolCommands": list(custom_tool_payload.get("commands", [])),
-            "postBuildTriggerType": post_build_trigger_payload.get("type", ""),
-            "postBuildTriggerTargetPlanKey": post_build_trigger_payload.get("targetPlanKey", ""),
+            "customToolCommands": list(plan_definition.build.static_analysis.custom_tool_commands),
+            "postBuildTriggerType": plan_definition.build.post_build_trigger.type,
+            "postBuildTriggerTargetPlanKey": plan_definition.build.post_build_trigger.target_plan_key,
         },
     }
 
@@ -444,7 +440,7 @@ def get_build_plan_export_draft(plan_key: str) -> dict | None:
     try:
         plan = (
             BuildPlan.objects.select_related("project_build__project", "project_build__repository")
-            .prefetch_related("definitions", "build_infos")
+            .prefetch_related("build_infos")
             .get(plan_key=plan_key)
         )
     except ObjectDoesNotExist:
@@ -453,62 +449,40 @@ def get_build_plan_export_draft(plan_key: str) -> dict | None:
     if not hasattr(plan, "project_build"):
         return None
 
-    preview = get_build_plan_preview(plan_key)
-    active_definition = _resolve_active_definition(plan)
     files: list[dict] = []
     build_infos = list(plan.build_infos.all().order_by("build_key"))
-
-    files.append(
-        {
-            "path": f"drafts/{plan.plan_key}/plan-preview.json",
-            "label": "Plan Preview JSON",
-            "language": "json",
-            "content": json.dumps(preview or {}, ensure_ascii=False, indent=2) + "\n",
-        }
-    )
+    repository = getattr(plan.project_build, "repository", None)
+    coverity_system_settings = get_coverity_system_settings()
 
     for build_info in build_infos:
-        build_definition = _build_definition_for_export(plan=plan, build_info=build_info, active_definition=active_definition)
+        build_definition = _build_definition_for_export(plan=plan, build_info=build_info)
         has_build_stage = not (
             is_no_build_language(language=build_definition.language, compiler=build_definition.compiler)
             and not build_definition.build.prepare_command.strip()
             and not build_definition.build.build_command.strip()
             and not build_info.clean_command.strip()
         )
-        manifest_payload = {
-            "planKey": plan.plan_key,
-            "buildId": plan.build_id,
-            "jobKey": build_info.build_key,
-            "language": build_definition.language,
-            "compiler": build_definition.compiler,
-            "operatingSystem": build_definition.requirements.os,
-            "hasBuildStage": has_build_stage,
-            "subPath": build_definition.build.sub_path,
-            "prepareCommand": build_definition.build.prepare_command,
-            "buildCommand": build_definition.build.build_command,
-            "cleanCommand": build_info.clean_command,
-            "coverityStream": build_info.coverity_stream,
-            "analysisExcludedFiles": build_info.analysis_excluded_files,
-        }
-        files.append(
-            {
-                "path": f"drafts/{plan.plan_key}/jobs/{build_info.build_key}/manifest.json",
-                "label": f"{build_info.build_key} manifest",
-                "language": "json",
-                "content": json.dumps(manifest_payload, ensure_ascii=False, indent=2) + "\n",
-            }
+        coverity_config = generate_coverity_yaml(
+            build_definition,
+            clean_command=build_info.clean_command,
+            coverity_project=plan.coverity_project or (repository.coverity_project if repository else ""),
+            coverity_stream=build_info.coverity_stream or (repository.coverity_stream if repository else ""),
+            exclude_files_regex=build_info.analysis_excluded_files,
+            connect_url=str(coverity_system_settings["connectUrl"]),
+            on_new_cert=str(coverity_system_settings["onNewCert"]),
+            commit_enabled=bool(coverity_system_settings["commitEnabled"]),
         )
         files.append(
             {
                 "path": f"drafts/{plan.plan_key}/jobs/{build_info.build_key}/coverity.yaml",
-                "label": f"{build_info.build_key} coverity",
+                "label": f"{build_info.build_key} Coverity config",
                 "language": "yaml",
-                "content": generate_coverity_yaml(build_definition),
+                "content": coverity_config,
             }
         )
-        python_scripts = render_python_scripts(build_definition)
-        launcher_scripts = render_python_launcher_scripts(build_definition)
-        script_names = ["prepare_build.py"]
+        python_scripts = render_python_scripts(build_definition, coverity_config=coverity_config)
+        launcher_scripts = render_python_launcher_scripts(build_definition, coverity_config=coverity_config)
+        script_names = ["prepare_build.py", "run_coverity.py", "run_custom_analysis.py", "trigger_follow_up.py"]
         if has_build_stage:
             script_names.append("run_build.py")
         for script_name in script_names:
@@ -521,13 +495,20 @@ def get_build_plan_export_draft(plan_key: str) -> dict | None:
                         "content": python_scripts[script_name],
                     }
                 )
-        launcher_name = "run_build.bat" if build_definition.requirements.os.lower() == "windows" else "run_build.sh"
-        if has_build_stage and launcher_name in launcher_scripts:
+        launcher_task_names = ["prepare_build", "run_coverity", "run_custom_analysis", "trigger_follow_up"]
+        if has_build_stage:
+            launcher_task_names.append("run_build")
+        launcher_extension = ".bat" if build_definition.requirements.os.lower() == "windows" else ".sh"
+        launcher_language = "batch" if launcher_extension == ".bat" else "shell"
+        for task_name in launcher_task_names:
+            launcher_name = f"{task_name}{launcher_extension}"
+            if launcher_name not in launcher_scripts:
+                continue
             files.append(
                 {
                     "path": f"drafts/{plan.plan_key}/jobs/{build_info.build_key}/{launcher_name}",
-                    "label": f"{build_info.build_key} launcher",
-                    "language": "shell" if launcher_name.endswith(".sh") else "batch",
+                    "label": f"{build_info.build_key} {launcher_name}",
+                    "language": launcher_language,
                     "content": launcher_scripts[launcher_name],
                 }
             )
@@ -542,76 +523,132 @@ def get_build_plan_export_draft(plan_key: str) -> dict | None:
     }
 
 
-def _build_definition_for_export(*, plan: BuildPlan, build_info, active_definition):
-    project = plan.project_build.project
-    repository = getattr(plan.project_build, "repository", None)
-    base_payload = _default_definition_payload(plan)
-    if active_definition is not None:
-        base_payload = copy.deepcopy(active_definition.definition_json)
-
-    base_payload["buildId"] = plan.build_id
-    base_payload["name"] = f"{plan.project_build.build_name} {build_info.build_key}".strip()
-    base_payload["planKey"] = plan.plan_key
-    base_payload["language"] = build_info.language or base_payload.get("language", "")
-    base_payload["compiler"] = build_info.compiler or base_payload.get("compiler", "")
-
-    repository_payload = base_payload.setdefault("repository", {})
-    repository_payload["provider"] = repository_payload.get("provider", "bitbucket")
-    repository_payload["projectKey"] = repository_payload.get("projectKey") or project.bitbucket_project_key
-    repository_payload["repoSlug"] = repository_payload.get("repoSlug") or (repository.repo_slug if repository else "")
-    repository_payload["linkageMode"] = repository_payload.get("linkageMode", "linked")
-    repository_payload["applicationLink"] = repository_payload.get("applicationLink") or "BITBUCKET_SERVER"
-    repository_payload["branches"] = list(repository_payload.get("branches", ["dev", "release", "master"]))
-
-    requirements_payload = base_payload.setdefault("requirements", {})
-    requirements_payload["os"] = build_info.operating_system or requirements_payload.get("os", "linux")
-    requirements_payload["extraCapabilities"] = list(requirements_payload.get("extraCapabilities", []))
-
-    build_payload = base_payload.setdefault("build", {})
-    build_payload["subPath"] = build_info.build_sub_path or build_payload.get("subPath", ".")
-    build_payload["prepareCommand"] = build_info.pre_process or build_payload.get("prepareCommand", "")
-    build_payload["buildCommand"] = build_info.build_command or build_payload.get("buildCommand", "")
-    build_payload.setdefault("staticAnalysis", {})
-    build_payload["staticAnalysis"].setdefault("customTool", {})
-    build_payload["staticAnalysis"]["customTool"]["commands"] = list(
-        build_payload["staticAnalysis"]["customTool"].get("commands", [])
+def _build_definition_for_export(*, plan: BuildPlan, build_info):
+    return parse_build_definition_payload(
+        _build_definition_payload_from_registration(plan=plan, build_info=build_info),
+        year=str(timezone.now().year),
     )
-    build_payload.setdefault("runtimeRequirements", {})
-    build_payload["runtimeRequirements"]["commands"] = list(build_payload["runtimeRequirements"].get("commands", []))
-    build_payload["runtimeRequirements"]["envVars"] = list(build_payload["runtimeRequirements"].get("envVars", []))
-    build_payload.setdefault("postBuildTrigger", {})
-    build_payload["postBuildTrigger"]["type"] = build_payload["postBuildTrigger"].get("type", "plan")
-    build_payload["postBuildTrigger"]["targetPlanKey"] = build_payload["postBuildTrigger"].get("targetPlanKey", "")
-
-    year = active_definition.year if active_definition is not None else "2026"
-    return parse_build_definition_payload(base_payload, year=year)
 
 
-def _default_definition_payload(plan: BuildPlan) -> dict:
+def _build_definition_for_plan_summary(*, plan: BuildPlan, build_infos: list):
+    build_info = build_infos[0] if build_infos else None
+    return parse_build_definition_payload(
+        _build_definition_payload_from_registration(plan=plan, build_info=build_info),
+        year=str(timezone.now().year),
+    )
+
+
+def _build_definition_payload_from_registration(*, plan: BuildPlan, build_info) -> dict:
     project = plan.project_build.project
     repository = getattr(plan.project_build, "repository", None)
+    language, compiler = _resolve_language_and_compiler(plan=plan, build_info=build_info)
+    operating_system = _normalize_operating_system(getattr(build_info, "operating_system", ""))
+    build_key = getattr(build_info, "build_key", "").strip()
+    build_name = plan.project_build.build_name
     return {
         "buildId": plan.build_id,
-        "name": plan.project_build.build_name,
+        "name": f"{build_name} {build_key}".strip() if build_key else build_name,
         "planKey": plan.plan_key,
-        "description": plan.project_build.build_name,
-        "language": plan.project_build.runtime_stack or "",
-        "compiler": plan.project_build.build_type or "",
+        "description": build_name,
+        "language": language,
+        "compiler": compiler,
         "repository": {
             "provider": "bitbucket",
             "projectKey": project.bitbucket_project_key,
             "repoSlug": repository.repo_slug if repository else "",
             "linkageMode": "linked",
             "applicationLink": "BITBUCKET_SERVER",
+            "cloneUrl": (
+                build_git_clone_url(
+                    project_key=project.bitbucket_project_key,
+                    repo_slug=repository.repo_slug,
+                )
+                if repository
+                else ""
+            ),
             "branches": ["dev", "release", "master"],
         },
-        "requirements": {"os": "linux", "extraCapabilities": []},
+        "requirements": {"os": operating_system, "extraCapabilities": []},
         "build": {
-            "subPath": ".",
-            "prepareCommand": "",
-            "buildCommand": "",
-            "staticAnalysis": {"customTool": {"commands": []}},
-            "runtimeRequirements": {"commands": [], "envVars": []},
+            "subPath": _normalize_build_sub_path(getattr(build_info, "build_sub_path", "")),
+            "prepareCommand": getattr(build_info, "pre_process", "").strip(),
+            "buildCommand": getattr(build_info, "build_command", "").strip(),
+            "staticAnalysis": {"customTool": {"commands": _default_custom_tool_commands()}},
+            "runtimeRequirements": {
+                "commands": _default_runtime_commands(language=language, compiler=compiler),
+                "envVars": _default_runtime_env_vars(language=language, compiler=compiler),
+            },
             "postBuildTrigger": {"type": "plan", "targetPlanKey": ""},
         },
     }
+
+
+def _resolve_primary_build_info(plan: BuildPlan):
+    build_infos = list(plan.build_infos.all().order_by("build_key"))
+    if build_infos:
+        return build_infos[0]
+    return None
+
+
+def _resolve_language_and_compiler(*, plan: BuildPlan, build_info) -> tuple[str, str]:
+    explicit_language = getattr(build_info, "language", "").strip()
+    explicit_compiler = getattr(build_info, "compiler", "").strip()
+    if explicit_language and explicit_compiler:
+        return explicit_language, explicit_compiler
+
+    build_type = (plan.project_build.build_type or "").strip().lower()
+    runtime_stack = (plan.project_build.runtime_stack or "").strip().lower()
+    inferred_language = explicit_language
+    inferred_compiler = explicit_compiler
+
+    if not inferred_language or not inferred_compiler:
+        if build_type in {"maven", "java"} or "java" in runtime_stack:
+            inferred_language = inferred_language or "java"
+            inferred_compiler = inferred_compiler or "maven"
+        elif build_type in {"node", "javascript", "typescript"} or "node" in runtime_stack:
+            inferred_language = inferred_language or "javascript"
+            inferred_compiler = inferred_compiler or "node.js"
+        elif build_type == "python" or "python" in runtime_stack:
+            inferred_language = inferred_language or "python"
+            inferred_compiler = inferred_compiler or "python"
+        else:
+            inferred_language = inferred_language or plan.project_build.runtime_stack or ""
+            inferred_compiler = inferred_compiler or plan.project_build.build_type or ""
+
+    return inferred_language, inferred_compiler
+
+
+def _normalize_operating_system(value: str) -> str:
+    normalized = (value or "").strip().lower()
+    return normalized or "linux"
+
+
+def _normalize_build_sub_path(value: str) -> str:
+    normalized = (value or "").strip()
+    return normalized or "."
+
+
+def _default_custom_tool_commands() -> list[str]:
+    return ["custom-tool analyze {buildCommand}"]
+
+
+def _default_runtime_commands(*, language: str, compiler: str) -> list[str]:
+    normalized_language = (language or "").strip().lower()
+    normalized_compiler = (compiler or "").strip().lower()
+    if normalized_compiler == "maven" or normalized_language == "java":
+        return ["mvn", "coverity"]
+    if normalized_compiler == "node.js" or normalized_language in {"javascript", "typescript"}:
+        return ["node", "coverity"]
+    if normalized_compiler == "python" or normalized_language == "python":
+        return ["python", "coverity"]
+    return ["coverity"]
+
+
+def _default_runtime_env_vars(*, language: str, compiler: str) -> list[str]:
+    normalized_language = (language or "").strip().lower()
+    normalized_compiler = (compiler or "").strip().lower()
+    if normalized_compiler == "maven" or normalized_language == "java":
+        return ["JAVA_HOME"]
+    if normalized_compiler == "python" or normalized_language == "python":
+        return ["PYTHONPATH"]
+    return ["PATH"]

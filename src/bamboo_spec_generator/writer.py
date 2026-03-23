@@ -323,6 +323,7 @@ def _generate_scripts_bundle_summary(build: BuildDefinition, manifest_text: str)
         f"repository.linkedRepositoryName={manifest['repository']['linkedRepositoryName']}",
         f"repository.linkageMode={manifest['repository']['linkageMode']}",
         f"repository.applicationLink={manifest['repository']['applicationLink']}",
+        f"repository.cloneUrl={manifest['repository'].get('cloneUrl', '')}",
         f"repository.branches={','.join(manifest['repository']['branches'])}",
         f"repository.branchTriggerPolicy={','.join(_format_branch_trigger_policy_entries(manifest['repository']['branches']))}",
         f"repository.branchMatchingPattern={manifest['repository']['branchMatchingPattern']}",
@@ -422,6 +423,7 @@ def _build_repository_link_entry(build: BuildDefinition) -> dict[str, Any]:
         "linkedRepositoryName": f"{build.repository.project_key}/{build.repository.repo_slug}",
         "linkageMode": build.repository.linkage_mode,
         "applicationLink": _repository_application_link(build),
+        "cloneUrl": build.repository.clone_url or "",
         "branches": list(build.repository.branches),
         "branchTriggerPolicy": [
             {
@@ -456,6 +458,7 @@ def _generate_repository_links_summary(repository_links_text: str) -> str:
                 f"repository.linkedRepositoryName={entry['linkedRepositoryName']}",
                 f"repository.linkageMode={entry['linkageMode']}",
                 f"repository.applicationLink={entry['applicationLink']}",
+                f"repository.cloneUrl={entry.get('cloneUrl', '')}",
                 f"repository.branches={','.join(entry['branches'])}",
                 f"repository.branchTriggerPolicy={','.join(_format_branch_trigger_policy_entries(entry['branches']))}",
                 f"repository.branchMatchingPattern={entry['branchMatchingPattern']}",

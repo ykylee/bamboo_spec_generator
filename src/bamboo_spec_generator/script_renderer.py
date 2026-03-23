@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+from .coverity import generate_coverity_yaml
 from .model import BuildDefinition
 from .script_assets import load_python_script_assets
 
@@ -19,19 +20,33 @@ class ScriptRenderContext:
     replacements: dict[str, str]
 
 
-def render_python_scripts(build: BuildDefinition, prepare_context: dict | None = None) -> dict[str, str]:
+def render_python_scripts(
+    build: BuildDefinition,
+    prepare_context: dict | None = None,
+    coverity_config: str | None = None,
+) -> dict[str, str]:
     assets = load_python_script_assets(build)
-    context = ScriptRenderContext(replacements=_build_replacements(build, prepare_context=prepare_context))
+    context = ScriptRenderContext(
+        replacements=_build_replacements(build, prepare_context=prepare_context, coverity_config=coverity_config)
+    )
     return {script_name: _render_template(template, context.replacements) for script_name, template in assets.items()}
 
 
-def render_python_launcher_scripts(build: BuildDefinition, prepare_context: dict | None = None) -> dict[str, str]:
+def render_python_launcher_scripts(
+    build: BuildDefinition,
+    prepare_context: dict | None = None,
+    coverity_config: str | None = None,
+) -> dict[str, str]:
     extension = _launcher_extension(build)
     replacements = {
         "{{PYTHON_COMMAND}}": _python_command(build),
     }
     rendered: dict[str, str] = {}
-    for script_name in render_python_scripts(build, prepare_context=prepare_context):
+    for script_name in render_python_scripts(
+        build,
+        prepare_context=prepare_context,
+        coverity_config=coverity_config,
+    ):
         template = _read_launcher_template(build, script_name.removesuffix(".py"))
         launcher_name = script_name.removesuffix(".py") + extension
         rendered[launcher_name] = _render_template(
@@ -91,41 +106,19 @@ def _render_custom_tool_commands(build: BuildDefinition) -> list[str]:
     return rendered
 
 
-def _generate_coverity_yaml(build: BuildDefinition) -> str:
-    coverity_language = _coverity_language(build.language)
-    return (
-        "capture:\n"
-        "  build:\n"
-        f'    build-command: "{_escape_yaml(build.build.build_command)}"\n'
-        "  languages:\n"
-        "    include:\n"
-        f"      - {coverity_language}\n"
-    )
-
-
-def _coverity_language(language: str) -> str:
-    mapping = {
-        "java": "java",
-        "nodejs": "javascript",
-        "node.js": "javascript",
-        "javascript": "javascript",
-        "python": "python",
-    }
-    return mapping.get(language.lower(), language.lower())
-
-
-def _escape_yaml(value: str) -> str:
-    return value.replace("\\", "\\\\").replace('"', '\\"')
-
-
-def _build_replacements(build: BuildDefinition, *, prepare_context: dict | None = None) -> dict[str, str]:
+def _build_replacements(
+    build: BuildDefinition,
+    *,
+    prepare_context: dict | None = None,
+    coverity_config: str | None = None,
+) -> dict[str, str]:
     return {
         "{{SUB_PATH}}": repr(build.build.sub_path),
         "{{PLAN_KEY}}": repr(build.plan_key),
         "{{PREPARE_COMMAND}}": repr(build.build.prepare_command),
         "{{PREPARE_CONTEXT_EXPORTS}}": _prepare_context_exports(prepare_context),
         "{{BUILD_COMMAND}}": repr(build.build.build_command),
-        "{{COVERITY_CONFIG}}": repr(_generate_coverity_yaml(build)),
+        "{{COVERITY_CONFIG}}": repr(coverity_config if coverity_config is not None else generate_coverity_yaml(build)),
         "{{CUSTOM_TOOL_COMMANDS}}": _format_commands(_render_custom_tool_commands(build)),
         "{{TARGET_PLAN_KEY}}": repr(build.build.post_build_trigger.target_plan_key),
         "{{COMPILER_ENV_VAR}}": repr(_compiler_env_var(build.compiler)),

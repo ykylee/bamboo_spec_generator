@@ -344,11 +344,9 @@ class GeneratorFlowTest(unittest.TestCase):
             self.assertIn('private static final String REPOSITORY_BRANCH_MATCHING_PATTERN = "^(dev|release|master)$";', mfc_plan)
             self.assertIn("// Branch trigger policy: dev(order=1, enabled=true), release(order=2, enabled=true), master(order=3, enabled=true)", mfc_plan)
             self.assertIn('private static final String BITBUCKET_APPLICATION_LINK = "BITBUCKET_SERVER";', mfc_plan)
-            self.assertIn(".repositoryBranches(repositoryBranches())", mfc_plan)
             self.assertIn(".planBranchManagement(planBranchManagement())", mfc_plan)
             self.assertIn(".triggers(repositoryTrigger())", mfc_plan)
             self.assertIn(".linkedRepositories(LINKED_REPOSITORY)", mfc_plan)
-            self.assertIn('new VcsRepositoryBranch(LINKED_REPOSITORY, "dev").branchDisplayName("dev")', mfc_plan)
             self.assertIn('new PlanBranchManagement()', mfc_plan)
             self.assertIn('.createForVcsBranchMatching(REPOSITORY_BRANCH_MATCHING_PATTERN);', mfc_plan)
             self.assertIn('private BitbucketServerTrigger repositoryTrigger() {', mfc_plan)
@@ -432,17 +430,16 @@ class GeneratorFlowTest(unittest.TestCase):
             )
             self.assertIn('private static final String REPOSITORY_BRANCH_MATCHING_PATTERN = "^(release|dev|master)$";', plan_java)
             self.assertIn('private static final String BITBUCKET_APPLICATION_LINK = "BITBUCKET_DC";', plan_java)
-            self.assertIn('new VcsRepositoryBranch(LINKED_REPOSITORY, "release").branchDisplayName("release")', plan_java)
             self.assertIn('.createForVcsBranchMatching(REPOSITORY_BRANCH_MATCHING_PATTERN);', plan_java)
             self.assertIn(".triggers(repositoryTrigger())", plan_java)
-            self.assertIn(".planRepositories(createPlanRepository())", plan_java)
-            self.assertIn("private BitbucketServerRepository createPlanRepository() {", plan_java)
+            self.assertIn(".planRepositories(createBitbucketPlanRepository())", plan_java)
+            self.assertIn("private BitbucketServerRepository createBitbucketPlanRepository() {", plan_java)
             self.assertIn('.server(new ApplicationLink().name(BITBUCKET_APPLICATION_LINK))', plan_java)
             self.assertIn('.projectKey("SAMPLE")', plan_java)
             self.assertIn('.repositorySlug("sample-app-api")', plan_java)
             self.assertIn('.branch("release");', plan_java)
 
-    def test_create_if_missing_requires_application_link(self) -> None:
+    def test_create_if_missing_supports_git_clone_url_fallback(self) -> None:
         build = parse_build_definition(Path("build_info_json/2026/sample-app-api.json"))
         build = replace(
             build,
@@ -450,13 +447,50 @@ class GeneratorFlowTest(unittest.TestCase):
                 build.repository,
                 linkage_mode="create_if_missing",
                 application_link=None,
+                clone_url="https://git.example.com/scm/sample/sample-app-api.git",
+            ),
+        )
+
+        validate_build_definitions([build])
+
+        with TemporaryDirectory() as temp_dir:
+            output_root = Path(temp_dir) / "bamboo-specs"
+            write_specs_project(output_root, [build])
+            plan_java = (
+                output_root
+                / "src"
+                / "main"
+                / "java"
+                / "com"
+                / "example"
+                / "specs"
+                / "generated"
+                / "SampleAppApiPlanSpecs.java"
+            ).read_text(encoding="utf-8")
+            manifest = json.loads((output_root / "scripts" / "sample-app-api" / "manifest.json").read_text(encoding="utf-8"))
+
+            self.assertIn('private static final String GIT_CLONE_URL = "https://git.example.com/scm/sample/sample-app-api.git";', plan_java)
+            self.assertIn(".planRepositories(createGitPlanRepository())", plan_java)
+            self.assertIn("private GitRepository createGitPlanRepository() {", plan_java)
+            self.assertIn('.url(GIT_CLONE_URL)', plan_java)
+            self.assertEqual("https://git.example.com/scm/sample/sample-app-api.git", manifest["repository"]["cloneUrl"])
+
+    def test_create_if_missing_requires_application_link_or_clone_url(self) -> None:
+        build = parse_build_definition(Path("build_info_json/2026/sample-app-api.json"))
+        build = replace(
+            build,
+            repository=replace(
+                build.repository,
+                linkage_mode="create_if_missing",
+                application_link=None,
+                clone_url=None,
             ),
         )
 
         with self.assertRaises(ValidationError) as context:
             validate_build_definitions([build])
 
-        self.assertIn("repository.applicationLink", str(context.exception))
+        self.assertIn("repository.applicationLink or repository.cloneUrl", str(context.exception))
 
     def test_compare_report_detects_changed_bundle_on_regeneration(self) -> None:
         input_root = Path("build_info_json")

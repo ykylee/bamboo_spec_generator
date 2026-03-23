@@ -11,12 +11,22 @@ from apps.buildmeta.selectors.executions import (
     list_latest_failed_builds,
 )
 from apps.buildmeta.selectors.projects import get_project_detail, list_project_summaries
-from apps.buildmeta.services import create_project, update_build_plan_metadata, update_project, upsert_build_info
+from apps.buildmeta.services import (
+    create_project,
+    get_coverity_system_settings,
+    initialize_specs_draft_data,
+    initialize_specs_draft_for_plan,
+    set_system_setting,
+    update_build_plan_metadata,
+    update_project,
+    upsert_build_info,
+)
 
 from .forms import (
     BuildMetadataForm,
     BuildInfoMetadataForm,
     BuildPlanMetadataForm,
+    CoveritySystemSettingsForm,
     ProjectMetadataForm,
     ProjectRegistrationForm,
     RepositoryMetadataForm,
@@ -140,6 +150,62 @@ def build_plan_list(request):
     return render(request, "ui/build_plan_list.html", context)
 
 
+def coverity_settings(request):
+    settings_payload = get_coverity_system_settings()
+    form = CoveritySystemSettingsForm(
+        initial={
+                "connect_url": settings_payload["connectUrl"],
+                "on_new_cert": settings_payload["onNewCert"],
+                "commit_enabled": settings_payload["commitEnabled"],
+                "git_clone_url_template": settings_payload["gitCloneUrlTemplate"],
+            }
+        )
+    message = ""
+    error = ""
+    init_summary = None
+
+    if request.method == "POST":
+        form_kind = request.POST.get("form_kind", "").strip()
+        if form_kind == "coverity_settings":
+            form = CoveritySystemSettingsForm(request.POST)
+            if form.is_valid():
+                set_system_setting(
+                    key="coverity.connect.url",
+                    value=form.cleaned_data["connect_url"].strip(),
+                    description="Coverity Connect URL",
+                )
+                set_system_setting(
+                    key="coverity.connect.on_new_cert",
+                    value=form.cleaned_data["on_new_cert"].strip() or "trust",
+                    description="Coverity on-new-cert policy",
+                )
+                set_system_setting(
+                    key="coverity.commit.enabled",
+                    value="true" if form.cleaned_data["commit_enabled"] else "false",
+                    description="Coverity commit enabled flag",
+                )
+                set_system_setting(
+                    key="repository.git.clone_url_template",
+                    value=form.cleaned_data["git_clone_url_template"].strip(),
+                    description="Git clone URL template",
+                )
+                message = "Coverity 운영 설정을 저장했습니다."
+            else:
+                error = "Coverity 설정 입력값을 다시 확인해 주세요."
+        elif form_kind == "init_specs_drafts":
+            init_summary = initialize_specs_draft_data(reset_existing=True)
+            message = "등록된 샘플의 Specs 초안 데이터를 현재 기준으로 다시 초기화했습니다."
+
+    context = {
+        "form": form,
+        "message": message,
+        "error": error,
+        "initSummary": init_summary,
+        "navProjectSearchItems": _build_nav_project_search_items(list_project_summaries()),
+    }
+    return render(request, "ui/coverity_settings.html", context)
+
+
 def project_detail(request, jira_project_key: str):
     project = get_project_detail(jira_project_key)
     if project is None:
@@ -255,6 +321,8 @@ def project_build_detail(request, jira_project_key: str, plan_key: str):
     build_info_form = BuildInfoMetadataForm()
     metadata_error = ""
     build_info_error = ""
+    draft_refresh_message = ""
+    draft_refresh_error = ""
     metadata_open = request.GET.get("edit", "").lower() in {"1", "true", "open"}
     build_info_open = request.GET.get("add_build_info", "").lower() in {"1", "true", "open"}
 
@@ -290,6 +358,12 @@ def project_build_detail(request, jira_project_key: str, plan_key: str):
                 )
                 return redirect("project-build-detail", jira_project_key=jira_project_key, plan_key=plan_key)
             build_info_error = "빌드 정보 입력값을 다시 확인해 주세요."
+        elif form_kind == "refresh_specs_draft":
+            refresh_summary = initialize_specs_draft_for_plan(plan_key=plan_key, reset_existing=False)
+            if refresh_summary["initializedCount"] or refresh_summary["updatedCount"]:
+                draft_refresh_message = "이 플랜의 Specs 초안 데이터를 현재 기준으로 다시 채웠습니다."
+            else:
+                draft_refresh_error = "다시 채울 초안 데이터가 없어 기존 상태를 유지했습니다."
 
     project = get_project_detail(jira_project_key)
     if project is None:
@@ -316,6 +390,8 @@ def project_build_detail(request, jira_project_key: str, plan_key: str):
         "buildInfoEntries": _list_build_info_entries(plan_key),
         "buildPlanExportDraft": get_build_plan_export_draft(plan_key),
         "buildPlanPreview": get_build_plan_preview(plan_key),
+        "draftRefreshMessage": draft_refresh_message,
+        "draftRefreshError": draft_refresh_error,
         "registrationSuggestions": _build_registration_suggestions(),
         "navProjectSearchItems": _build_nav_project_search_items(list_project_summaries()),
     }

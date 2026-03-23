@@ -9,6 +9,7 @@ from .core import (
     ProjectBuild,
     ProjectRepository,
     StaticAnalysisResult,
+    SystemSetting,
 )
 
 __all__ = [
@@ -22,4 +23,5 @@ __all__ = [
     "ProjectBuild",
     "ProjectRepository",
     "StaticAnalysisResult",
+    "SystemSetting",
 ]
