@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
+import os
 
 from apps.buildmeta.models import SystemSetting
 
@@ -31,6 +32,13 @@ def get_coverity_system_settings() -> dict[str, str | bool]:
         "commitEnabled": commit_enabled in {"1", "true", "yes", "on"},
         "gitCloneUrlTemplate": get_system_setting(SystemSetting.KEY_GIT_CLONE_URL_TEMPLATE),
         "repositoryLinkageMode": get_repository_linkage_mode(),
+    }
+
+
+def get_bamboo_system_settings() -> dict[str, str | bool]:
+    return {
+        "serverUrl": get_system_setting(SystemSetting.KEY_BAMBOO_SERVER_URL).strip(),
+        "tokenConfigured": bool(os.environ.get("BAMBOO_SERVER_TOKEN", "").strip()),
     }
 
 

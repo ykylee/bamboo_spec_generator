@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from django.test import TestCase
+from unittest.mock import patch
 
 from apps.buildmeta.models import (
     BuildExecution,
@@ -215,9 +216,10 @@ class ProjectViewTest(TestCase):
         response = self.client.get("/settings/coverity/")
 
         self.assertEqual(200, response.status_code)
-        self.assertContains(response, "Coverity 운영 설정")
+        self.assertContains(response, "운영 설정")
         self.assertContains(response, "샘플 Draft 재초기화")
         self.assertContains(response, "Repository Linkage Mode")
+        self.assertContains(response, "Bamboo Server URL")
 
     def test_coverity_settings_page_updates_settings(self) -> None:
         response = self.client.post(
@@ -229,11 +231,12 @@ class ProjectViewTest(TestCase):
                 "commit_enabled": "on",
                 "repository_linkage_mode": "create_if_missing",
                 "git_clone_url_template": "https://git.example.com/scm/{project_key_lower}/{repo_slug}.git",
+                "bamboo_server_url": "https://bamboo.example.com",
             },
         )
 
         self.assertEqual(200, response.status_code)
-        self.assertContains(response, "Coverity 운영 설정을 저장했습니다.")
+        self.assertContains(response, "운영 설정을 저장했습니다.")
         self.assertEqual("https://coverity.example.com", SystemSetting.objects.get(key="coverity.connect.url").value)
         self.assertEqual(
             "https://git.example.com/scm/{project_key_lower}/{repo_slug}.git",
@@ -242,6 +245,10 @@ class ProjectViewTest(TestCase):
         self.assertEqual(
             "create_if_missing",
             SystemSetting.objects.get(key="repository.linkage_mode").value,
+        )
+        self.assertEqual(
+            "https://bamboo.example.com",
+            SystemSetting.objects.get(key="bamboo.server.url").value,
         )
 
     def test_coverity_settings_page_initializes_specs_drafts(self) -> None:
@@ -811,7 +818,14 @@ class ProjectViewTest(TestCase):
         self.assertEqual("/projects/SAMPLE/builds/SAMPWEB/", response["Location"])
         self.assertTrue(ProjectBuild.objects.filter(project=self.project, build_plan__plan_key="SAMPWEB").exists())
 
-    def test_project_build_detail_renders_build_metadata(self) -> None:
+    @patch("apps.ui.views.get_bamboo_plan_status")
+    def test_project_build_detail_renders_build_metadata(self, bamboo_status_mock) -> None:
+        bamboo_status_mock.return_value = {
+            "configured": False,
+            "exists": False,
+            "message": "Bamboo 서버 URL이 아직 설정되지 않았습니다.",
+            "fullPlanKey": "SAMPLE-SAMPAPI",
+        }
         BuildPlanBuildInfo.objects.create(
             build_plan=BuildPlan.objects.get(plan_key="SAMPAPI"),
             build_key="api-linux",
@@ -836,12 +850,94 @@ class ProjectViewTest(TestCase):
         self.assertContains(response, "Post Process")
         self.assertContains(response, "Specs Export 초안")
         self.assertContains(response, "Specs 초안 다시 채우기")
+        self.assertContains(response, "실제 Bamboo 연동")
+        self.assertContains(response, "실제 Bamboo Plan 보기")
         self.assertContains(response, "drafts/SAMPAPI/jobs/api-linux/coverity.yaml")
         self.assertNotContains(response, "plan-preview.json")
         self.assertContains(response, "linux")
         self.assertContains(response, 'data-preview-stage', html=False)
         self.assertContains(response, 'data-job-select', html=False)
         self.assertContains(response, 'data-job-panel', html=False)
+
+    @patch("apps.ui.views.get_bamboo_plan_status")
+    @patch("apps.ui.views.publish_bamboo_specs")
+    def test_project_build_detail_publishes_bamboo_specs(self, publish_mock, bamboo_status_mock) -> None:
+        publish_mock.return_value = {
+            "success": True,
+            "message": "Bamboo Specs publish가 완료되었습니다.",
+            "output": "",
+        }
+        bamboo_status_mock.return_value = {
+            "configured": True,
+            "exists": True,
+            "message": "Bamboo에 등록되어 있습니다.",
+            "fullPlanKey": "SAMPLE-SAMPAPI",
+        }
+
+        response = self.client.post(
+            "/projects/SAMPLE/builds/SAMPAPI/",
+            data={"form_kind": "bamboo_publish"},
+        )
+
+        self.assertEqual(200, response.status_code)
+        publish_mock.assert_called_once_with("SAMPAPI")
+        self.assertContains(response, "Bamboo Specs publish가 완료되었습니다.")
+
+    @patch("apps.ui.views.get_bamboo_plan_status")
+    @patch("apps.ui.views.queue_bamboo_plan")
+    def test_project_build_detail_queues_bamboo_plan(self, queue_mock, bamboo_status_mock) -> None:
+        queue_mock.return_value = {
+            "message": "Bamboo plan 실행을 요청했습니다.",
+            "fullPlanKey": "SAMPLE-SAMPAPI",
+        }
+        bamboo_status_mock.return_value = {
+            "configured": True,
+            "exists": True,
+            "message": "Bamboo에 등록되어 있습니다.",
+            "fullPlanKey": "SAMPLE-SAMPAPI",
+        }
+
+        response = self.client.post(
+            "/projects/SAMPLE/builds/SAMPAPI/",
+            data={"form_kind": "bamboo_run"},
+        )
+
+        self.assertEqual(200, response.status_code)
+        queue_mock.assert_called_once_with("SAMPAPI")
+        self.assertContains(response, "Bamboo plan 실행을 요청했습니다.")
+
+    @patch("apps.ui.views.get_bamboo_plan_details")
+    def test_project_bamboo_plan_detail_renders_live_plan(self, plan_details_mock) -> None:
+        plan_details_mock.return_value = {
+            "projectKey": "SAMPLE",
+            "planKey": "SAMPAPI",
+            "fullPlanKey": "SAMPLE-SAMPAPI",
+            "planUrl": "https://bamboo.example.com/browse/SAMPLE-SAMPAPI",
+            "summary": {
+                "shortName": "Sample API",
+                "description": "sample plan",
+                "enabled": True,
+                "building": False,
+            },
+            "stages": [
+                {
+                    "name": "Build",
+                    "description": "build stage",
+                    "jobs": [{"key": "JOB1", "name": "Build Job"}],
+                }
+            ],
+            "branches": [{"name": "dev", "key": "SAMPLE-SAMPAPI0"}],
+            "actions": [],
+            "variables": [{"key": "sample", "value": "value"}],
+        }
+
+        response = self.client.get("/projects/SAMPLE/builds/SAMPAPI/bamboo/")
+
+        self.assertEqual(200, response.status_code)
+        self.assertContains(response, "실제 Bamboo Plan")
+        self.assertContains(response, "SAMPLE-SAMPAPI")
+        self.assertContains(response, "Build Job")
+        self.assertContains(response, "sample")
 
     def test_project_build_detail_updates_build_plan_metadata(self) -> None:
         response = self.client.post(

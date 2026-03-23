@@ -205,6 +205,8 @@ class GeneratorFlowTest(unittest.TestCase):
             self.assertTrue(repository_links_path.exists())
             self.assertTrue(repository_links_summary_path.exists())
             self.assertIn("mvn -B dependency:go-offline", rendered_api_script_path.read_text(encoding="utf-8"))
+            self.assertIn("BUILD_KEY =", rendered_api_script_path.read_text(encoding="utf-8"))
+            self.assertIn('"buildKey": BUILD_KEY', rendered_api_script_path.read_text(encoding="utf-8"))
             self.assertIn('echo "[prepare] launching prepare_build.py"', rendered_api_launcher_path.read_text(encoding="utf-8"))
             self.assertIn('exec python3 "$SCRIPT_DIR/prepare_build.py" "$@"', rendered_api_launcher_path.read_text(encoding="utf-8"))
             bundle_readme = rendered_api_bundle_readme_path.read_text(encoding="utf-8")

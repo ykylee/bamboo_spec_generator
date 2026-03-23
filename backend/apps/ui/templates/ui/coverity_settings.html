@@ -1,14 +1,14 @@
 {% extends "ui/base.html" %}
 
-{% block title %}Coverity Settings | Bamboo Spec Generator{% endblock %}
-{% block page_heading %}Coverity 운영 설정{% endblock %}
+{% block title %}운영 설정 | Bamboo Spec Generator{% endblock %}
+{% block page_heading %}운영 설정{% endblock %}
 
 {% block content %}
 <section class="signal-hero signal-hero--workspace">
   <div class="signal-hero__content">
     <p class="signal-hero__eyebrow">System Settings</p>
-    <h1 class="hero__title">Coverity 운영 설정</h1>
-    <p class="signal-hero__body">Coverity 공통값과 Git clone URL 템플릿 같은 시스템 운영 설정을 관리합니다. 이 값은 Specs Export 초안과 Bamboo 저장소 연결 fallback에 사용됩니다.</p>
+    <h1 class="hero__title">운영 설정</h1>
+    <p class="signal-hero__body">Coverity 공통값, Git clone URL 템플릿, Bamboo 서버 URL 같은 운영 설정을 관리합니다. Bamboo 토큰은 보안상 서버 환경 변수로만 읽습니다.</p>
   </div>
 </section>
 
@@ -47,11 +47,18 @@
           <span class="project-form__label">Git Clone URL Template</span>
           {{ form.git_clone_url_template }}
         </label>
+        <label class="project-form__field project-form__field--span-3">
+          <span class="project-form__label">Bamboo Server URL</span>
+          {{ form.bamboo_server_url }}
+        </label>
       </div>
       <div class="project-form__actions">
         <button class="action-button" type="submit">설정 저장</button>
       </div>
     </form>
+    <ul class="meta-list">
+      <li><strong>Bamboo Token</strong>{% if bambooSettings.tokenConfigured %}서버 환경 변수 설정됨{% else %}서버 환경 변수 누락{% endif %}</li>
+    </ul>
   </article>
 
   <article class="panel panel--signal-list">

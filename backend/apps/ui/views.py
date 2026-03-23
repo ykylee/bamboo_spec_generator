@@ -12,10 +12,16 @@ from apps.buildmeta.selectors.executions import (
 )
 from apps.buildmeta.selectors.projects import get_project_detail, list_project_summaries
 from apps.buildmeta.services import (
+    BambooOperationError,
     create_project,
+    get_bamboo_plan_details,
+    get_bamboo_plan_status,
+    get_bamboo_system_settings,
     get_coverity_system_settings,
     initialize_specs_draft_data,
     initialize_specs_draft_for_plan,
+    publish_bamboo_specs,
+    queue_bamboo_plan,
     set_system_setting,
     update_build_plan_metadata,
     update_project,
@@ -152,6 +158,7 @@ def build_plan_list(request):
 
 def coverity_settings(request):
     settings_payload = get_coverity_system_settings()
+    bamboo_settings = get_bamboo_system_settings()
     form = CoveritySystemSettingsForm(
         initial={
                 "connect_url": settings_payload["connectUrl"],
@@ -159,6 +166,7 @@ def coverity_settings(request):
                 "commit_enabled": settings_payload["commitEnabled"],
                 "repository_linkage_mode": settings_payload["repositoryLinkageMode"],
                 "git_clone_url_template": settings_payload["gitCloneUrlTemplate"],
+                "bamboo_server_url": bamboo_settings["serverUrl"],
             }
         )
     message = ""
@@ -195,7 +203,12 @@ def coverity_settings(request):
                     value=form.cleaned_data["repository_linkage_mode"].strip() or "linked",
                     description="Repository linkage mode",
                 )
-                message = "Coverity 운영 설정을 저장했습니다."
+                set_system_setting(
+                    key="bamboo.server.url",
+                    value=form.cleaned_data["bamboo_server_url"].strip(),
+                    description="Bamboo server URL",
+                )
+                message = "운영 설정을 저장했습니다."
             else:
                 error = "Coverity 설정 입력값을 다시 확인해 주세요."
         elif form_kind == "init_specs_drafts":
@@ -207,6 +220,7 @@ def coverity_settings(request):
         "message": message,
         "error": error,
         "initSummary": init_summary,
+        "bambooSettings": get_bamboo_system_settings(),
         "navProjectSearchItems": _build_nav_project_search_items(list_project_summaries()),
     }
     return render(request, "ui/coverity_settings.html", context)
@@ -329,6 +343,8 @@ def project_build_detail(request, jira_project_key: str, plan_key: str):
     build_info_error = ""
     draft_refresh_message = ""
     draft_refresh_error = ""
+    bamboo_message = ""
+    bamboo_error = ""
     metadata_open = request.GET.get("edit", "").lower() in {"1", "true", "open"}
     build_info_open = request.GET.get("add_build_info", "").lower() in {"1", "true", "open"}
 
@@ -370,6 +386,23 @@ def project_build_detail(request, jira_project_key: str, plan_key: str):
                 draft_refresh_message = "이 플랜의 Specs 초안 데이터를 현재 기준으로 다시 채웠습니다."
             else:
                 draft_refresh_error = "다시 채울 초안 데이터가 없어 기존 상태를 유지했습니다."
+        elif form_kind == "bamboo_publish":
+            try:
+                result = publish_bamboo_specs(plan_key)
+            except BambooOperationError as exc:
+                bamboo_error = str(exc)
+            else:
+                if result["success"]:
+                    bamboo_message = result["message"]
+                else:
+                    bamboo_error = result["output"] or result["message"]
+        elif form_kind == "bamboo_run":
+            try:
+                result = queue_bamboo_plan(plan_key)
+            except BambooOperationError as exc:
+                bamboo_error = str(exc)
+            else:
+                bamboo_message = f"{result['message']} ({result['fullPlanKey']})"
 
     project = get_project_detail(jira_project_key)
     if project is None:
@@ -383,6 +416,7 @@ def project_build_detail(request, jira_project_key: str, plan_key: str):
         (item for item in project["repositories"] if item["repoSlug"] == build["repositorySlug"]),
         None,
     )
+    bamboo_status = get_bamboo_plan_status(plan_key)
     context = {
         "project": project,
         "build": build,
@@ -398,10 +432,39 @@ def project_build_detail(request, jira_project_key: str, plan_key: str):
         "buildPlanPreview": get_build_plan_preview(plan_key),
         "draftRefreshMessage": draft_refresh_message,
         "draftRefreshError": draft_refresh_error,
+        "bambooStatus": bamboo_status,
+        "bambooMessage": bamboo_message,
+        "bambooError": bamboo_error,
         "registrationSuggestions": _build_registration_suggestions(),
         "navProjectSearchItems": _build_nav_project_search_items(list_project_summaries()),
     }
     return render(request, "ui/build_detail.html", context)
+
+
+def project_bamboo_plan_detail(request, jira_project_key: str, plan_key: str):
+    project = get_project_detail(jira_project_key)
+    if project is None:
+        return render(request, "ui/bamboo_plan_detail.html", {"project": None, "build": None, "bambooPlan": None})
+
+    build = next((item for item in project["builds"] if item["planKey"] == plan_key), None)
+    if build is None:
+        return render(request, "ui/bamboo_plan_detail.html", {"project": project, "build": None, "bambooPlan": None})
+
+    try:
+        bamboo_plan = get_bamboo_plan_details(plan_key)
+        bamboo_error = ""
+    except BambooOperationError as exc:
+        bamboo_plan = None
+        bamboo_error = str(exc)
+
+    context = {
+        "project": project,
+        "build": build,
+        "bambooPlan": bamboo_plan,
+        "bambooError": bamboo_error,
+        "navProjectSearchItems": _build_nav_project_search_items(list_project_summaries()),
+    }
+    return render(request, "ui/bamboo_plan_detail.html", context)
 
 
 def project_build_info_list(request, jira_project_key: str, plan_key: str):

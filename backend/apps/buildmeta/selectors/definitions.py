@@ -556,6 +556,7 @@ def _build_definition_payload_from_registration(*, plan: BuildPlan, build_info) 
     build_name = plan.project_build.build_name
     return {
         "buildId": plan.build_id,
+        "buildKey": build_key,
         "name": f"{build_name} {build_key}".strip() if build_key else build_name,
         "planKey": plan.plan_key,
         "description": build_name,

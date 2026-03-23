@@ -9,3 +9,4 @@ class CoveritySystemSettingsIn(Schema):
     commitEnabled: bool = False
     gitCloneUrlTemplate: str = ""
     repositoryLinkageMode: str = "linked"
+    bambooServerUrl: str = ""

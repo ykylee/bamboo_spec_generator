@@ -8,6 +8,7 @@ EXECUTION_WORKING_DIRECTORY = Path({{SUB_PATH}})
 EXECUTION_STATE_DIRECTORY = EXECUTION_WORKING_DIRECTORY / ".bamboo-meta"
 EXECUTION_STATE_PATH = EXECUTION_STATE_DIRECTORY / "execution-state.json"
 PLAN_KEY = {{PLAN_KEY}}
+BUILD_KEY = {{BUILD_KEY}}
 
 
 def _read_json(path: Path) -> dict | None:
@@ -134,6 +135,7 @@ def start_execution_if_configured() -> dict | None:
             "branchKind": _resolve_branch_kind(branch_name),
             "commitHash": commit_hash,
             "buildNumber": build_number,
+            "buildKey": BUILD_KEY,
         },
     )
     if payload is None:
@@ -144,6 +146,7 @@ def start_execution_if_configured() -> dict | None:
         "buildNumber": build_number,
         "commitHash": commit_hash,
         "branchName": branch_name,
+        "buildKey": BUILD_KEY,
         "buildExecutionId": payload.get("buildExecutionId", ""),
         "buildVersionId": payload.get("buildVersionId", ""),
         "version": payload.get("version", ""),

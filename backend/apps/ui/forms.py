@@ -126,3 +126,10 @@ class CoveritySystemSettingsForm(forms.Form):
             attrs={"placeholder": "https://git.example.com/scm/{project_key_lower}/{repo_slug}.git"}
         ),
     )
+    bamboo_server_url = forms.CharField(
+        label="Bamboo Server URL",
+        required=False,
+        widget=forms.TextInput(
+            attrs={"placeholder": "https://bamboo.example.com"}
+        ),
+    )

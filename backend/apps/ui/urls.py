@@ -3,6 +3,7 @@ from __future__ import annotations
 from django.urls import path
 
 from .views import (
+    project_bamboo_plan_detail,
     build_plan_list,
     coverity_settings,
     project_build_detail,
@@ -28,6 +29,11 @@ urlpatterns = [
         "projects/<str:jira_project_key>/builds/<str:plan_key>/",
         project_build_detail,
         name="project-build-detail",
+    ),
+    path(
+        "projects/<str:jira_project_key>/builds/<str:plan_key>/bamboo/",
+        project_bamboo_plan_detail,
+        name="project-bamboo-plan-detail",
     ),
     path(
         "projects/<str:jira_project_key>/builds/<str:plan_key>/infos/",

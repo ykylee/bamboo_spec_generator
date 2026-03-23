@@ -32,6 +32,7 @@
         <input type="hidden" name="form_kind" value="refresh_specs_draft">
         <button class="action-button action-button--ghost" type="submit">Specs 초안 다시 채우기</button>
       </form>
+      <a class="action-button action-button--ghost" href="{% url 'project-bamboo-plan-detail' project.jiraProjectKey build.planKey %}">실제 Bamboo Plan 보기</a>
       {% if repository %}
       <a class="action-button action-button--ghost" href="{% url 'project-repository-detail' project.jiraProjectKey repository.repoSlug %}">저장소 상세</a>
       {% endif %}
@@ -436,6 +437,68 @@
 </section>
 {% endif %}
 
+<section class="panel panel--signal-list">
+  <div class="panel__header">
+    <div>
+      <p class="panel__eyebrow">Bamboo Operations</p>
+      <h2 class="panel__title">실제 Bamboo 연동</h2>
+    </div>
+    <div class="chip-row">
+      <span class="chip">{{ bambooStatus.fullPlanKey|default:build.planKey }}</span>
+      {% if bambooStatus.exists %}
+      <span class="chip chip--success">registered</span>
+      {% elif bambooStatus.configured %}
+      <span class="chip chip--neutral">not published</span>
+      {% else %}
+      <span class="chip chip--neutral">not configured</span>
+      {% endif %}
+    </div>
+  </div>
+  {% if bambooMessage %}
+  <div class="form-alert form-alert--success">{{ bambooMessage }}</div>
+  {% endif %}
+  {% if bambooError %}
+  <div class="form-alert form-alert--error">{{ bambooError }}</div>
+  {% endif %}
+  <div class="detail-grid detail-grid--resource">
+    <article class="panel panel--signal-list">
+      <div class="panel__header">
+        <h3 class="panel__title">상태</h3>
+      </div>
+      <ul class="meta-list">
+        <li><strong>구성</strong>{% if bambooStatus.configured %}준비됨{% else %}미준비{% endif %}</li>
+        <li><strong>등록 여부</strong>{% if bambooStatus.exists %}등록됨{% else %}미등록{% endif %}</li>
+        <li><strong>Enabled</strong>{% if bambooStatus.exists %}{% if bambooStatus.enabled %}Yes{% else %}No{% endif %}{% else %}-{% endif %}</li>
+        <li><strong>Building</strong>{% if bambooStatus.exists %}{% if bambooStatus.building %}Yes{% else %}No{% endif %}{% else %}-{% endif %}</li>
+        <li><strong>Latest Result</strong>{{ bambooStatus.latestResultState|default:"-" }}</li>
+        <li><strong>Latest Build #</strong>{{ bambooStatus.latestBuildNumber|default:"-" }}</li>
+        <li><strong>Message</strong>{{ bambooStatus.message|default:"-" }}</li>
+      </ul>
+      {% if bambooStatus.planUrl %}
+      <a class="action-button action-button--ghost" href="{{ bambooStatus.planUrl }}" target="_blank" rel="noreferrer">Bamboo 열기</a>
+      {% endif %}
+    </article>
+    <article class="panel panel--signal-list">
+      <div class="panel__header">
+        <h3 class="panel__title">작업</h3>
+      </div>
+      <div class="hero__actions">
+        <form method="post" action="{% url 'project-build-detail' project.jiraProjectKey build.planKey %}">
+          {% csrf_token %}
+          <input type="hidden" name="form_kind" value="bamboo_publish">
+          <button class="action-button" type="submit">Bamboo Publish</button>
+        </form>
+        <form method="post" action="{% url 'project-build-detail' project.jiraProjectKey build.planKey %}">
+          {% csrf_token %}
+          <input type="hidden" name="form_kind" value="bamboo_run">
+          <button class="action-button action-button--ghost" type="submit">Bamboo 수동 실행</button>
+        </form>
+        <a class="action-button action-button--ghost" href="{% url 'project-bamboo-plan-detail' project.jiraProjectKey build.planKey %}">실제 구성 페이지</a>
+      </div>
+    </article>
+  </div>
+</section>
+
 <section class="stat-grid">
   <article class="stat-card stat-card--signal">
     <span class="stat-card__label">Static Analysis</span>
@@ -479,6 +542,7 @@
       <li><strong>Repository</strong>{% if repository %}<a href="{% url 'project-repository-detail' project.jiraProjectKey repository.repoSlug %}">{{ repository.repoSlug }}</a>{% else %}미연결{% endif %}</li>
       <li><strong>Latest Version</strong>{{ build.latestVersion|default:"미기록" }}</li>
       <li><strong>Latest Result</strong>{% if build.latestSuccess %}성공{% elif build.latestSuccess == False %}실패{% else %}미기록{% endif %}</li>
+      <li><strong>Bamboo Status</strong>{% if bambooStatus.exists %}등록됨{% elif bambooStatus.configured %}미등록{% else %}미설정{% endif %}</li>
       <li><strong>Build Info</strong><a class="chip chip--neutral" href="{% url 'project-build-detail' project.jiraProjectKey build.planKey %}?add_build_info=open#build-info-add-panel">등록 패널 열기</a></li>
     </ul>
   </article>
@@ -492,6 +556,7 @@
       <li><strong>빌드 정보 상태</strong>{% if build.buildInfoCount %}빌드 정보 {{ build.buildInfoCount }}건이 등록돼 있습니다.{% else %}아직 빌드 정보가 없습니다.{% endif %}</li>
       <li><strong>저장소 연결</strong>{% if repository %}저장소 slug와 플랜이 연결돼 있습니다.{% else %}저장소 연결이 누락돼 있습니다.{% endif %}</li>
       <li><strong>Preview 상태</strong>{% if buildPlanPreview %}등록된 프로젝트, 저장소, 플랜, 빌드 정보 기준 Preview를 표시 중입니다.{% else %}Preview를 생성할 수 없습니다.{% endif %}</li>
+      <li><strong>Bamboo 연동 상태</strong>{{ bambooStatus.message|default:"Bamboo 상태를 아직 확인하지 못했습니다." }}</li>
     </ul>
   </article>
 </section>

@@ -5,6 +5,7 @@ from ninja import Router
 from apps.api.schemas import CoveritySystemSettingsIn
 from apps.buildmeta.models import SystemSetting
 from apps.buildmeta.services import (
+    get_bamboo_system_settings,
     get_coverity_system_settings,
     initialize_specs_draft_data,
     initialize_specs_draft_for_plan,
@@ -17,7 +18,10 @@ router = Router(tags=["system-settings"])
 
 @router.get("/coverity")
 def get_coverity_settings(request) -> dict:
-    return get_coverity_system_settings()
+    return {
+        **get_coverity_system_settings(),
+        **get_bamboo_system_settings(),
+    }
 
 
 @router.put("/coverity")
@@ -48,7 +52,15 @@ def put_coverity_settings(request, payload: CoveritySystemSettingsIn) -> dict:
         value="create_if_missing" if linkage_mode == "create_if_missing" else "linked",
         description="Repository linkage mode",
     )
-    return get_coverity_system_settings()
+    set_system_setting(
+        key=SystemSetting.KEY_BAMBOO_SERVER_URL,
+        value=payload.bambooServerUrl.strip(),
+        description="Bamboo server URL",
+    )
+    return {
+        **get_coverity_system_settings(),
+        **get_bamboo_system_settings(),
+    }
 
 
 @router.post("/specs-drafts/initialize")
