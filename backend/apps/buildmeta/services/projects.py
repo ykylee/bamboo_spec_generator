@@ -27,7 +27,7 @@ def update_project(jira_project_key: str, payload) -> dict | None:
 
 def _save_project(existing_jira_project_key: str | None, data: dict) -> dict:
     _validate_repositories(data["repositories"])
-    _validate_builds(data["builds"], data["repositories"])
+    _validate_builds(data["builds"])
 
     with transaction.atomic():
         project, _ = Project.objects.get_or_create(
@@ -42,6 +42,7 @@ def _save_project(existing_jira_project_key: str | None, data: dict) -> dict:
         project.save(update_fields=["bitbucket_project_key", "representative_repo_slug", "updated_at"])
 
         repository_map = _upsert_repositories(project, data["repositories"])
+        _validate_build_repository_links(data["builds"], repository_map)
         _upsert_builds(project, data["builds"], repository_map)
         _prune_removed_builds(project, data["builds"])
         _prune_removed_repositories(project, data["repositories"])
@@ -89,10 +90,9 @@ def _validate_repositories(repositories: list[dict]) -> None:
         raise ValueError("Only one representative repository can be provided per request.")
 
 
-def _validate_builds(builds: list[dict], repositories: list[dict]) -> None:
+def _validate_builds(builds: list[dict]) -> None:
     seen_plan_keys: set[str] = set()
     seen_build_ids: set[str] = set()
-    repository_slugs = {repository["repoSlug"].strip() for repository in repositories}
     for build in builds:
         build_name = build["buildName"].strip()
         build_id = build["buildId"].strip()
@@ -106,14 +106,19 @@ def _validate_builds(builds: list[dict], repositories: list[dict]) -> None:
             raise ValueError("Build planKey is required.")
         if not repository_slug:
             raise ValueError("Build repositorySlug is required.")
-        if repository_slug not in repository_slugs:
-            raise ValueError(f"Build repositorySlug '{repository_slug}' is not registered in repositories.")
         if plan_key in seen_plan_keys:
             raise ValueError(f"Build planKey '{plan_key}' is duplicated in the request.")
         if build_id in seen_build_ids:
             raise ValueError(f"Build buildId '{build_id}' is duplicated in the request.")
         seen_plan_keys.add(plan_key)
         seen_build_ids.add(build_id)
+
+
+def _validate_build_repository_links(builds: list[dict], repository_map: dict[str, ProjectRepository]) -> None:
+    for build in builds:
+        repository_slug = build["repositorySlug"].strip()
+        if repository_slug not in repository_map:
+            raise ValueError(f"Build repositorySlug '{repository_slug}' is not registered in repositories.")
 
 
 def _upsert_repositories(project: Project, repositories: list[dict]) -> dict[str, ProjectRepository]:
@@ -138,11 +143,7 @@ def _upsert_builds(project: Project, builds: list[dict], repository_map: dict[st
         build_id = build["buildId"].strip()
         plan_key = build["planKey"].strip()
         repository_slug = build["repositorySlug"].strip()
-        plan = BuildPlan.objects.filter(plan_key=plan_key).first()
-        if plan is not None and plan.build_id != build_id:
-            raise ValueError(f"Build plan '{plan_key}' already exists with a different buildId.")
-        if plan is None:
-            plan = BuildPlan.objects.create(build_id=build_id, plan_key=plan_key)
+        plan = _resolve_build_plan(build_id, plan_key)
 
         project_build = ProjectBuild.objects.filter(build_plan=plan).first()
         if project_build is not None and project_build.project_id != project.id:
@@ -157,6 +158,25 @@ def _upsert_builds(project: Project, builds: list[dict], repository_map: dict[st
         project_build.build_type = build["buildType"].strip()
         project_build.runtime_stack = build["runtimeStack"].strip()
         project_build.save()
+
+
+def _resolve_build_plan(build_id: str, plan_key: str) -> BuildPlan:
+    plan_by_key = BuildPlan.objects.filter(plan_key=plan_key).first()
+    plan_by_build_id = BuildPlan.objects.filter(build_id=build_id).first()
+
+    if plan_by_key is not None and plan_by_build_id is not None and plan_by_key.id != plan_by_build_id.id:
+        raise ValueError(
+            f"Build plan '{plan_key}' and buildId '{build_id}' refer to different existing build plans."
+        )
+    if plan_by_key is not None:
+        if plan_by_key.build_id != build_id:
+            raise ValueError(f"Build plan '{plan_key}' already exists with a different buildId.")
+        return plan_by_key
+    if plan_by_build_id is not None:
+        if plan_by_build_id.plan_key != plan_key:
+            raise ValueError(f"Build buildId '{build_id}' already exists with a different planKey.")
+        return plan_by_build_id
+    return BuildPlan.objects.create(build_id=build_id, plan_key=plan_key)
 
 
 def _prune_removed_builds(project: Project, builds: list[dict]) -> None:

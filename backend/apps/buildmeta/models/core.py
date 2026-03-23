@@ -28,6 +28,8 @@ class BuildPlan(TimestampedModel):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     build_id = models.CharField(max_length=255, unique=True)
     plan_key = models.CharField(max_length=64, unique=True)
+    static_analysis_tool_version = models.CharField(max_length=128, blank=True)
+    coverity_project = models.CharField(max_length=255, blank=True)
     latest_version = models.ForeignKey(
         "buildmeta.BuildVersion",
         null=True,
@@ -38,6 +40,31 @@ class BuildPlan(TimestampedModel):
 
     def __str__(self) -> str:
         return self.plan_key
+
+
+class BuildPlanBuildInfo(TimestampedModel):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    build_plan = models.ForeignKey(BuildPlan, on_delete=models.CASCADE, related_name="build_infos")
+    build_key = models.CharField(max_length=128)
+    pre_process = models.TextField(blank=True)
+    build_command = models.TextField(blank=True)
+    clean_command = models.TextField(blank=True)
+    language = models.CharField(max_length=64, blank=True)
+    compiler = models.CharField(max_length=128, blank=True)
+    analysis_excluded_files = models.TextField(blank=True)
+    coverity_stream = models.CharField(max_length=255, blank=True)
+    build_sub_path = models.CharField(max_length=255, blank=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["build_plan", "build_key"], name="uq_plan_build_info_key"),
+        ]
+        indexes = [
+            models.Index(fields=["build_plan", "build_key"], name="ix_plan_build_info_key"),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.build_plan.plan_key}:{self.build_key}"
 
 
 class ProjectRepository(TimestampedModel):
@@ -167,6 +194,13 @@ class BuildVersion(TimestampedModel):
 class BuildExecution(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     build_plan = models.ForeignKey(BuildPlan, on_delete=models.CASCADE, related_name="executions")
+    build_info = models.ForeignKey(
+        BuildPlanBuildInfo,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="executions",
+    )
     build_version = models.ForeignKey(BuildVersion, on_delete=models.CASCADE, related_name="executions")
     build_number = models.CharField(max_length=64)
     commit_hash = models.CharField(max_length=64)
@@ -182,11 +216,15 @@ class BuildExecution(models.Model):
 
     class Meta:
         constraints = [
-            models.UniqueConstraint(fields=["build_plan", "build_number"], name="uq_build_execution_number"),
+            models.UniqueConstraint(
+                fields=["build_plan", "build_info", "build_number"],
+                name="uq_build_execution_number_scope",
+            ),
         ]
         indexes = [
             models.Index(fields=["build_version", "-created_at"], name="ix_execution_version_created"),
             models.Index(fields=["build_plan", "-build_number"], name="ix_execution_plan_number"),
+            models.Index(fields=["build_info", "-created_at"], name="ix_exec_build_info_created"),
         ]
 
 

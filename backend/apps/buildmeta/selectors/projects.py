@@ -1,22 +1,15 @@
 from __future__ import annotations
 
 from django.core.exceptions import ObjectDoesNotExist
-from django.db.models import Prefetch
-
-from apps.buildmeta.models import BuildPlanDefinition, Project
+from apps.buildmeta.models import Project
 
 
 def _project_queryset():
-    active_definitions = Prefetch(
-        "builds__build_plan__definitions",
-        queryset=BuildPlanDefinition.objects.filter(is_active=True).order_by("-created_at"),
-        to_attr="active_definitions",
-    )
     return Project.objects.prefetch_related(
         "repositories",
         "builds__repository",
+        "builds__build_plan__build_infos",
         "builds__build_plan__latest_version__latest_execution",
-        active_definitions,
     )
 
 
@@ -64,7 +57,6 @@ def list_project_summaries() -> list[dict]:
                 "repositoryCount": repository_count,
                 "repositorySlugs": [repo.repo_slug for repo in sorted(repositories, key=lambda item: item.repo_slug)],
                 "buildCount": build_count,
-                "activeDefinitionCount": generation_status["activeDefinitionCount"],
                 "readyBuildCount": generation_status["readyBuildCount"],
                 "generationReady": generation_status["generationReady"],
                 "generationReadinessIssues": generation_status["generationReadinessIssues"],
@@ -113,8 +105,10 @@ def get_project_detail(jira_project_key: str) -> dict | None:
                 "repositorySlug": build.repository.repo_slug if build.repository_id else "",
                 "planKey": build.build_plan.plan_key,
                 "buildId": build.build_plan.build_id,
-                "generationReady": bool(getattr(build.build_plan, "active_definitions", [])),
-                "activeDefinitionYear": _get_active_definition_year(build.build_plan),
+                "generationReady": bool(build.repository_id),
+                "staticAnalysisToolVersion": build.build_plan.static_analysis_tool_version,
+                "coverityProject": build.build_plan.coverity_project,
+                "buildInfoCount": build.build_plan.build_infos.count(),
                 "latestVersion": (
                     build.build_plan.latest_version.version_text
                     if build.build_plan.latest_version is not None
@@ -125,6 +119,7 @@ def get_project_detail(jira_project_key: str) -> dict | None:
                     if build.build_plan.latest_version is not None
                     else None
                 ),
+                "buildInfoUrl": f"/projects/{project.jira_project_key}/builds/{build.build_plan.plan_key}/infos/",
             }
             for build in sorted(builds, key=lambda item: item.build_name)
         ],
@@ -142,30 +137,16 @@ def _build_generation_status(project: Project, repositories: list, builds: list)
     elif all(repo.repo_slug != project.representative_repo_slug for repo in repositories):
         issues.append("대표 저장소 메타데이터 불일치")
 
-    ready_build_count = 0
     unlinked_build_count = 0
     for build in builds:
         if build.repository_id is None:
             unlinked_build_count += 1
-        if getattr(build.build_plan, "active_definitions", []):
-            ready_build_count += 1
-    missing_definition_count = len(builds) - ready_build_count
     if unlinked_build_count:
         issues.append(f"저장소 연결 없는 빌드 {unlinked_build_count}")
-    if missing_definition_count:
-        issues.append(f"활성 정의 없음 {missing_definition_count}")
 
     return {
         "generationReady": bool(builds) and not issues,
         "generationReadinessIssues": issues,
-        "readyBuildCount": ready_build_count,
-        "activeDefinitionCount": ready_build_count,
+        "readyBuildCount": len(builds) - unlinked_build_count,
         "totalBuildCount": len(builds),
     }
-
-
-def _get_active_definition_year(build_plan) -> str:
-    active_definitions = getattr(build_plan, "active_definitions", [])
-    if not active_definitions:
-        return ""
-    return active_definitions[0].year

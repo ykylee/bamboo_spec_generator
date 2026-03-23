@@ -136,6 +136,8 @@ class UiPlaywrightE2ETest(unittest.TestCase):
         runtime_stack: str = "python3.12",
         coverity_project: str = "",
         coverity_stream: str = "",
+        build_plan_coverity_project: str = "",
+        static_analysis_tool_version: str = "",
         with_active_definition: bool = False,
         definition_year: str = "2026",
     ) -> None:
@@ -151,7 +153,12 @@ class UiPlaywrightE2ETest(unittest.TestCase):
             coverity_stream=coverity_stream,
             is_representative=True,
         )
-        build_plan = self.BuildPlan.objects.create(build_id=build_id, plan_key=plan_key)
+        build_plan = self.BuildPlan.objects.create(
+            build_id=build_id,
+            plan_key=plan_key,
+            static_analysis_tool_version=static_analysis_tool_version,
+            coverity_project=build_plan_coverity_project,
+        )
         self.ProjectBuild.objects.create(
             project=project,
             repository=repository,
@@ -199,10 +206,22 @@ class UiPlaywrightE2ETest(unittest.TestCase):
         self.assertEqual(2, self.page.locator("[data-repository-row]").count())
         self.assertEqual(2, self.page.locator("[data-build-row]").count())
 
+        self.page.locator('input[name="jira_project_key"]').fill("TEMP")
+        self.page.locator('input[name="repo_slug"]').first.fill("temp-repo")
+        self.page.locator('input[name="build_name"]').first.fill("Temp Build")
+
         self.page.get_by_role("button", name="접기", exact=True).click()
         self.page.wait_for_timeout(150)
         self.assertEqual("", registration_panel.get_attribute("hidden"))
         self.assertEqual("false", toggle_button.get_attribute("aria-expanded"))
+
+        toggle_button.click()
+        self.page.wait_for_timeout(150)
+        self.assertEqual("", self.page.locator('input[name="jira_project_key"]').input_value())
+        self.assertEqual("", self.page.locator('input[name="repo_slug"]').first.input_value())
+        self.assertEqual("", self.page.locator('input[name="build_name"]').first.input_value())
+        self.assertEqual(1, self.page.locator("[data-repository-row]").count())
+        self.assertEqual(1, self.page.locator("[data-build-row]").count())
 
     def test_nav_search_requires_keyword_and_filters_matching_projects(self) -> None:
         self._create_project_with_build(
@@ -248,6 +267,34 @@ class UiPlaywrightE2ETest(unittest.TestCase):
         self.page.wait_for_timeout(150)
         self.assertTrue(results.is_hidden())
 
+    def test_registration_inputs_allow_manual_entry_and_searchable_suggestions(self) -> None:
+        self._create_project_with_build(
+            jira_project_key="OPS",
+            bitbucket_project_key="OPSBB",
+            repo_slug="ops-api",
+            build_name="Operations API",
+            build_id="ops-api",
+            plan_key="OPSAPI",
+            with_active_definition=True,
+        )
+
+        self.page.goto(self.base_url, wait_until="domcontentloaded")
+        self.page.get_by_role("button", name="프로젝트 등록").click()
+
+        representative_input = self.page.locator('input[name="representative_repo_slug"]')
+        representative_input.fill("ops")
+        self.page.wait_for_timeout(150)
+
+        suggestion_panel = self.page.locator(".project-form__suggestions").filter(has=representative_input).first
+        self.assertTrue(self.page.get_by_role("button", name="ops-api").is_visible())
+
+        self.page.get_by_role("button", name="ops-api").click()
+        self.assertEqual("ops-api", representative_input.input_value())
+
+        representative_input.fill("manual-custom-repo")
+        self.page.wait_for_timeout(150)
+        self.assertEqual("manual-custom-repo", representative_input.input_value())
+
     def test_registration_flow_redirects_to_detail_in_browser(self) -> None:
         self.page.goto(self.base_url, wait_until="domcontentloaded")
         self.page.get_by_role("button", name="프로젝트 등록").click()
@@ -273,8 +320,9 @@ class UiPlaywrightE2ETest(unittest.TestCase):
         self.assertEqual(f"{self.base_url}/projects/OPS/", self.page.url)
         self.assertTrue(self.Project.objects.filter(jira_project_key="OPS").exists())
         self.assertEqual("OPS", self.page.locator(".hero__title").inner_text())
-        self.assertTrue(self.page.get_by_text("Specs 준비 필요").is_visible())
-        self.assertTrue(self.page.get_by_text("Repository: ops-api").is_visible())
+        self.assertTrue(self.page.get_by_text("운영 준비").is_visible())
+        self.assertTrue(self.page.locator("#project-repository-add-panel").count() == 1)
+        self.assertTrue(self.page.locator("#project-build-add-panel").count() == 1)
 
     def test_project_list_pagination_updates_only_list_panel_in_browser(self) -> None:
         for index in range(11):
@@ -302,6 +350,72 @@ class UiPlaywrightE2ETest(unittest.TestCase):
             self.page.locator("[data-project-list-container]").get_by_text("PAG10", exact=True).first.is_visible()
         )
 
+    def test_build_plan_page_is_reachable_from_navigation(self) -> None:
+        self._create_project_with_build(
+            jira_project_key="SAMPLE",
+            bitbucket_project_key="SAMPLE",
+            repo_slug="sample-app-api",
+            build_name="Sample API",
+            build_id="sample-app-api",
+            plan_key="SAMPAPI",
+            build_type="maven",
+            runtime_stack="java",
+            coverity_project="sample-app-api",
+            coverity_stream="sample-app-api-dev",
+            build_plan_coverity_project="sample-api-coverity",
+            static_analysis_tool_version="coverity-2024.12",
+            with_active_definition=True,
+        )
+
+        self.page.goto(self.base_url, wait_until="domcontentloaded")
+        self.page.get_by_role("link", name="빌드 플랜").first.click()
+        self.page.wait_for_url(f"{self.base_url}/build-plans/")
+
+        self.assertTrue(self.page.get_by_text("빌드 플랜 인덱스").is_visible())
+        self.assertTrue(self.page.locator("table.project-table").get_by_text("Sample API").is_visible())
+        self.assertIn("coverity-2024.12", self.page.locator("body").text_content())
+        self.page.get_by_role("link", name="플랜 상세").first.click()
+        self.page.wait_for_url(f"{self.base_url}/projects/SAMPLE/builds/SAMPAPI/")
+
+    def test_build_detail_updates_plan_metadata_and_opens_build_info_page(self) -> None:
+        self._create_project_with_build(
+            jira_project_key="SAMPLE",
+            bitbucket_project_key="SAMPLE",
+            repo_slug="sample-app-api",
+            build_name="Sample API",
+            build_id="sample-app-api",
+            plan_key="SAMPAPI",
+            build_type="maven",
+            runtime_stack="java",
+            coverity_project="sample-app-api",
+            coverity_stream="sample-app-api-dev",
+        )
+
+        self.page.goto(f"{self.base_url}/projects/SAMPLE/builds/SAMPAPI/", wait_until="domcontentloaded")
+        self.page.locator('input[name="static_analysis_tool_version"]').fill("coverity-2024.12")
+        self.page.locator('input[name="coverity_project"]').fill("sample-api-coverity")
+        self.page.get_by_role("button", name="수정 저장").click()
+        self.page.wait_for_url(f"{self.base_url}/projects/SAMPLE/builds/SAMPAPI/")
+
+        self.assertTrue(self.page.locator(".signal-hero").get_by_text("coverity-2024.12").first.is_visible())
+        self.assertTrue(self.page.locator(".signal-hero").get_by_text("sample-api-coverity").first.is_visible())
+
+        self.page.get_by_role("link", name="빌드 정보").first.click()
+        self.page.wait_for_url(f"{self.base_url}/projects/SAMPLE/builds/SAMPAPI/infos/")
+        self.assertTrue(self.page.get_by_text("빌드 정보 목록").is_visible())
+        self.page.locator('input[name="build_key"]').fill("api-linux")
+        self.page.locator('input[name="language"]').fill("java")
+        self.page.locator('input[name="compiler"]').fill("maven")
+        self.page.locator('input[name="coverity_stream"]').fill("sample-api-dev")
+        self.page.locator('input[name="build_sub_path"]').fill("services/api")
+        self.page.locator('textarea[name="build_command"]').fill("mvn -B clean package")
+        self.page.get_by_role("button", name="빌드 정보 등록").click()
+        self.page.wait_for_url(f"{self.base_url}/projects/SAMPLE/builds/SAMPAPI/infos/")
+        self.assertTrue(self.page.get_by_text("api-linux").first.is_visible())
+        self.page.locator("table.project-table").get_by_role("link", name="상세").click()
+        self.page.wait_for_url(f"{self.base_url}/projects/SAMPLE/builds/SAMPAPI/infos/api-linux/")
+        self.assertTrue(self.page.get_by_role("heading", name="빌드 정보 수정").is_visible())
+
     def test_detail_edit_panel_shows_validation_error_in_browser(self) -> None:
         self._create_project_with_build(
             jira_project_key="SAMPLE",
@@ -319,7 +433,7 @@ class UiPlaywrightE2ETest(unittest.TestCase):
 
         self.page.goto(f"{self.base_url}/projects/SAMPLE/", wait_until="domcontentloaded")
         edit_panel = self.page.locator("#project-edit-panel")
-        toggle_button = self.page.locator("[data-toggle-edit]")
+        toggle_button = self.page.get_by_role("button", name="프로젝트 수정")
 
         self.assertEqual("", edit_panel.get_attribute("hidden"))
         self.assertEqual("false", toggle_button.get_attribute("aria-expanded"))
@@ -336,3 +450,91 @@ class UiPlaywrightE2ETest(unittest.TestCase):
         self.assertIsNone(edit_panel.get_attribute("hidden"))
         self.assertEqual("true", toggle_button.get_attribute("aria-expanded"))
         self.assertEqual("missing-repo", representative_input.input_value())
+
+    def test_detail_edit_panel_resets_unsaved_changes_when_collapsed(self) -> None:
+        self._create_project_with_build(
+            jira_project_key="SAMPLE",
+            bitbucket_project_key="SAMPLE",
+            repo_slug="sample-app-api",
+            build_name="Sample API",
+            build_id="sample-app-api",
+            plan_key="SAMPAPI",
+            build_type="maven",
+            runtime_stack="java",
+            coverity_project="sample-app-api",
+            coverity_stream="sample-app-api-dev",
+            with_active_definition=True,
+        )
+
+        self.page.goto(f"{self.base_url}/projects/SAMPLE/", wait_until="domcontentloaded")
+        edit_panel = self.page.locator("#project-edit-panel")
+        open_button = self.page.get_by_role("button", name="프로젝트 수정")
+
+        open_button.click()
+        self.page.wait_for_timeout(150)
+
+        bitbucket_input = self.page.locator('input[name="bitbucket_project_key"]')
+        representative_input = self.page.locator('input[name="representative_repo_slug"]')
+        bitbucket_input.fill("SAMPLE-EDIT")
+        representative_input.fill("sample-app-web")
+
+        edit_panel.get_by_role("button", name="접기", exact=True).click()
+        self.page.wait_for_timeout(150)
+
+        self.assertEqual("", edit_panel.get_attribute("hidden"))
+        self.assertEqual("false", open_button.get_attribute("aria-expanded"))
+
+        open_button.click()
+        self.page.wait_for_timeout(150)
+
+        self.assertIsNone(edit_panel.get_attribute("hidden"))
+        self.assertEqual("true", open_button.get_attribute("aria-expanded"))
+        self.assertEqual("SAMPLE", bitbucket_input.input_value())
+        self.assertEqual("sample-app-api", representative_input.input_value())
+
+    def test_repository_and_build_management_flows_are_embedded_in_project_detail(self) -> None:
+        self._create_project_with_build(
+            jira_project_key="SAMPLE",
+            bitbucket_project_key="SAMPLE",
+            repo_slug="sample-app-api",
+            build_name="Sample API",
+            build_id="sample-app-api",
+            plan_key="SAMPAPI",
+            build_type="maven",
+            runtime_stack="java",
+            coverity_project="sample-app-api",
+            coverity_stream="sample-app-api-dev",
+            with_active_definition=True,
+        )
+
+        self.page.goto(f"{self.base_url}/projects/SAMPLE/", wait_until="domcontentloaded")
+        self.page.get_by_role("button", name="저장소 추가").click()
+        self.page.wait_for_timeout(150)
+
+        repository_panel = self.page.locator("#project-repository-add-panel")
+        self.assertIsNone(repository_panel.get_attribute("hidden"))
+        self.page.locator('input[name="repo_slug"]').fill("sample-app-web")
+        self.page.locator('input[name="coverity_project"]').fill("sample-app-web")
+        self.page.locator('input[name="coverity_stream"]').fill("sample-app-web-dev")
+        self.page.get_by_role("button", name="저장소 등록").click()
+        self.page.wait_for_url(f"{self.base_url}/projects/SAMPLE/repositories/sample-app-web/")
+
+        self.assertTrue(self.page.get_by_role("heading", name="저장소 메타데이터").is_visible())
+        self.assertTrue(self.page.get_by_role("heading", name="sample-app-web", exact=True).is_visible())
+
+        self.page.goto(f"{self.base_url}/projects/SAMPLE/", wait_until="domcontentloaded")
+        self.page.get_by_role("button", name="빌드 추가").click()
+        self.page.wait_for_timeout(150)
+        build_panel = self.page.locator("#project-build-add-panel")
+        self.assertIsNone(build_panel.get_attribute("hidden"))
+        self.page.locator('input[name="build_name"]').fill("Sample Web")
+        self.page.locator('input[name="build_type"]').fill("node")
+        self.page.locator('input[name="runtime_stack"]').fill("node20")
+        self.page.locator('input[name="build_id"]').fill("sample-app-web")
+        self.page.locator('input[name="plan_key"]').fill("SAMPWEB")
+        self.page.locator('input[name="build_repository_slug"]').fill("sample-app-web")
+        self.page.get_by_role("button", name="빌드 등록").click()
+        self.page.wait_for_url(f"{self.base_url}/projects/SAMPLE/builds/SAMPWEB/")
+
+        self.assertTrue(self.page.get_by_role("heading", name="빌드 플랜 메타데이터").is_visible())
+        self.assertTrue(self.page.get_by_role("heading", name="Sample Web", exact=True).is_visible())

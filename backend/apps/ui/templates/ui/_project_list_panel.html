@@ -94,9 +94,9 @@
         </div>
         <div class="chip-row">
           {% if project.generationReady %}
-          <span class="chip chip--success">Specs 생성 가능</span>
+          <span class="chip chip--success">운영 준비</span>
           {% else %}
-          <span class="chip chip--warning">Specs 준비 필요</span>
+          <span class="chip chip--warning">연결 점검 필요</span>
           {% endif %}
           {% if project.warningTags %}
             <span class="chip chip--warning">{{ project.warningTags.0 }}</span>

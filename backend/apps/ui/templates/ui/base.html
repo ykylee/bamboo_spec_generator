@@ -42,8 +42,8 @@
           </a>
         </div>
         <nav class="app-header__nav" aria-label="서비스 이동">
-          <a class="app-header__nav-link{% if request.resolver_match.url_name == 'project-list' or request.resolver_match.url_name == 'project-detail' %} app-header__nav-link--active{% endif %}" href="{% url 'project-list' %}">프로젝트</a>
-          <span class="app-header__nav-link app-header__nav-link--muted">빌드 플랜</span>
+          <a class="app-header__nav-link{% if request.resolver_match.url_name == 'project-list' or request.resolver_match.url_name == 'project-detail' or request.resolver_match.url_name == 'project-repository-detail' %} app-header__nav-link--active{% endif %}" href="{% url 'project-list' %}">프로젝트</a>
+          <a class="app-header__nav-link{% if request.resolver_match.url_name == 'build-plan-list' or request.resolver_match.url_name == 'project-build-detail' or request.resolver_match.url_name == 'project-build-info-list' or request.resolver_match.url_name == 'project-build-info-detail' %} app-header__nav-link--active{% endif %}" href="{% url 'build-plan-list' %}">빌드 플랜</a>
           <span class="app-header__nav-link app-header__nav-link--muted">실행 이력</span>
           <span class="app-header__nav-link app-header__nav-link--muted">정적 분석</span>
         </nav>
@@ -99,7 +99,7 @@
         </div>
 
         <nav class="sidebar__nav">
-          <a class="sidebar__nav-item sidebar__nav-item--active" href="{% url 'project-list' %}">
+          <a class="sidebar__nav-item{% if request.resolver_match.url_name == 'project-list' or request.resolver_match.url_name == 'project-detail' or request.resolver_match.url_name == 'project-repository-detail' %} sidebar__nav-item--active{% else %} sidebar__nav-item--muted{% endif %}" href="{% url 'project-list' %}">
             <span class="sidebar__nav-icon" aria-hidden="true">
               <svg viewBox="0 0 20 20" focusable="false">
                 <path d="M3 5.5A2.5 2.5 0 0 1 5.5 3h9A2.5 2.5 0 0 1 17 5.5v9a2.5 2.5 0 0 1-2.5 2.5h-9A2.5 2.5 0 0 1 3 14.5z"/>
@@ -108,7 +108,7 @@
             </span>
             <span class="sidebar__nav-text">프로젝트</span>
           </a>
-          <span class="sidebar__nav-item sidebar__nav-item--muted">
+          <a class="sidebar__nav-item{% if request.resolver_match.url_name == 'build-plan-list' or request.resolver_match.url_name == 'project-build-detail' or request.resolver_match.url_name == 'project-build-info-list' or request.resolver_match.url_name == 'project-build-info-detail' %} sidebar__nav-item--active{% else %} sidebar__nav-item--muted{% endif %}" href="{% url 'build-plan-list' %}">
             <span class="sidebar__nav-icon" aria-hidden="true">
               <svg viewBox="0 0 20 20" focusable="false">
                 <path d="M4 4.5h5l1.2 1.5H16A1.5 1.5 0 0 1 17.5 7.5v8A1.5 1.5 0 0 1 16 17H4A1.5 1.5 0 0 1 2.5 15.5v-9A2 2 0 0 1 4.5 4.5z"/>
@@ -116,7 +116,7 @@
               </svg>
             </span>
             <span class="sidebar__nav-text">빌드 플랜</span>
-          </span>
+          </a>
           <span class="sidebar__nav-item sidebar__nav-item--muted">
             <span class="sidebar__nav-icon" aria-hidden="true">
               <svg viewBox="0 0 20 20" focusable="false">
@@ -277,6 +277,91 @@
 
           updateProjectSearch();
         }
+
+        function enhanceSuggestionInputs(root) {
+          root.querySelectorAll(".project-form input[list]").forEach(function (input) {
+            if (input.dataset.suggestionEnhanced === "true") {
+              return;
+            }
+
+            const listId = input.getAttribute("list");
+            const source = listId ? document.getElementById(listId) : null;
+            if (!source) {
+              return;
+            }
+
+            const field = input.closest(".project-form__field");
+            if (!field) {
+              return;
+            }
+
+            const panel = document.createElement("div");
+            panel.className = "project-form__suggestions";
+            panel.hidden = true;
+            field.appendChild(panel);
+            input.dataset.suggestionEnhanced = "true";
+            input.dataset.sourceList = listId;
+            input.removeAttribute("list");
+
+            function getOptions() {
+              return Array.from(source.querySelectorAll("option"))
+                .map(function (option) {
+                  return (option.value || "").trim();
+                })
+                .filter(function (value, index, values) {
+                  return value && values.indexOf(value) === index;
+                });
+            }
+
+            function closePanel() {
+              panel.hidden = true;
+              panel.replaceChildren();
+            }
+
+            function renderPanel() {
+              const keyword = (input.value || "").trim().toLowerCase();
+              if (!keyword) {
+                closePanel();
+                return;
+              }
+
+              const matches = getOptions().filter(function (value) {
+                return value.toLowerCase().indexOf(keyword) !== -1;
+              });
+              if (!matches.length) {
+                closePanel();
+                return;
+              }
+
+              panel.replaceChildren();
+              matches.slice(0, 8).forEach(function (value) {
+                const button = document.createElement("button");
+                button.type = "button";
+                button.className = "project-form__suggestion";
+                button.textContent = value;
+                button.addEventListener("mousedown", function (event) {
+                  event.preventDefault();
+                });
+                button.addEventListener("click", function () {
+                  input.value = value;
+                  closePanel();
+                  input.dispatchEvent(new Event("input", { bubbles: true }));
+                });
+                panel.appendChild(button);
+              });
+              panel.hidden = false;
+            }
+
+            input.addEventListener("focus", renderPanel);
+            input.addEventListener("input", renderPanel);
+            input.addEventListener("blur", function () {
+              window.setTimeout(closePanel, 120);
+            });
+          });
+        }
+
+        window.BambooUiEnhanceSuggestionInputs = enhanceSuggestionInputs;
+        enhanceSuggestionInputs(document);
       }());
     </script>
   </body>

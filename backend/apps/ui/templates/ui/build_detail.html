@@ -1,0 +1,220 @@
+{% extends "ui/base.html" %}
+
+{% block title %}{% if build %}{{ build.buildName }} | Bamboo Spec Generator{% else %}빌드 없음 | Bamboo Spec Generator{% endif %}{% endblock %}
+{% block body_class %}page-resource-detail{% endblock %}
+{% block page_heading %}{% if build %}{{ build.buildName }} 상세{% else %}빌드 상세{% endif %}{% endblock %}
+
+{% block content %}
+{% if project and build %}
+<section class="signal-hero signal-hero--workspace">
+  <div class="signal-hero__content">
+    <p class="signal-hero__eyebrow">Build Plan Workspace</p>
+    <h1 class="hero__title">{{ build.buildName }}</h1>
+    <p class="signal-hero__body">빌드 상세에서는 플랜 공통 메타데이터를 관리하고, 플랜 아래 여러 종류의 `빌드 정보`를 따로 등록해 환경구성과 분석 집계 기준을 분리합니다.</p>
+    <div class="hero__actions">
+      <a class="action-button" href="#build-plan-metadata-panel">빌드 플랜 수정</a>
+      <a class="action-button action-button--ghost" href="{% url 'project-build-info-list' project.jiraProjectKey build.planKey %}">빌드 정보</a>
+      {% if repository %}
+      <a class="action-button action-button--ghost" href="{% url 'project-repository-detail' project.jiraProjectKey repository.repoSlug %}">저장소 상세</a>
+      {% endif %}
+    </div>
+    <div class="chip-row">
+      <span class="chip">{{ build.planKey }}</span>
+      <span class="chip chip--neutral">{{ build.buildId }}</span>
+      <span class="chip chip--neutral">{{ build.staticAnalysisToolVersion|default:"정적분석 미지정" }}</span>
+      <span class="chip chip--neutral">{{ build.buildInfoCount }} build infos</span>
+      {% if build.coverityProject %}
+      <span class="chip chip--success">{{ build.coverityProject }}</span>
+      {% endif %}
+    </div>
+  </div>
+  <div class="signal-hero__board" aria-label="빌드 상세 보드">
+    <article class="signal-metric signal-metric--primary">
+      <span class="signal-metric__label">Plan Key</span>
+      <strong class="signal-metric__value signal-metric__value--compact">{{ build.planKey }}</strong>
+      <p class="signal-metric__meta">플랜 식별자</p>
+    </article>
+    <article class="signal-metric">
+      <span class="signal-metric__label">Build Info</span>
+      <strong class="signal-metric__value">{{ build.buildInfoCount }}</strong>
+      <p class="signal-metric__meta">플랜 아래 등록된 빌드 환경구성 수</p>
+    </article>
+    <article class="signal-metric">
+      <span class="signal-metric__label">Static Analysis</span>
+      <strong class="signal-metric__value signal-metric__value--compact">{{ build.staticAnalysisToolVersion|default:"-" }}</strong>
+      <p class="signal-metric__meta">플랜 단위 정적분석 도구 버전</p>
+    </article>
+    <article class="signal-metric signal-metric--list">
+      <div class="signal-metric__header">
+        <span class="signal-metric__label">Operator Notes</span>
+        <span class="badge">Build Plan</span>
+      </div>
+      <ul class="signal-queue">
+        <li class="signal-queue__item"><strong>플랜 메타데이터</strong><span>정적분석 도구 버전과 Coverity Project는 이 화면에서 관리합니다.</span></li>
+        <li class="signal-queue__item"><strong>빌드 정보</strong><span>빌드키, 명령어, 언어, 컴파일러, Coverity Stream은 별도 페이지에서 관리합니다.</span></li>
+        <li class="signal-queue__item"><strong>집계 기준</strong><span>Bamboo 플랜 실행 중 여러 빌드가 일어나면 빌드키 기준으로 결과를 구분하고 취합할 수 있게 준비합니다.</span></li>
+      </ul>
+    </article>
+  </div>
+</section>
+
+<section class="registration-layout registration-layout--signal" id="build-plan-metadata-panel">
+  <article class="panel registration-panel registration-panel--signal">
+    <div class="panel__header">
+      <div>
+        <p class="panel__eyebrow">Build Plan Metadata</p>
+        <h2 class="panel__title">빌드 메타데이터 수정</h2>
+      </div>
+      <div class="panel__header-actions">
+        <span class="badge">Plan Scoped</span>
+        <a class="action-button action-button--ghost" href="{% url 'project-build-info-list' project.jiraProjectKey build.planKey %}">빌드 정보</a>
+      </div>
+    </div>
+    <p class="panel__body">플랜 공통 메타데이터는 이 패널에서 관리하고, 개별 실행 결과는 `빌드 정보` 페이지로 분리합니다.</p>
+    {% if metadataError %}
+    <div class="form-alert form-alert--error">{{ metadataError }}</div>
+    {% endif %}
+
+    <datalist id="static-analysis-tool-version-options">
+      {% for item in registrationSuggestions.staticAnalysisToolVersions %}
+      <option value="{{ item }}"></option>
+      {% endfor %}
+    </datalist>
+    <datalist id="coverity-project-options">
+      {% for item in registrationSuggestions.coverityProjects %}
+      <option value="{{ item }}"></option>
+      {% endfor %}
+    </datalist>
+
+    <form class="project-form" method="post" action="{% url 'project-build-detail' project.jiraProjectKey build.planKey %}">
+      {% csrf_token %}
+      <input type="hidden" name="form_kind" value="build_plan_metadata">
+      <div class="project-form__grid">
+        <label class="project-form__field">
+          <span class="project-form__label">정적분석 도구 버전</span>
+          {{ metadataForm.static_analysis_tool_version }}
+          {% if metadataForm.static_analysis_tool_version.errors %}<span class="project-form__error">{{ metadataForm.static_analysis_tool_version.errors|join:", " }}</span>{% endif %}
+        </label>
+        <label class="project-form__field">
+          <span class="project-form__label">Coverity Project</span>
+          {{ metadataForm.coverity_project }}
+          {% if metadataForm.coverity_project.errors %}<span class="project-form__error">{{ metadataForm.coverity_project.errors|join:", " }}</span>{% endif %}
+        </label>
+      </div>
+      <div class="project-form__actions">
+        <button class="action-button" type="submit">수정 저장</button>
+      </div>
+    </form>
+  </article>
+
+  <aside class="panel registration-hints registration-hints--signal">
+    <div class="panel__header">
+      <h2 class="panel__title">관리 기준</h2>
+    </div>
+    <ul class="meta-list">
+      <li><strong>정적분석 도구 버전</strong> 플랜 단위 공통 버전 문자열을 관리합니다.</li>
+      <li><strong>Coverity Project</strong> 저장소별 Coverity와 별도로, 빌드 플랜이 직접 참조하는 프로젝트명을 관리합니다.</li>
+      <li><strong>빌드 정보</strong> 빌드 환경구성은 별도 페이지에서 빌드키 단위로 관리합니다.</li>
+    </ul>
+  </aside>
+</section>
+
+<section class="stat-grid">
+  <article class="stat-card stat-card--signal">
+    <span class="stat-card__label">Static Analysis</span>
+    <p class="stat-card__value stat-card__value--compact">{{ build.staticAnalysisToolVersion|default:"-" }}</p>
+    <p class="stat-card__meta">플랜 공통 정적분석 도구 버전</p>
+  </article>
+  <article class="stat-card stat-card--signal">
+    <span class="stat-card__label">Coverity Project</span>
+    <p class="stat-card__value stat-card__value--compact">{{ build.coverityProject|default:"-" }}</p>
+    <p class="stat-card__meta">빌드 플랜이 참조하는 Coverity 프로젝트</p>
+  </article>
+  <article class="stat-card stat-card--signal">
+    <span class="stat-card__label">Build Infos</span>
+    <p class="stat-card__value">{{ build.buildInfoCount }}</p>
+    <p class="stat-card__meta">등록된 빌드 환경구성 수</p>
+  </article>
+</section>
+
+<section class="detail-grid detail-grid--resource">
+  <article class="panel panel--signal-list">
+    <div class="panel__header">
+      <h2 class="panel__title">빌드 플랜 메타데이터</h2>
+    </div>
+    <ul class="meta-list">
+      <li><strong>Project</strong>{{ project.jiraProjectKey }}</li>
+      <li><strong>Build Name</strong>{{ build.buildName }}</li>
+      <li><strong>Build Type</strong>{{ build.buildType|default:"미지정" }}</li>
+      <li><strong>Runtime Stack</strong>{{ build.runtimeStack|default:"미지정" }}</li>
+      <li><strong>Build ID</strong>{{ build.buildId }}</li>
+      <li><strong>Plan Key</strong>{{ build.planKey }}</li>
+      <li><strong>정적분석 도구 버전</strong>{{ build.staticAnalysisToolVersion|default:"미지정" }}</li>
+      <li><strong>Coverity Project</strong>{{ build.coverityProject|default:"미지정" }}</li>
+    </ul>
+  </article>
+
+  <article class="panel panel--signal-list">
+    <div class="panel__header">
+      <h2 class="panel__title">연결 정보</h2>
+    </div>
+    <ul class="meta-list">
+      <li><strong>Repository</strong>{% if repository %}<a href="{% url 'project-repository-detail' project.jiraProjectKey repository.repoSlug %}">{{ repository.repoSlug }}</a>{% else %}미연결{% endif %}</li>
+      <li><strong>Latest Version</strong>{{ build.latestVersion|default:"미기록" }}</li>
+      <li><strong>Latest Result</strong>{% if build.latestSuccess %}성공{% elif build.latestSuccess == False %}실패{% else %}미기록{% endif %}</li>
+      <li><strong>Build Info Page</strong><a href="{% url 'project-build-info-list' project.jiraProjectKey build.planKey %}">빌드 정보 관리</a></li>
+    </ul>
+  </article>
+
+  <article class="panel panel--signal-list">
+    <div class="panel__header">
+      <h2 class="panel__title">운영 포인트</h2>
+    </div>
+    <ul class="meta-list">
+      <li><strong>메타데이터 상태</strong>{% if build.staticAnalysisToolVersion or build.coverityProject %}플랜 메타데이터가 일부 이상 채워져 있습니다.{% else %}플랜 메타데이터가 아직 비어 있습니다.{% endif %}</li>
+      <li><strong>빌드 정보 상태</strong>{% if build.buildInfoCount %}빌드 정보 {{ build.buildInfoCount }}건이 등록돼 있습니다.{% else %}아직 빌드 정보가 없습니다.{% endif %}</li>
+      <li><strong>저장소 연결</strong>{% if repository %}저장소 slug와 플랜이 연결돼 있습니다.{% else %}저장소 연결이 누락돼 있습니다.{% endif %}</li>
+    </ul>
+  </article>
+</section>
+
+<section class="panel panel--signal-list">
+  <div class="panel__header">
+    <div>
+      <p class="panel__eyebrow">Build Info Snapshot</p>
+      <h2 class="panel__title">등록된 빌드 정보</h2>
+    </div>
+    <a class="chip chip--neutral" href="{% url 'project-build-info-list' project.jiraProjectKey build.planKey %}">전체 관리</a>
+  </div>
+  <ul class="entity-preview-list">
+    {% for buildInfo in buildInfoEntries %}
+    <li class="entity-preview-item">
+      <div>
+        <strong>{{ buildInfo.buildKey }}</strong>
+        <p>{{ buildInfo.language|default:"언어 미지정" }} · {{ buildInfo.compiler|default:"컴파일러 미지정" }} · {{ buildInfo.coverityStream|default:"Coverity Stream 미지정" }}</p>
+      </div>
+      <div class="chip-row">
+        <span class="chip chip--neutral">{{ buildInfo.executionCount }} runs</span>
+        <a class="chip chip--neutral" href="{% url 'project-build-info-detail' project.jiraProjectKey build.planKey buildInfo.buildKey %}">상세</a>
+      </div>
+    </li>
+    {% empty %}
+    <li class="empty-state empty-state--inline">
+      <h3 class="empty-state__title">등록된 빌드 정보가 없습니다.</h3>
+      <p class="empty-state__body">플랜 안에서 여러 빌드가 돌 수 있다면 먼저 빌드키별 환경구성을 등록해 주세요.</p>
+    </li>
+    {% endfor %}
+  </ul>
+</section>
+{% elif project %}
+<section class="empty-state">
+  <h1 class="empty-state__title">빌드를 찾을 수 없습니다.</h1>
+  <p class="empty-state__body">요청한 Plan Key가 현재 프로젝트에 연결되어 있지 않습니다.</p>
+</section>
+{% else %}
+<section class="empty-state">
+  <h1 class="empty-state__title">프로젝트를 찾을 수 없습니다.</h1>
+  <p class="empty-state__body">프로젝트가 없어서 빌드 상세를 불러올 수 없습니다.</p>
+</section>
+{% endif %}
+{% endblock %}

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from django.core.exceptions import ObjectDoesNotExist
-
 from apps.buildmeta.models import BuildPlan
 
 
@@ -40,6 +39,53 @@ def list_latest_failed_builds(limit: int = 5) -> list[dict]:
     ]
 
 
+def list_build_plan_summaries() -> list[dict]:
+    plans = (
+        BuildPlan.objects.select_related(
+            "latest_version__latest_execution",
+            "project_build__project",
+            "project_build__repository",
+        )
+        .prefetch_related("executions", "build_infos")
+        .order_by("project_build__project__jira_project_key", "project_build__build_name", "plan_key")
+    )
+    summaries = []
+    for plan in plans:
+        project_build = getattr(plan, "project_build", None)
+        project = project_build.project if project_build is not None else None
+        repository = project_build.repository if project_build is not None else None
+        latest_execution = plan.latest_version.latest_execution if plan.latest_version is not None else None
+        summaries.append(
+            {
+                "projectKey": project.jira_project_key if project is not None else "",
+                "buildName": project_build.build_name if project_build is not None else plan.plan_key,
+                "buildType": project_build.build_type if project_build is not None else "",
+                "runtimeStack": project_build.runtime_stack if project_build is not None else "",
+                "planKey": plan.plan_key,
+                "buildId": plan.build_id,
+                "staticAnalysisToolVersion": plan.static_analysis_tool_version,
+                "coverityProject": plan.coverity_project,
+                "repositorySlug": repository.repo_slug if repository is not None else "",
+                "latestVersion": plan.latest_version.version_text if plan.latest_version is not None else "",
+                "latestSuccess": plan.latest_version.latest_success if plan.latest_version is not None else None,
+                "resultStatus": latest_execution.result_status if latest_execution is not None else "",
+                "summaryMessage": latest_execution.summary_message if latest_execution is not None else "",
+                "buildInfoCount": plan.build_infos.count(),
+                "detailUrl": (
+                    f"/projects/{project.jira_project_key}/builds/{plan.plan_key}/"
+                    if project is not None
+                    else ""
+                ),
+                "buildInfoUrl": (
+                    f"/projects/{project.jira_project_key}/builds/{plan.plan_key}/infos/"
+                    if project is not None
+                    else ""
+                ),
+            }
+        )
+    return summaries
+
+
 def list_executions_by_plan_key(plan_key: str) -> list[dict] | None:
     try:
         plan = BuildPlan.objects.prefetch_related(
@@ -54,6 +100,7 @@ def list_executions_by_plan_key(plan_key: str) -> list[dict] | None:
         {
             "buildExecutionId": str(execution.id),
             "buildVersionId": str(execution.build_version_id),
+            "buildKey": execution.build_info.build_key if execution.build_info_id else "",
             "version": execution.build_version.version_text,
             "buildNumber": execution.build_number,
             "commitHash": execution.commit_hash,

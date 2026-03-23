@@ -23,7 +23,7 @@
     <p class="signal-hero__eyebrow">Operations Radar</p>
     <h1 class="hero__title">주의가 필요한 프로젝트를 먼저 보여줍니다.</h1>
     <p class="signal-hero__body">
-      등록 정보, 활성 정의 연결, 최근 실패 빌드를 한 화면에서 모아 우선순위를 빠르게 결정할 수 있도록 구성했습니다.
+      등록 정보, 저장소 연결 상태, 최근 실패 빌드를 한 화면에서 모아 우선순위를 빠르게 결정할 수 있도록 구성했습니다.
     </p>
     <div class="hero__actions">
       <button
@@ -87,7 +87,7 @@
 <section class="signal-strip" data-reveal>
   <article class="signal-strip__panel">
     <p class="signal-strip__label">Attention Logic</p>
-    <p class="signal-strip__body">활성 정의 누락, 저장소 메타데이터 누락, 최근 실패 빌드가 있으면 우선 대상에 포함합니다.</p>
+    <p class="signal-strip__body">저장소 메타데이터 누락, 저장소 연결 누락, 최근 실패 빌드가 있으면 우선 대상에 포함합니다.</p>
   </article>
   <article class="signal-strip__panel">
     <p class="signal-strip__label">Registration Flow</p>
@@ -365,9 +365,9 @@
           <strong>{{ project.jiraProjectKey }}</strong>
           <div class="stack-top">
             {% if project.generationReady %}
-            <span class="chip chip--success">Specs 생성 가능</span>
+            <span class="chip chip--success">운영 준비</span>
             {% else %}
-            <span class="chip chip--warning">활성 정의 {{ project.activeDefinitionCount }}/{{ project.buildCount }}</span>
+            <span class="chip chip--warning">연결 점검 필요</span>
             {% endif %}
           </div>
           <div class="chip-row stack-top">
@@ -428,6 +428,7 @@
     const buildStack = document.querySelector("[data-build-stack]");
     const addRepositoryButton = document.querySelector("[data-add-repository]");
     const addBuildButton = document.querySelector("[data-add-build]");
+    const registrationForm = registrationPanel ? registrationPanel.querySelector(".project-form") : null;
 
     function scrollWithHeaderOffset(target) {
       if (!target) {
@@ -458,6 +459,29 @@
           }
         });
       });
+    }
+
+    function resetRegistrationPanel() {
+      if (!registrationPanel || !registrationForm) {
+        return;
+      }
+
+      registrationForm.reset();
+
+      if (repositoryStack && repositoryTemplate) {
+        repositoryStack.replaceChildren(repositoryTemplate.content.cloneNode(true));
+      }
+      if (buildStack && buildTemplate) {
+        buildStack.replaceChildren(buildTemplate.content.cloneNode(true));
+      }
+
+      registrationPanel.querySelectorAll(".form-alert, .project-form__error").forEach(function (node) {
+        node.remove();
+      });
+
+      if (window.BambooUiEnhanceSuggestionInputs) {
+        window.BambooUiEnhanceSuggestionInputs(registrationPanel);
+      }
     }
 
     function syncDashboardHeights() {
@@ -529,6 +553,7 @@
             });
             scrollWithHeaderOffset(registrationPanel);
           } else {
+            resetRegistrationPanel();
             registrationPanel.setAttribute("hidden", "");
             registrationPanel.classList.add("registration-layout--collapsed");
             document.querySelectorAll("[data-toggle-registration]").forEach(function (toggle) {
@@ -557,17 +582,26 @@
     if (repositoryTemplate && repositoryStack && addRepositoryButton) {
       addRepositoryButton.addEventListener("click", function () {
         repositoryStack.appendChild(repositoryTemplate.content.cloneNode(true));
+        if (window.BambooUiEnhanceSuggestionInputs) {
+          window.BambooUiEnhanceSuggestionInputs(repositoryStack);
+        }
       });
     }
 
     if (buildTemplate && buildStack && addBuildButton) {
       addBuildButton.addEventListener("click", function () {
         buildStack.appendChild(buildTemplate.content.cloneNode(true));
+        if (window.BambooUiEnhanceSuggestionInputs) {
+          window.BambooUiEnhanceSuggestionInputs(buildStack);
+        }
       });
     }
 
     bindRepositoryDialogs(document);
     initPartialPagination();
+    if (window.BambooUiEnhanceSuggestionInputs) {
+      window.BambooUiEnhanceSuggestionInputs(document);
+    }
     syncDashboardHeights();
     window.addEventListener("load", syncDashboardHeights);
     window.addEventListener("resize", syncDashboardHeights);

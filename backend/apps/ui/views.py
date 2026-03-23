@@ -3,12 +3,23 @@ from __future__ import annotations
 from django.core.paginator import Paginator
 from django.shortcuts import redirect, render
 
-from apps.buildmeta.models import Project, ProjectRepository
-from apps.buildmeta.selectors.executions import list_latest_failed_builds
+from apps.buildmeta.models import BuildPlan, BuildPlanBuildInfo, Project, ProjectRepository
+from apps.buildmeta.selectors.executions import (
+    list_build_plan_summaries,
+    list_executions_by_plan_key,
+    list_latest_failed_builds,
+)
 from apps.buildmeta.selectors.projects import get_project_detail, list_project_summaries
-from apps.buildmeta.services import create_project, update_project
+from apps.buildmeta.services import create_project, update_build_plan_metadata, update_project, upsert_build_info
 
-from .forms import ProjectRegistrationForm
+from .forms import (
+    BuildMetadataForm,
+    BuildInfoMetadataForm,
+    BuildPlanMetadataForm,
+    ProjectMetadataForm,
+    ProjectRegistrationForm,
+    RepositoryMetadataForm,
+)
 
 
 def project_list(request):
@@ -81,44 +92,307 @@ def project_list(request):
     return render(request, "ui/project_list.html", context)
 
 
+def build_plan_list(request):
+    plans = list_build_plan_summaries()
+    query = request.GET.get("q", "").strip().lower()
+    status_filter = request.GET.get("status", "all").strip().lower()
+
+    if query:
+        plans = [
+            plan
+            for plan in plans
+            if query in plan["projectKey"].lower()
+            or query in plan["buildName"].lower()
+            or query in plan["planKey"].lower()
+            or query in plan["buildId"].lower()
+            or query in (plan["staticAnalysisToolVersion"] or "").lower()
+            or query in (plan["coverityProject"] or "").lower()
+            or query in (plan["repositorySlug"] or "").lower()
+        ]
+
+    if status_filter == "attention":
+        plans = [
+            plan
+            for plan in plans
+            if not plan["repositorySlug"]
+            or plan["latestSuccess"] is False
+            or not plan["staticAnalysisToolVersion"]
+            or not plan["coverityProject"]
+        ]
+    elif status_filter == "failed":
+        plans = [plan for plan in plans if plan["latestSuccess"] is False]
+
+    failed_count = sum(1 for plan in plans if plan["latestSuccess"] is False)
+    linked_count = sum(1 for plan in plans if plan["repositorySlug"])
+    context = {
+        "plans": plans,
+        "statusFilter": status_filter,
+        "query": request.GET.get("q", "").strip(),
+        "summary": {
+            "totalPlans": len(plans),
+            "linkedPlans": linked_count,
+            "failedPlans": failed_count,
+        },
+        "failedBuilds": list_latest_failed_builds(),
+        "navProjectSearchItems": _build_nav_project_search_items(list_project_summaries()),
+    }
+    return render(request, "ui/build_plan_list.html", context)
+
+
 def project_detail(request, jira_project_key: str):
     project = get_project_detail(jira_project_key)
     if project is None:
         return render(request, "ui/project_detail.html", {"project": None})
 
-    edit_form = ProjectRegistrationForm(initial=_build_form_initial(project))
+    edit_form = ProjectMetadataForm(initial=_build_project_metadata_initial(project))
+    repository_add_form = RepositoryMetadataForm()
+    build_add_form = BuildMetadataForm()
     edit_error = ""
-    repository_rows = project["repositories"] or [_blank_repository_row()]
-    build_rows = project["builds"] or [_blank_build_row()]
+    repository_add_error = ""
+    build_add_error = ""
     edit_open = request.GET.get("edit", "").lower() in {"1", "true", "open"}
+    repository_add_open = request.GET.get("add_repository", "").lower() in {"1", "true", "open"}
+    build_add_open = request.GET.get("add_build", "").lower() in {"1", "true", "open"}
 
     if request.method == "POST":
-        edit_form = ProjectRegistrationForm(request.POST)
-        repository_rows = _extract_repository_rows(request.POST)
-        build_rows = _extract_build_rows(request.POST)
-        edit_open = True
-        if edit_form.is_valid():
-            try:
-                payload = _build_project_payload(edit_form, repository_rows, build_rows)
-                project = update_project(jira_project_key, payload)
-            except ValueError as exc:
-                edit_error = str(exc)
-            else:
-                if project is None:
-                    return render(request, "ui/project_detail.html", {"project": None})
-                return redirect("project-detail", jira_project_key=project["jiraProjectKey"])
+        form_kind = request.POST.get("form_kind", "").strip()
+        if form_kind == "project":
+            edit_form = ProjectMetadataForm(request.POST)
+            edit_open = True
+            if edit_form.is_valid():
+                try:
+                    payload = _build_project_metadata_payload(project, edit_form)
+                    project = update_project(jira_project_key, payload)
+                except ValueError as exc:
+                    edit_error = str(exc)
+                else:
+                    if project is None:
+                        return render(request, "ui/project_detail.html", {"project": None})
+                    return redirect("project-detail", jira_project_key=project["jiraProjectKey"])
+        elif form_kind == "repository":
+            repository_add_form = RepositoryMetadataForm(request.POST)
+            repository_add_open = True
+            if repository_add_form.is_valid():
+                try:
+                    payload = _build_repository_append_payload(project, repository_add_form)
+                    update_project(jira_project_key, payload)
+                except ValueError as exc:
+                    repository_add_error = str(exc)
+                else:
+                    return redirect(
+                        "project-repository-detail",
+                        jira_project_key=jira_project_key,
+                        repo_slug=repository_add_form.cleaned_data["repo_slug"].strip(),
+                    )
+        elif form_kind == "build":
+            build_add_form = BuildMetadataForm(request.POST)
+            build_add_open = True
+            if build_add_form.is_valid():
+                try:
+                    payload = _build_plan_append_payload(project, build_add_form)
+                    update_project(jira_project_key, payload)
+                except ValueError as exc:
+                    build_add_error = str(exc)
+                else:
+                    return redirect(
+                        "project-build-detail",
+                        jira_project_key=jira_project_key,
+                        plan_key=build_add_form.cleaned_data["plan_key"].strip(),
+                    )
 
     context = {
         "project": project,
         "editForm": edit_form,
         "editError": edit_error,
-        "repositoryRows": repository_rows,
-        "buildRows": build_rows,
         "editOpen": edit_open,
+        "repositoryAddForm": repository_add_form,
+        "repositoryAddError": repository_add_error,
+        "repositoryAddOpen": repository_add_open,
+        "buildAddForm": build_add_form,
+        "buildAddError": build_add_error,
+        "buildAddOpen": build_add_open,
+        "registrationSuggestions": _build_registration_suggestions(),
+        "navProjectSearchItems": _build_nav_project_search_items(list_project_summaries()),
+        "repositoryEntries": _build_repository_entries(project),
+    }
+    return render(request, "ui/project_detail.html", context)
+
+
+def project_repository_detail(request, jira_project_key: str, repo_slug: str):
+    project = get_project_detail(jira_project_key)
+    if project is None:
+        return render(request, "ui/repository_detail.html", {"project": None, "repository": None})
+
+    repository = next((item for item in project["repositories"] if item["repoSlug"] == repo_slug), None)
+    if repository is None:
+        return render(request, "ui/repository_detail.html", {"project": project, "repository": None})
+
+    linked_builds = [
+        build
+        for build in project["builds"]
+        if build["repositorySlug"] == repo_slug
+    ]
+    context = {
+        "project": project,
+        "repository": repository,
+        "linkedBuilds": linked_builds,
+        "navProjectSearchItems": _build_nav_project_search_items(list_project_summaries()),
+    }
+    return render(request, "ui/repository_detail.html", context)
+
+
+def project_build_detail(request, jira_project_key: str, plan_key: str):
+    project = get_project_detail(jira_project_key)
+    if project is None:
+        return render(request, "ui/build_detail.html", {"project": None, "build": None})
+
+    build = next((item for item in project["builds"] if item["planKey"] == plan_key), None)
+    if build is None:
+        return render(request, "ui/build_detail.html", {"project": project, "build": None})
+
+    metadata_form = BuildPlanMetadataForm(initial=_build_build_plan_metadata_initial(build))
+    metadata_error = ""
+    metadata_open = request.GET.get("edit", "").lower() in {"1", "true", "open"}
+
+    if request.method == "POST" and request.POST.get("form_kind", "").strip() == "build_plan_metadata":
+        metadata_form = BuildPlanMetadataForm(request.POST)
+        metadata_open = True
+        if metadata_form.is_valid():
+            update_build_plan_metadata(
+                plan_key=plan_key,
+                static_analysis_tool_version=metadata_form.cleaned_data["static_analysis_tool_version"],
+                coverity_project=metadata_form.cleaned_data["coverity_project"],
+            )
+            return redirect("project-build-detail", jira_project_key=jira_project_key, plan_key=plan_key)
+        metadata_error = "빌드 플랜 메타데이터를 다시 확인해 주세요."
+
+    project = get_project_detail(jira_project_key)
+    if project is None:
+        return render(request, "ui/build_detail.html", {"project": None, "build": None})
+
+    build = next((item for item in project["builds"] if item["planKey"] == plan_key), None)
+    if build is None:
+        return render(request, "ui/build_detail.html", {"project": project, "build": None})
+
+    repository = next(
+        (item for item in project["repositories"] if item["repoSlug"] == build["repositorySlug"]),
+        None,
+    )
+    context = {
+        "project": project,
+        "build": build,
+        "repository": repository,
+        "metadataForm": metadata_form,
+        "metadataError": metadata_error,
+        "metadataOpen": metadata_open,
+        "buildInfoEntries": _list_build_info_entries(plan_key),
         "registrationSuggestions": _build_registration_suggestions(),
         "navProjectSearchItems": _build_nav_project_search_items(list_project_summaries()),
     }
-    return render(request, "ui/project_detail.html", context)
+    return render(request, "ui/build_detail.html", context)
+
+
+def project_build_info_list(request, jira_project_key: str, plan_key: str):
+    project = get_project_detail(jira_project_key)
+    if project is None:
+        return render(request, "ui/build_info_list.html", {"project": None, "build": None, "executions": []})
+
+    build = next((item for item in project["builds"] if item["planKey"] == plan_key), None)
+    if build is None:
+        return render(request, "ui/build_info_list.html", {"project": project, "build": None, "executions": []})
+
+    repository = next(
+        (item for item in project["repositories"] if item["repoSlug"] == build["repositorySlug"]),
+        None,
+    )
+    build_info_form = BuildInfoMetadataForm()
+    build_info_error = ""
+
+    if request.method == "POST" and request.POST.get("form_kind", "").strip() == "build_info":
+        build_info_form = BuildInfoMetadataForm(request.POST)
+        if build_info_form.is_valid():
+            upsert_build_info(
+                plan_key=plan_key,
+                build_key=build_info_form.cleaned_data["build_key"],
+                pre_process=build_info_form.cleaned_data["pre_process"],
+                build_command=build_info_form.cleaned_data["build_command"],
+                clean_command=build_info_form.cleaned_data["clean_command"],
+                language=build_info_form.cleaned_data["language"],
+                compiler=build_info_form.cleaned_data["compiler"],
+                analysis_excluded_files=build_info_form.cleaned_data["analysis_excluded_files"],
+                coverity_stream=build_info_form.cleaned_data["coverity_stream"],
+                build_sub_path=build_info_form.cleaned_data["build_sub_path"],
+            )
+            return redirect("project-build-info-list", jira_project_key=jira_project_key, plan_key=plan_key)
+        build_info_error = "빌드 정보 입력값을 다시 확인해 주세요."
+
+    context = {
+        "project": project,
+        "build": build,
+        "repository": repository,
+        "buildInfoEntries": _list_build_info_entries(plan_key),
+        "buildInfoForm": build_info_form,
+        "buildInfoError": build_info_error,
+        "executionGroups": _list_execution_groups(plan_key),
+        "registrationSuggestions": _build_registration_suggestions(),
+        "navProjectSearchItems": _build_nav_project_search_items(list_project_summaries()),
+    }
+    return render(request, "ui/build_info_list.html", context)
+
+
+def project_build_info_detail(request, jira_project_key: str, plan_key: str, build_key: str):
+    project = get_project_detail(jira_project_key)
+    if project is None:
+        return render(request, "ui/build_info_detail.html", {"project": None, "build": None, "buildInfo": None})
+
+    build = next((item for item in project["builds"] if item["planKey"] == plan_key), None)
+    if build is None:
+        return render(request, "ui/build_info_detail.html", {"project": project, "build": None, "buildInfo": None})
+
+    build_info = BuildPlanBuildInfo.objects.filter(build_plan__plan_key=plan_key, build_key=build_key).first()
+    if build_info is None:
+        return render(request, "ui/build_info_detail.html", {"project": project, "build": build, "buildInfo": None})
+
+    form = BuildInfoMetadataForm(initial=_build_info_initial(build_info))
+    error = ""
+    if request.method == "POST":
+        form = BuildInfoMetadataForm(request.POST)
+        if form.is_valid():
+            upsert_build_info(
+                plan_key=plan_key,
+                build_key=form.cleaned_data["build_key"],
+                pre_process=form.cleaned_data["pre_process"],
+                build_command=form.cleaned_data["build_command"],
+                clean_command=form.cleaned_data["clean_command"],
+                language=form.cleaned_data["language"],
+                compiler=form.cleaned_data["compiler"],
+                analysis_excluded_files=form.cleaned_data["analysis_excluded_files"],
+                coverity_stream=form.cleaned_data["coverity_stream"],
+                build_sub_path=form.cleaned_data["build_sub_path"],
+            )
+            return redirect(
+                "project-build-info-detail",
+                jira_project_key=jira_project_key,
+                plan_key=plan_key,
+                build_key=form.cleaned_data["build_key"].strip(),
+            )
+        error = "빌드 정보 입력값을 다시 확인해 주세요."
+
+    repository = next(
+        (item for item in project["repositories"] if item["repoSlug"] == build["repositorySlug"]),
+        None,
+    )
+    context = {
+        "project": project,
+        "build": build,
+        "repository": repository,
+        "buildInfo": _serialize_build_info(build_info),
+        "buildInfoForm": form,
+        "buildInfoError": error,
+        "executionGroups": _list_execution_groups(plan_key),
+        "navProjectSearchItems": _build_nav_project_search_items(list_project_summaries()),
+    }
+    return render(request, "ui/build_info_detail.html", context)
 
 
 def _build_pagination_base_query(request) -> str:
@@ -172,9 +446,6 @@ def _build_project_payload(registration_form: ProjectRegistrationForm, repositor
 
     for repository in repositories:
         repository["isRepresentative"] = repository["repoSlug"] == representative_repo_slug
-    for build in builds:
-        if build["repositorySlug"] not in repository_slugs:
-            raise ValueError(f"빌드 연결 저장소 '{build['repositorySlug']}' 가 저장소 목록에 없습니다.")
 
     return {
         "jiraProjectKey": registration_form.cleaned_data["jira_project_key"].strip(),
@@ -265,6 +536,12 @@ def _build_registration_suggestions() -> dict:
             .values_list("coverity_project", flat=True)
             .distinct()
         ),
+        "staticAnalysisToolVersions": list(
+            BuildPlan.objects.exclude(static_analysis_tool_version="")
+            .order_by("static_analysis_tool_version")
+            .values_list("static_analysis_tool_version", flat=True)
+            .distinct()
+        ),
         "coverityStreams": list(
             ProjectRepository.objects.exclude(coverity_stream="")
             .order_by("coverity_stream")
@@ -295,9 +572,168 @@ def _build_nav_project_search_items(projects: list[dict]) -> list[dict]:
     ]
 
 
-def _build_form_initial(project: dict) -> dict:
+def _build_project_metadata_initial(project: dict) -> dict:
     return {
-        "jira_project_key": project["jiraProjectKey"],
         "bitbucket_project_key": project["bitbucketProjectKey"],
         "representative_repo_slug": project["representativeRepoSlug"],
     }
+
+
+def _build_build_plan_metadata_initial(build: dict) -> dict:
+    return {
+        "static_analysis_tool_version": build["staticAnalysisToolVersion"],
+        "coverity_project": build["coverityProject"],
+    }
+
+
+def _build_info_initial(build_info: BuildPlanBuildInfo) -> dict:
+    return {
+        "build_key": build_info.build_key,
+        "pre_process": build_info.pre_process,
+        "build_command": build_info.build_command,
+        "clean_command": build_info.clean_command,
+        "language": build_info.language,
+        "compiler": build_info.compiler,
+        "analysis_excluded_files": build_info.analysis_excluded_files,
+        "coverity_stream": build_info.coverity_stream,
+        "build_sub_path": build_info.build_sub_path,
+    }
+
+
+def _build_project_payload_from_detail(project: dict) -> dict:
+    return {
+        "jiraProjectKey": project["jiraProjectKey"],
+        "bitbucketProjectKey": project["bitbucketProjectKey"],
+        "representativeRepoSlug": project["representativeRepoSlug"],
+        "repositories": [
+            {
+                "repoSlug": repository["repoSlug"],
+                "coverityProject": repository["coverityProject"],
+                "coverityStream": repository["coverityStream"],
+                "isRepresentative": repository["isRepresentative"],
+            }
+            for repository in project["repositories"]
+        ],
+        "builds": [
+            {
+                "buildName": build["buildName"],
+                "buildType": build["buildType"],
+                "runtimeStack": build["runtimeStack"],
+                "buildId": build["buildId"],
+                "planKey": build["planKey"],
+                "repositorySlug": build["repositorySlug"],
+            }
+            for build in project["builds"]
+        ],
+    }
+
+
+def _build_project_metadata_payload(project: dict, edit_form: ProjectMetadataForm) -> dict:
+    payload = _build_project_payload_from_detail(project)
+    representative_repo_slug = edit_form.cleaned_data["representative_repo_slug"].strip()
+    repository_slugs = {repository["repoSlug"] for repository in payload["repositories"]}
+    if representative_repo_slug not in repository_slugs:
+        raise ValueError("대표 저장소는 등록한 저장소 목록 중 하나여야 합니다.")
+
+    payload["bitbucketProjectKey"] = edit_form.cleaned_data["bitbucket_project_key"].strip()
+    payload["representativeRepoSlug"] = representative_repo_slug
+    for repository in payload["repositories"]:
+        repository["isRepresentative"] = repository["repoSlug"] == representative_repo_slug
+    return payload
+
+
+def _build_repository_append_payload(project: dict, add_form: RepositoryMetadataForm) -> dict:
+    payload = _build_project_payload_from_detail(project)
+    payload["repositories"].append(
+        {
+            "repoSlug": add_form.cleaned_data["repo_slug"].strip(),
+            "coverityProject": add_form.cleaned_data["coverity_project"].strip(),
+            "coverityStream": add_form.cleaned_data["coverity_stream"].strip(),
+            "isRepresentative": False,
+        }
+    )
+    return payload
+
+
+def _build_plan_append_payload(project: dict, add_form: BuildMetadataForm) -> dict:
+    payload = _build_project_payload_from_detail(project)
+    payload["builds"].append(
+        {
+            "buildName": add_form.cleaned_data["build_name"].strip(),
+            "buildType": add_form.cleaned_data["build_type"].strip(),
+            "runtimeStack": add_form.cleaned_data["runtime_stack"].strip(),
+            "buildId": add_form.cleaned_data["build_id"].strip(),
+            "planKey": add_form.cleaned_data["plan_key"].strip(),
+            "repositorySlug": add_form.cleaned_data["build_repository_slug"].strip(),
+        }
+    )
+    return payload
+
+
+def _build_repository_linked_build_counts(project: dict) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for build in project["builds"]:
+        counts[build["repositorySlug"]] = counts.get(build["repositorySlug"], 0) + 1
+    return counts
+
+
+def _build_repository_entries(project: dict) -> list[dict]:
+    linked_build_counts = _build_repository_linked_build_counts(project)
+    return [
+        {**repository, "linkedBuildCount": linked_build_counts.get(repository["repoSlug"], 0)}
+        for repository in project["repositories"]
+    ]
+
+
+def _serialize_build_info(build_info: BuildPlanBuildInfo) -> dict:
+    return {
+        "buildKey": build_info.build_key,
+        "preProcess": build_info.pre_process,
+        "buildCommand": build_info.build_command,
+        "cleanCommand": build_info.clean_command,
+        "language": build_info.language,
+        "compiler": build_info.compiler,
+        "analysisExcludedFiles": build_info.analysis_excluded_files,
+        "coverityStream": build_info.coverity_stream,
+        "buildSubPath": build_info.build_sub_path,
+        "executionCount": build_info.executions.count(),
+    }
+
+
+def _list_build_info_entries(plan_key: str) -> list[dict]:
+    return [
+        _serialize_build_info(build_info)
+        for build_info in BuildPlanBuildInfo.objects.filter(build_plan__plan_key=plan_key)
+        .prefetch_related("executions")
+        .order_by("build_key")
+    ]
+
+
+def _list_execution_groups(plan_key: str) -> list[dict]:
+    executions = list_executions_by_plan_key(plan_key) or []
+    grouped: dict[str, dict] = {}
+    for execution in executions:
+        build_key = execution["buildKey"] or "미분류"
+        bucket = grouped.setdefault(
+            build_key,
+            {
+                "buildKey": build_key,
+                "executionCount": 0,
+                "latestResult": "",
+                "latestVersion": "",
+                "toolNames": set(),
+            },
+        )
+        bucket["executionCount"] += 1
+        if not bucket["latestResult"]:
+            bucket["latestResult"] = execution["resultStatus"] or "미기록"
+            bucket["latestVersion"] = execution["version"]
+        for result in execution["staticAnalysisResults"]:
+            bucket["toolNames"].add(result["toolName"])
+    return [
+        {
+            **bucket,
+            "toolNames": sorted(bucket["toolNames"]),
+        }
+        for bucket in grouped.values()
+    ]

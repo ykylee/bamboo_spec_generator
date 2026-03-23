@@ -1,0 +1,220 @@
+{% extends "ui/base.html" %}
+
+{% block title %}{% if build %}{{ build.buildName }} 빌드 정보 | Bamboo Spec Generator{% else %}빌드 정보 | Bamboo Spec Generator{% endif %}{% endblock %}
+{% block body_class %}page-resource-index{% endblock %}
+{% block page_heading %}{% if build %}{{ build.buildName }} 빌드 정보{% else %}빌드 정보{% endif %}{% endblock %}
+
+{% block content %}
+{% if project and build %}
+<section class="signal-hero signal-hero--workspace">
+  <div class="signal-hero__content">
+    <p class="signal-hero__eyebrow">Build Info Index</p>
+    <h1 class="hero__title">{{ build.buildName }} 빌드 정보</h1>
+    <p class="signal-hero__body">플랜 아래 여러 빌드키를 등록하고, pre process, 빌드/클린 명령어, 언어, 컴파일러, 분석 제외 파일, Coverity Stream, 빌드 sub path를 개별 관리합니다.</p>
+    <div class="hero__actions">
+      <a class="action-button" href="{% url 'project-build-detail' project.jiraProjectKey build.planKey %}">빌드 플랜 상세</a>
+      {% if repository %}
+      <a class="action-button action-button--ghost" href="{% url 'project-repository-detail' project.jiraProjectKey repository.repoSlug %}">저장소 상세</a>
+      {% endif %}
+    </div>
+    <div class="chip-row">
+      <span class="chip">{{ build.planKey }}</span>
+      <span class="chip chip--neutral">{{ build.buildId }}</span>
+      <span class="chip chip--neutral">{{ buildInfoEntries|length }} build infos</span>
+    </div>
+  </div>
+  <div class="signal-hero__board" aria-label="빌드 정보 보드">
+    <article class="signal-metric signal-metric--primary">
+      <span class="signal-metric__label">Build Infos</span>
+      <strong class="signal-metric__value">{{ buildInfoEntries|length }}</strong>
+      <p class="signal-metric__meta">플랜 아래 등록된 빌드 환경구성 수</p>
+    </article>
+    <article class="signal-metric">
+      <span class="signal-metric__label">Execution Groups</span>
+      <strong class="signal-metric__value">{{ executionGroups|length }}</strong>
+      <p class="signal-metric__meta">현재 실행 이력이 묶이는 빌드키 그룹 수</p>
+    </article>
+    <article class="signal-metric">
+      <span class="signal-metric__label">Repository</span>
+      <strong class="signal-metric__value signal-metric__value--compact">{{ build.repositorySlug|default:"-" }}</strong>
+      <p class="signal-metric__meta">현재 플랜과 연결된 저장소 slug</p>
+    </article>
+    <article class="signal-metric signal-metric--list">
+      <div class="signal-metric__header">
+        <span class="signal-metric__label">Included Data</span>
+        <span class="badge">Build Scoped</span>
+      </div>
+      <ul class="signal-queue">
+        <li class="signal-queue__item"><strong>빌드키</strong><span>플랜 내부 여러 빌드 단위를 구분하는 키입니다.</span></li>
+        <li class="signal-queue__item"><strong>환경구성</strong><span>명령어, 언어, 컴파일러, 제외 파일, sub path를 빌드별로 관리합니다.</span></li>
+        <li class="signal-queue__item"><strong>집계 연결</strong><span>실행 이력은 앞으로 buildKey 기준으로 연결되어 개별 분석 결과를 취합합니다.</span></li>
+      </ul>
+    </article>
+  </div>
+</section>
+
+<section class="section-grid section-grid--dashboard">
+  <section class="panel panel--project-list panel--signal-list">
+    <div class="panel__header">
+      <div>
+        <p class="panel__eyebrow">Build Registry</p>
+        <h2 class="panel__title">빌드 정보 목록</h2>
+      </div>
+      <span class="badge">{{ buildInfoEntries|length }} Items</span>
+    </div>
+    {% if buildInfoError %}
+    <div class="form-alert form-alert--error">{{ buildInfoError }}</div>
+    {% endif %}
+    <datalist id="coverity-stream-options">
+      {% for item in registrationSuggestions.coverityStreams %}
+      <option value="{{ item }}"></option>
+      {% endfor %}
+    </datalist>
+    <form class="project-form" method="post" action="{% url 'project-build-info-list' project.jiraProjectKey build.planKey %}">
+      {% csrf_token %}
+      <input type="hidden" name="form_kind" value="build_info">
+      <div class="project-form__grid">
+        <label class="project-form__field">
+          <span class="project-form__label">빌드키</span>
+          {{ buildInfoForm.build_key }}
+        </label>
+        <label class="project-form__field">
+          <span class="project-form__label">언어</span>
+          {{ buildInfoForm.language }}
+        </label>
+        <label class="project-form__field">
+          <span class="project-form__label">컴파일러</span>
+          {{ buildInfoForm.compiler }}
+        </label>
+        <label class="project-form__field">
+          <span class="project-form__label">Coverity Stream</span>
+          {{ buildInfoForm.coverity_stream }}
+        </label>
+        <label class="project-form__field">
+          <span class="project-form__label">빌드 Sub Path</span>
+          {{ buildInfoForm.build_sub_path }}
+        </label>
+        <label class="project-form__field project-form__field--span-3">
+          <span class="project-form__label">Pre Process</span>
+          {{ buildInfoForm.pre_process }}
+        </label>
+        <label class="project-form__field project-form__field--span-3">
+          <span class="project-form__label">빌드 명령어</span>
+          {{ buildInfoForm.build_command }}
+        </label>
+        <label class="project-form__field project-form__field--span-3">
+          <span class="project-form__label">클린 명령어</span>
+          {{ buildInfoForm.clean_command }}
+        </label>
+        <label class="project-form__field project-form__field--span-3">
+          <span class="project-form__label">분석 제외 파일</span>
+          {{ buildInfoForm.analysis_excluded_files }}
+        </label>
+      </div>
+      <div class="project-form__actions">
+        <button class="action-button" type="submit">빌드 정보 등록</button>
+      </div>
+    </form>
+    {% if buildInfoEntries %}
+    <table class="project-table">
+      <thead>
+        <tr>
+          <th>Build Key</th>
+          <th>언어/컴파일러</th>
+          <th>Coverity</th>
+          <th>Sub Path</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for buildInfo in buildInfoEntries %}
+        <tr>
+          <td>
+            <span class="project-table__title">{{ buildInfo.buildKey }}</span>
+            <span class="project-table__sub">{{ buildInfo.executionCount }} runs</span>
+          </td>
+          <td>
+            <span class="project-table__title">{{ buildInfo.language|default:"미지정" }}</span>
+            <span class="project-table__sub">{{ buildInfo.compiler|default:"미지정" }}</span>
+          </td>
+          <td>
+            <span class="project-table__title">{{ buildInfo.coverityStream|default:"미지정" }}</span>
+            <span class="project-table__sub">{{ buildInfo.analysisExcludedFiles|default:"제외 파일 없음"|truncatechars:32 }}</span>
+          </td>
+          <td>
+            <span class="project-table__title">{{ buildInfo.buildSubPath|default:"미지정" }}</span>
+            <span class="project-table__sub">{{ buildInfo.buildCommand|default:"명령어 미지정"|truncatechars:32 }}</span>
+          </td>
+          <td>
+            <a class="chip chip--neutral" href="{% url 'project-build-info-detail' project.jiraProjectKey build.planKey buildInfo.buildKey %}">상세</a>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    <div class="project-compact-list">
+      {% for buildInfo in buildInfoEntries %}
+      <article class="project-compact-item">
+        <div class="project-compact-item__main">
+          <div>
+            <h3 class="project-compact-item__title">{{ buildInfo.buildKey }}</h3>
+            <p class="project-compact-item__sub">{{ buildInfo.language|default:"언어 미지정" }} · {{ buildInfo.compiler|default:"컴파일러 미지정" }}</p>
+          </div>
+          <div class="chip-row">
+            <span class="chip chip--neutral">{{ buildInfo.coverityStream|default:"Coverity Stream 미지정" }}</span>
+            <a class="chip chip--neutral" href="{% url 'project-build-info-detail' project.jiraProjectKey build.planKey buildInfo.buildKey %}">상세</a>
+          </div>
+        </div>
+      </article>
+      {% endfor %}
+    </div>
+    {% else %}
+    <div class="empty-state">
+      <h3 class="empty-state__title">표시할 빌드 정보가 없습니다.</h3>
+      <p class="empty-state__body">아직 이 플랜에서 관리 중인 빌드 환경구성이 없습니다.</p>
+    </div>
+    {% endif %}
+  </section>
+
+  <aside class="panel panel--stacked panel--dashboard-side panel--signal-side">
+    <div class="panel__header">
+      <div>
+        <p class="panel__eyebrow">Aggregation Preview</p>
+        <h2 class="panel__title">실행 집계 미리보기</h2>
+      </div>
+    </div>
+    <ul class="entity-preview-list">
+      {% for group in executionGroups %}
+      <li class="entity-preview-item">
+        <div>
+          <strong>{{ group.buildKey }}</strong>
+          <p>{{ group.executionCount }} runs · {{ group.latestVersion|default:"버전 미기록" }}</p>
+        </div>
+        <div class="chip-row">
+          <span class="chip chip--neutral">{{ group.latestResult }}</span>
+          {% if group.toolNames %}
+          <span class="chip chip--neutral">{{ group.toolNames|join:", " }}</span>
+          {% endif %}
+        </div>
+      </li>
+      {% empty %}
+      <li class="empty-state empty-state--inline">
+        <h3 class="empty-state__title">실행 이력이 없습니다.</h3>
+        <p class="empty-state__body">실행 API에 `buildKey`가 전달되면 여기서 빌드별 집계 상태를 확인할 수 있습니다.</p>
+      </li>
+      {% endfor %}
+    </ul>
+  </aside>
+</section>
+{% elif project %}
+<section class="empty-state">
+  <h1 class="empty-state__title">빌드를 찾을 수 없습니다.</h1>
+  <p class="empty-state__body">요청한 Plan Key가 현재 프로젝트에 연결되어 있지 않습니다.</p>
+</section>
+{% else %}
+<section class="empty-state">
+  <h1 class="empty-state__title">프로젝트를 찾을 수 없습니다.</h1>
+  <p class="empty-state__body">프로젝트가 없어서 빌드 정보를 불러올 수 없습니다.</p>
+</section>
+{% endif %}
+{% endblock %}

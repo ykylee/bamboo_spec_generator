@@ -16,6 +16,7 @@ def create_execution(request, plan_key: str, payload: ExecutionStartIn) -> dict:
         branch_kind=payload.branchKind,
         commit_hash=payload.commitHash,
         build_number=payload.buildNumber,
+        build_key=payload.buildKey,
         started_at=payload.startedAt,
     )
 

@@ -1,0 +1,178 @@
+{% extends "ui/base.html" %}
+
+{% block title %}빌드 플랜 | Bamboo Spec Generator{% endblock %}
+{% block body_class %}page-build-plan-list{% endblock %}
+{% block page_heading %}빌드 플랜 인덱스{% endblock %}
+{% block topbar_controls %}
+<form class="global-filter-bar global-filter-bar--status" method="get" action="{% url 'build-plan-list' %}">
+  <label class="filter-field">
+    <span class="filter-field__label">상태</span>
+    <select class="filter-field__input" name="status">
+      <option value="all"{% if statusFilter == 'all' %} selected{% endif %}>전체</option>
+      <option value="attention"{% if statusFilter == 'attention' %} selected{% endif %}>주의 필요</option>
+      <option value="failed"{% if statusFilter == 'failed' %} selected{% endif %}>최근 실패</option>
+    </select>
+  </label>
+  <button class="filter-submit" type="submit">적용</button>
+</form>
+{% endblock %}
+
+{% block content %}
+<section class="signal-hero signal-hero--workspace">
+  <div class="signal-hero__content">
+    <p class="signal-hero__eyebrow">Build Plan Index</p>
+    <h1 class="hero__title">모든 빌드 플랜을 한 화면에서 봅니다.</h1>
+    <p class="signal-hero__body">
+      프로젝트별 빌드 플랜, 정적분석 도구 버전, Coverity Project, 빌드 환경구성 등록 현황을 전역 인덱스로 모아 운영 판단 속도를 높였습니다.
+    </p>
+    <div class="chip-row">
+      <span class="chip chip--neutral">총 {{ summary.totalPlans }}개</span>
+      <span class="chip chip--success">저장소 연결 {{ summary.linkedPlans }}</span>
+      {% if summary.failedPlans %}
+      <span class="chip chip--warning">최근 실패 {{ summary.failedPlans }}</span>
+      {% endif %}
+    </div>
+  </div>
+  <div class="signal-hero__board" aria-label="빌드 플랜 상태 보드">
+    <article class="signal-metric signal-metric--primary">
+      <span class="signal-metric__label">Build Plans</span>
+      <strong class="signal-metric__value">{{ summary.totalPlans }}</strong>
+      <p class="signal-metric__meta">현재 인덱스에 포함된 전체 빌드 플랜 수</p>
+    </article>
+    <article class="signal-metric">
+      <span class="signal-metric__label">Linked</span>
+      <strong class="signal-metric__value">{{ summary.linkedPlans }}</strong>
+      <p class="signal-metric__meta">저장소에 연결된 플랜 수</p>
+    </article>
+    <article class="signal-metric">
+      <span class="signal-metric__label">Failed</span>
+      <strong class="signal-metric__value">{{ summary.failedPlans }}</strong>
+      <p class="signal-metric__meta">최근 실행이 실패 상태인 플랜 수</p>
+    </article>
+    <article class="signal-metric signal-metric--list">
+      <div class="signal-metric__header">
+        <span class="signal-metric__label">Operator View</span>
+        <span class="badge">Global</span>
+      </div>
+      <ul class="signal-queue">
+        <li class="signal-queue__item"><strong>프로젝트 기준</strong><span>각 플랜이 어느 프로젝트에 묶여 있는지 바로 확인합니다.</span></li>
+        <li class="signal-queue__item"><strong>메타데이터</strong><span>정적분석 도구 버전과 Coverity Project를 플랜 단위로 관리합니다.</span></li>
+        <li class="signal-queue__item"><strong>빌드 정보</strong><span>각 행에서 빌드키별 환경구성 관리 페이지로 바로 이동합니다.</span></li>
+      </ul>
+    </article>
+  </div>
+</section>
+
+<section class="section-grid section-grid--dashboard">
+  <section class="panel panel--project-list panel--signal-list">
+    <div class="panel__header">
+      <div>
+        <p class="panel__eyebrow">Live Index</p>
+        <h2 class="panel__title">빌드 플랜 리스트</h2>
+      </div>
+      <span class="badge">{{ plans|length }} Items</span>
+    </div>
+    {% if plans %}
+    <table class="project-table">
+      <thead>
+        <tr>
+          <th>Build</th>
+          <th>Project</th>
+          <th>정적분석</th>
+          <th>Coverity</th>
+          <th>빌드 정보</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for plan in plans %}
+        <tr>
+          <td>
+            <span class="project-table__title">{{ plan.buildName }}</span>
+            <span class="project-table__sub">{{ plan.planKey }} · {{ plan.buildId }}</span>
+          </td>
+          <td><span class="chip chip--neutral">{{ plan.projectKey|default:"미연결" }}</span></td>
+          <td>
+            {{ plan.staticAnalysisToolVersion|default:"미지정" }}
+          </td>
+          <td>{{ plan.coverityProject|default:"미지정" }}</td>
+          <td>
+            <span class="project-table__title">{{ plan.buildInfoCount }}</span>
+            <span class="project-table__sub">{{ plan.latestVersion|default:"버전 미기록" }}</span>
+          </td>
+          <td>
+            <div class="chip-row">
+              {% if plan.detailUrl %}
+              <a class="chip chip--neutral" href="{{ plan.detailUrl }}">플랜 상세</a>
+              {% endif %}
+              {% if plan.buildInfoUrl %}
+              <a class="chip chip--neutral" href="{{ plan.buildInfoUrl }}">빌드 정보</a>
+              {% endif %}
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    <div class="project-compact-list">
+      {% for plan in plans %}
+      <article class="project-compact-item">
+        <div class="project-compact-item__main">
+          <div>
+            <h3 class="project-compact-item__title">{{ plan.buildName }}</h3>
+            <p class="project-compact-item__sub">{{ plan.projectKey }} · {{ plan.planKey }}</p>
+          </div>
+          <div class="chip-row">
+            <span class="chip chip--neutral">{{ plan.staticAnalysisToolVersion|default:"정적분석 미지정" }}</span>
+            {% if plan.coverityProject %}
+            <span class="chip chip--success">{{ plan.coverityProject }}</span>
+            {% endif %}
+          </div>
+        </div>
+        <div class="project-compact-item__actions">
+          {% if plan.detailUrl %}
+          <a class="chip chip--neutral" href="{{ plan.detailUrl }}">플랜 상세</a>
+          {% endif %}
+          {% if plan.buildInfoUrl %}
+          <a class="chip chip--neutral" href="{{ plan.buildInfoUrl }}">빌드 정보</a>
+          {% endif %}
+        </div>
+      </article>
+      {% endfor %}
+    </div>
+    {% else %}
+    <div class="empty-state">
+      <h3 class="empty-state__title">표시할 빌드 플랜이 없습니다.</h3>
+      <p class="empty-state__body">현재 필터 조건에 맞는 빌드 플랜이 없습니다.</p>
+    </div>
+    {% endif %}
+  </section>
+
+  <aside class="panel panel--stacked panel--dashboard-side panel--signal-side">
+    <div class="panel__header">
+      <div>
+        <p class="panel__eyebrow">Recent Failures</p>
+        <h2 class="panel__title">최근 실패 빌드</h2>
+      </div>
+    </div>
+    <ul class="failed-build-list failed-build-list--scroll">
+      {% for build in failedBuilds %}
+      <li class="failed-build-item">
+        <div class="failed-build-item__top">
+          <strong>{{ build.buildName }}</strong>
+          <span class="chip chip--warning">{{ build.resultStatus|default:"failed" }}</span>
+        </div>
+        <p class="failed-build-item__meta">{{ build.projectKey }} / {{ build.planKey }}</p>
+        <p class="failed-build-item__meta">Version {{ build.version|default:"-" }} · Build #{{ build.buildNumber|default:"-" }}</p>
+        <p class="failed-build-item__meta">{{ build.summaryMessage|default:"실패 요약 없음" }}</p>
+      </li>
+      {% empty %}
+      <li class="empty-state empty-state--inline">
+        <h3 class="empty-state__title">실패 상태 빌드가 없습니다.</h3>
+        <p class="empty-state__body">최근 실패 기록이 없으면 이 영역은 비워둡니다.</p>
+      </li>
+      {% endfor %}
+    </ul>
+  </aside>
+</section>
+{% endblock %}

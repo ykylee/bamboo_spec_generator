@@ -13,6 +13,7 @@ from apps.buildmeta.models import (
     BuildDefinitionHistory,
     BuildExecution,
     BuildPlan,
+    BuildPlanBuildInfo,
     BuildPlanDefinition,
     StaticAnalysisResult,
     BuildVersion,
@@ -33,6 +34,12 @@ class ExecutionServiceTest(TestCase):
             representative_repo_slug="sample-app-api",
         )
         self.plan = BuildPlan.objects.create(build_id="sample-app-api", plan_key="SAMPAPI")
+        self.build_info = BuildPlanBuildInfo.objects.create(
+            build_plan=self.plan,
+            build_key="api-linux",
+            language="java",
+            compiler="maven",
+        )
 
     def test_start_execution_creates_version_and_execution(self) -> None:
         payload = start_execution(
@@ -189,6 +196,34 @@ class ExecutionServiceTest(TestCase):
         self.assertEqual("failed", result.status)
         self.assertEqual("updated", result.summary)
         self.assertEqual({"high": 1}, result.metrics_json)
+
+    def test_same_build_number_allows_multiple_build_infos(self) -> None:
+        second_build_info = BuildPlanBuildInfo.objects.create(
+            build_plan=self.plan,
+            build_key="api-windows",
+            language="java",
+            compiler="maven",
+        )
+
+        first_payload = start_execution(
+            plan_key="SAMPAPI",
+            branch_kind=BuildVersion.BRANCH_KIND_DEV,
+            commit_hash="abcdef123456",
+            build_number="101",
+            build_key=self.build_info.build_key,
+        )
+        second_payload = start_execution(
+            plan_key="SAMPAPI",
+            branch_kind=BuildVersion.BRANCH_KIND_DEV,
+            commit_hash="abcdef123456",
+            build_number="101",
+            build_key=second_build_info.build_key,
+        )
+
+        self.assertNotEqual(first_payload["buildExecutionId"], second_payload["buildExecutionId"])
+        self.assertEqual(2, BuildExecution.objects.count())
+        self.assertEqual("api-linux", first_payload["buildKey"])
+        self.assertEqual("api-windows", second_payload["buildKey"])
 
 
 class DefinitionSelectorTest(TestCase):
@@ -602,7 +637,7 @@ class InitPostgresDbCommandTest(SimpleTestCase):
 
 
 class ProjectServiceTest(TestCase):
-    def test_create_project_marks_generation_not_ready_without_active_definitions(self) -> None:
+    def test_create_project_marks_generation_ready_without_active_definitions(self) -> None:
         payload = create_project(
             {
                 "jiraProjectKey": "OPS",
@@ -630,8 +665,8 @@ class ProjectServiceTest(TestCase):
         )
 
         self.assertEqual("OPS", payload["jiraProjectKey"])
-        self.assertFalse(payload["generation"]["generationReady"])
-        self.assertEqual(["활성 정의 없음 1"], payload["generation"]["generationReadinessIssues"])
+        self.assertTrue(payload["generation"]["generationReady"])
+        self.assertEqual([], payload["generation"]["generationReadinessIssues"])
         self.assertEqual(1, Project.objects.count())
         self.assertEqual(1, BuildPlan.objects.count())
         self.assertEqual(1, ProjectBuild.objects.count())
@@ -826,6 +861,69 @@ class ProjectServiceTest(TestCase):
                             "buildId": "ops-api",
                             "planKey": "OPSAPI",
                             "repositorySlug": "ops-web",
+                        }
+                    ],
+                }
+            )
+
+    def test_create_project_reuses_existing_unlinked_build_plan(self) -> None:
+        BuildPlan.objects.create(build_id="ops-api", plan_key="OPSAPI")
+
+        payload = create_project(
+            {
+                "jiraProjectKey": "OPS",
+                "bitbucketProjectKey": "OPS",
+                "representativeRepoSlug": "ops-api",
+                "repositories": [
+                    {
+                        "repoSlug": "ops-api",
+                        "coverityProject": "",
+                        "coverityStream": "",
+                        "isRepresentative": True,
+                    }
+                ],
+                "builds": [
+                    {
+                        "buildName": "API",
+                        "buildType": "python",
+                        "runtimeStack": "python3.12",
+                        "buildId": "ops-api",
+                        "planKey": "OPSAPI",
+                        "repositorySlug": "ops-api",
+                    }
+                ],
+            }
+        )
+
+        self.assertEqual("OPS", payload["jiraProjectKey"])
+        self.assertEqual(1, BuildPlan.objects.count())
+        self.assertEqual(1, ProjectBuild.objects.count())
+
+    def test_create_project_rejects_existing_build_id_with_different_plan_key(self) -> None:
+        BuildPlan.objects.create(build_id="ops-api", plan_key="OPSAPI")
+
+        with self.assertRaisesMessage(ValueError, "Build buildId 'ops-api' already exists with a different planKey."):
+            create_project(
+                {
+                    "jiraProjectKey": "OPS",
+                    "bitbucketProjectKey": "OPS",
+                    "representativeRepoSlug": "ops-api",
+                    "repositories": [
+                        {
+                            "repoSlug": "ops-api",
+                            "coverityProject": "",
+                            "coverityStream": "",
+                            "isRepresentative": True,
+                        }
+                    ],
+                    "builds": [
+                        {
+                            "buildName": "API",
+                            "buildType": "python",
+                            "runtimeStack": "python3.12",
+                            "buildId": "ops-api",
+                            "planKey": "DIFFKEY",
+                            "repositorySlug": "ops-api",
                         }
                     ],
                 }
