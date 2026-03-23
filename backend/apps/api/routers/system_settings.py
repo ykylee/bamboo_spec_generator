@@ -42,6 +42,12 @@ def put_coverity_settings(request, payload: CoveritySystemSettingsIn) -> dict:
         value=payload.gitCloneUrlTemplate.strip(),
         description="Git clone URL template",
     )
+    linkage_mode = payload.repositoryLinkageMode.strip().lower()
+    set_system_setting(
+        key=SystemSetting.KEY_REPOSITORY_LINKAGE_MODE,
+        value="create_if_missing" if linkage_mode == "create_if_missing" else "linked",
+        description="Repository linkage mode",
+    )
     return get_coverity_system_settings()
 
 

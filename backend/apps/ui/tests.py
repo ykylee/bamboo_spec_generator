@@ -217,6 +217,7 @@ class ProjectViewTest(TestCase):
         self.assertEqual(200, response.status_code)
         self.assertContains(response, "Coverity 운영 설정")
         self.assertContains(response, "샘플 Draft 재초기화")
+        self.assertContains(response, "Repository Linkage Mode")
 
     def test_coverity_settings_page_updates_settings(self) -> None:
         response = self.client.post(
@@ -226,6 +227,7 @@ class ProjectViewTest(TestCase):
                 "connect_url": "https://coverity.example.com",
                 "on_new_cert": "trust",
                 "commit_enabled": "on",
+                "repository_linkage_mode": "create_if_missing",
                 "git_clone_url_template": "https://git.example.com/scm/{project_key_lower}/{repo_slug}.git",
             },
         )
@@ -236,6 +238,10 @@ class ProjectViewTest(TestCase):
         self.assertEqual(
             "https://git.example.com/scm/{project_key_lower}/{repo_slug}.git",
             SystemSetting.objects.get(key="repository.git.clone_url_template").value,
+        )
+        self.assertEqual(
+            "create_if_missing",
+            SystemSetting.objects.get(key="repository.linkage_mode").value,
         )
 
     def test_coverity_settings_page_initializes_specs_drafts(self) -> None:

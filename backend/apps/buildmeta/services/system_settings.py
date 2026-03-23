@@ -30,7 +30,15 @@ def get_coverity_system_settings() -> dict[str, str | bool]:
         "onNewCert": get_system_setting(SystemSetting.KEY_COVERITY_ON_NEW_CERT, "trust"),
         "commitEnabled": commit_enabled in {"1", "true", "yes", "on"},
         "gitCloneUrlTemplate": get_system_setting(SystemSetting.KEY_GIT_CLONE_URL_TEMPLATE),
+        "repositoryLinkageMode": get_repository_linkage_mode(),
     }
+
+
+def get_repository_linkage_mode() -> str:
+    value = get_system_setting(SystemSetting.KEY_REPOSITORY_LINKAGE_MODE, "linked").strip().lower()
+    if value == "create_if_missing":
+        return "create_if_missing"
+    return "linked"
 
 
 def build_git_clone_url(*, project_key: str, repo_slug: str) -> str:

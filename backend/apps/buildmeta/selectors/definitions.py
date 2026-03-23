@@ -7,7 +7,11 @@ from django.core.exceptions import ObjectDoesNotExist
 from django.utils import timezone
 
 from apps.buildmeta.models import BuildPlan
-from apps.buildmeta.services.system_settings import build_git_clone_url, get_coverity_system_settings
+from apps.buildmeta.services.system_settings import (
+    build_git_clone_url,
+    get_coverity_system_settings,
+    get_repository_linkage_mode,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 if str(REPO_ROOT) not in sys.path:
@@ -629,11 +633,7 @@ def _normalize_build_sub_path(value: str) -> str:
 def _repository_linkage_mode(*, project, repository) -> str:
     if repository is None:
         return "linked"
-    clone_url = build_git_clone_url(
-        project_key=project.bitbucket_project_key,
-        repo_slug=repository.repo_slug,
-    ).strip()
-    if clone_url:
+    if get_repository_linkage_mode() == "create_if_missing":
         return "create_if_missing"
     return "linked"
 

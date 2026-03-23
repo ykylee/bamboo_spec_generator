@@ -79,6 +79,10 @@ class ApiSmokeTest(TestCase):
             key=SystemSetting.KEY_GIT_CLONE_URL_TEMPLATE,
             value="https://git.example.com/scm/{project_key_lower}/{repo_slug}.git",
         )
+        SystemSetting.objects.create(
+            key=SystemSetting.KEY_REPOSITORY_LINKAGE_MODE,
+            value="create_if_missing",
+        )
 
         response = self.client.get("/api/v1/build-plans/SAMPAPI/prepare-context", **self.auth_headers)
 
@@ -90,6 +94,18 @@ class ApiSmokeTest(TestCase):
             payload["currentRepository"]["cloneUrl"],
         )
         self.assertEqual("create_if_missing", payload["variables"]["currentRepository.linkageMode"])
+
+    def test_prepare_context_endpoint_keeps_linked_mode_when_only_git_clone_template_exists(self) -> None:
+        SystemSetting.objects.create(
+            key=SystemSetting.KEY_GIT_CLONE_URL_TEMPLATE,
+            value="https://git.example.com/scm/{project_key_lower}/{repo_slug}.git",
+        )
+
+        response = self.client.get("/api/v1/build-plans/SAMPAPI/prepare-context", **self.auth_headers)
+
+        self.assertEqual(200, response.status_code)
+        payload = response.json()
+        self.assertEqual("linked", payload["currentRepository"]["linkageMode"])
 
     def test_execution_start_and_finish_endpoints(self) -> None:
         start_response = self.client.post(
@@ -267,6 +283,7 @@ class ApiSmokeTest(TestCase):
                     "connectUrl": "https://coverity.example.com",
                     "onNewCert": "trust",
                     "commitEnabled": True,
+                    "repositoryLinkageMode": "create_if_missing",
                     "gitCloneUrlTemplate": "https://git.example.com/scm/{project_key_lower}/{repo_slug}.git",
                 }
             ),
@@ -278,6 +295,7 @@ class ApiSmokeTest(TestCase):
         payload = response.json()
         self.assertEqual("https://coverity.example.com", payload["connectUrl"])
         self.assertTrue(payload["commitEnabled"])
+        self.assertEqual("create_if_missing", payload["repositoryLinkageMode"])
         self.assertEqual(
             "https://git.example.com/scm/{project_key_lower}/{repo_slug}.git",
             payload["gitCloneUrlTemplate"],

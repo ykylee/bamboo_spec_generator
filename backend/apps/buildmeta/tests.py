@@ -315,6 +315,10 @@ class DefinitionSelectorTest(TestCase):
             key=SystemSetting.KEY_GIT_CLONE_URL_TEMPLATE,
             value="https://git.example.com/scm/{project_key_lower}/{repo_slug}.git",
         )
+        set_system_setting(
+            key=SystemSetting.KEY_REPOSITORY_LINKAGE_MODE,
+            value="create_if_missing",
+        )
 
         payload = get_active_definition_by_plan_key("SAMPAPI")
 
@@ -324,6 +328,39 @@ class DefinitionSelectorTest(TestCase):
             "https://git.example.com/scm/sample/sample-app-api.git",
             payload["definition"]["repository"]["cloneUrl"],
         )
+
+    def test_active_definition_keeps_linked_mode_when_only_git_clone_template_exists(self) -> None:
+        repository = ProjectRepository.objects.create(
+            project=self.project,
+            repo_slug="sample-app-api",
+            coverity_project="sample-app-api",
+            coverity_stream="sample-app-api-dev",
+            is_representative=True,
+        )
+        ProjectBuild.objects.create(
+            project=self.project,
+            repository=repository,
+            build_plan=self.plan,
+            build_name="Sample API",
+            build_type="maven",
+            runtime_stack="java",
+        )
+        BuildPlanBuildInfo.objects.create(
+            build_plan=self.plan,
+            build_key="api-linux",
+            operating_system="linux",
+            language="java",
+            compiler="maven",
+        )
+        set_system_setting(
+            key=SystemSetting.KEY_GIT_CLONE_URL_TEMPLATE,
+            value="https://git.example.com/scm/{project_key_lower}/{repo_slug}.git",
+        )
+
+        payload = get_active_definition_by_plan_key("SAMPAPI")
+
+        assert payload is not None
+        self.assertEqual("linked", payload["definition"]["repository"]["linkageMode"])
 
 
     def test_build_plan_preview_maps_build_infos_to_jobs(self) -> None:
@@ -497,6 +534,7 @@ class SystemSettingServiceTest(TestCase):
         self.assertEqual("https://coverity.example.com", payload["connectUrl"])
         self.assertEqual("trust", payload["onNewCert"])
         self.assertTrue(payload["commitEnabled"])
+        self.assertEqual("linked", payload["repositoryLinkageMode"])
         self.assertEqual(
             "https://git.example.com/scm/{project_key_lower}/{repo_slug}.git",
             payload["gitCloneUrlTemplate"],

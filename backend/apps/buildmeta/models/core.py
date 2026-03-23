@@ -19,6 +19,7 @@ class SystemSetting(TimestampedModel):
     KEY_COVERITY_ON_NEW_CERT = "coverity.connect.on_new_cert"
     KEY_COVERITY_COMMIT_ENABLED = "coverity.commit.enabled"
     KEY_GIT_CLONE_URL_TEMPLATE = "repository.git.clone_url_template"
+    KEY_REPOSITORY_LINKAGE_MODE = "repository.linkage_mode"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     key = models.CharField(max_length=128, unique=True)

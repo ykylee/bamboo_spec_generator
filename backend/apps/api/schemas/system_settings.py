@@ -8,3 +8,4 @@ class CoveritySystemSettingsIn(Schema):
     onNewCert: str = "trust"
     commitEnabled: bool = False
     gitCloneUrlTemplate: str = ""
+    repositoryLinkageMode: str = "linked"

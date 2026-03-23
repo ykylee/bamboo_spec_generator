@@ -157,6 +157,7 @@ def coverity_settings(request):
                 "connect_url": settings_payload["connectUrl"],
                 "on_new_cert": settings_payload["onNewCert"],
                 "commit_enabled": settings_payload["commitEnabled"],
+                "repository_linkage_mode": settings_payload["repositoryLinkageMode"],
                 "git_clone_url_template": settings_payload["gitCloneUrlTemplate"],
             }
         )
@@ -188,6 +189,11 @@ def coverity_settings(request):
                     key="repository.git.clone_url_template",
                     value=form.cleaned_data["git_clone_url_template"].strip(),
                     description="Git clone URL template",
+                )
+                set_system_setting(
+                    key="repository.linkage_mode",
+                    value=form.cleaned_data["repository_linkage_mode"].strip() or "linked",
+                    description="Repository linkage mode",
                 )
                 message = "Coverity 운영 설정을 저장했습니다."
             else:

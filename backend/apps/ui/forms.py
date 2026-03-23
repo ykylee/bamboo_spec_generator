@@ -105,9 +105,20 @@ class BuildInfoMetadataForm(forms.Form):
 
 
 class CoveritySystemSettingsForm(forms.Form):
+    REPOSITORY_LINKAGE_MODE_CHOICES = [
+        ("linked", "linked"),
+        ("create_if_missing", "create_if_missing"),
+    ]
+
     connect_url = forms.CharField(label="Coverity Connect URL", required=False)
     on_new_cert = forms.CharField(label="on-new-cert", max_length=64, required=False, initial="trust")
     commit_enabled = forms.BooleanField(label="Commit Enabled", required=False)
+    repository_linkage_mode = forms.ChoiceField(
+        label="Repository Linkage Mode",
+        choices=REPOSITORY_LINKAGE_MODE_CHOICES,
+        required=False,
+        initial="linked",
+    )
     git_clone_url_template = forms.CharField(
         label="Git Clone URL Template",
         required=False,
