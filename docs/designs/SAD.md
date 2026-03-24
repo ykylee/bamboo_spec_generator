@@ -2,7 +2,7 @@
 
 ## 문서 메타데이터
 
-- 문서 일자: 2026-03-18
+- 문서 일자: 2026-03-24
 - 문서 유형: SAD
 - 상태: 초안
 - 관련 CRS: [../requirements/CRS.md](../requirements/CRS.md)
@@ -14,11 +14,11 @@
 
 ## 현재 구현 기준
 
-- 현재 실제 구현된 입력 어댑터는 JSON loader 하나다.
+- 현재 실제 구현된 입력 어댑터는 JSON loader와 운영 API 기반 활성 정의 조회 경로다.
 - 현재 실제 구현된 생성 파이프라인은 `parser -> validator -> script asset/render -> generator -> writer` 흐름이다.
-- 운영 API에서 활성 정의를 읽는 생성기 클라이언트와 CLI 진입점이 부분 구현되었다.
-- Django 운영 백엔드, ORM 모델, migration, Admin, Ninja API, 조회용 기본 UI가 스캐폴딩 수준으로 구현되었다.
-- 버전 계산, 실행 시작/종료 저장 서비스, 준비 컨텍스트 selector가 백엔드 내부에 초안 구현되었다.
+- 운영 API에서 활성 정의와 prepare context를 읽는 생성기 클라이언트와 CLI 진입점이 구현되었다.
+- Django 운영 백엔드에는 ORM 모델, migration, Admin, Ninja API, 프로젝트 등록/수정, BuildInfo 관리, 운영 설정 관리, 조회용 UI가 구현되었다.
+- 버전 계산, 실행 시작/종료 저장, 정적분석 결과 upsert, 준비 컨텍스트 selector, preview/export draft 생성, Specs draft 초기화, Bamboo publish/run/status/detail 서비스가 백엔드 내부에 부분 구현되었다.
 - 로컬 개발 기본 DB는 SQLite이며, 운영 전환용 PostgreSQL 설정 스위치와 초기화 명령이 구현되었다.
 
 ## 배경
@@ -94,7 +94,7 @@ Deployment Metadata Services
   |- Rollback Tracker
 ```
 
-위 다이어그램에서 `DB Active Definitions`, `Build Metadata Services`, `Operations Backend`는 목표 아키텍처이며, 현재 구현 범위는 `JSON Files`부터 `Artifact Writer / Summary Reporter`까지다.
+위 다이어그램에서 배포 메타데이터 영역은 목표 아키텍처다. 현재 구현 범위는 `JSON Files`, 운영 API 기반 입력, `Artifact Writer / Summary Reporter`, `Build Metadata Services`, `Operations Backend`의 프로젝트/정의/실행/운영 설정/Bamboo 연동 일부까지 포함한다.
 
 ## 주요 컴포넌트
 
@@ -102,7 +102,7 @@ Deployment Metadata Services
 
 - JSON 파일 또는 DB 정의를 읽는다.
 - 입력 형식 차이를 흡수하고 공통 내부 모델 후보를 만든다.
-- 현재 구현은 JSON 파일만 지원한다.
+- 현재 구현은 JSON 파일 직접 로드와 운영 API를 통한 활성 정의 조회를 지원한다.
 
 ### 2. 검증 및 정규화 계층
 
@@ -149,6 +149,7 @@ Deployment Metadata Services
 
 - Ninja 기반 HTTP API를 제공한다.
 - 준비 스테이지 변수 조회, 프로젝트/플랜/버전/실행 이력 조회, 결과 적재를 담당한다.
+- 운영 설정 조회/수정과 Specs draft 초기화도 담당한다.
 - 장기적으로 배포 환경 상태 조회, 릴리스 승인/배포 결과 적재를 포함한다.
 - 생성기는 보안상 이 API를 통해서만 운영 데이터를 조회한다.
 - 현재 활성 정의 조회, 준비 컨텍스트 조회, 실행 시작/종료 적재, 프로젝트 조회의 기본 경로가 구현되었다.
@@ -158,7 +159,7 @@ Deployment Metadata Services
 - 운영 사용자가 프로젝트, 플랜, 버전, 실행 결과를 읽기 전용으로 탐색한다.
 - 장기적으로 운영 사용자는 빌드 상태와 이어진 배포 상태, 릴리스 후보, 승인 대기 항목을 같은 콘솔에서 탐색한다.
 - 초기 범위는 Django 템플릿 또는 Django 내부 뷰 기반 조회 화면을 우선한다.
-- 현재 프로젝트 목록/상세의 기본 화면만 구현되었다.
+- 현재 프로젝트 목록/상세, 저장소 상세, 빌드 상세, BuildInfo 목록/상세, Coverity/Bamboo 설정, Bamboo plan 상태/상세, publish 이력 화면이 구현되었다.
 
 ## 아키텍처 원칙
 

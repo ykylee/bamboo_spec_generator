@@ -14,18 +14,19 @@
 - 테스트는 `unittest` 기반으로 일부 포함되어 있습니다.
 - 실제 Bamboo 서버 import 및 실행까지는 아직 검증되지 않았습니다.
 - Django/Ninja 기반 운영 백엔드 스캐폴딩, migration, 기본 API/UI, SQLite/PostgreSQL 스위치, 개발용 DB 초기화 명령이 추가되었습니다.
-- 운영 공통 설정을 저장하기 위한 `SystemSetting` 모델이 추가되었으며, Coverity Connect URL 같은 전역값을 DB로 관리할 수 있습니다.
-- 운영 API는 프로젝트 목록/상세 조회 외에 프로젝트 등록/수정 upsert를 지원하며, 프로젝트별 Specs 생성 준비도와 활성 정의 연결 상태를 함께 반환합니다.
-- 조회용 웹 UI는 Django 템플릿 기반으로 프로젝트 목록/상세 화면을 제공하며, 메인 페이지에서 프로젝트 등록이 가능합니다.
-- 프로젝트 등록 UI는 여러 저장소를 한 번에 입력할 수 있고, 각 빌드는 반드시 특정 저장소 slug에 연결되도록 구성되어 있습니다.
+- 운영 공통 설정을 저장하기 위한 `SystemSetting` 모델이 추가되었으며, Coverity Connect URL, Git clone URL 템플릿, repository linkage mode, Bamboo 서버 URL 같은 전역값을 DB로 관리할 수 있습니다.
+- 운영 API는 프로젝트 목록/상세 조회 외에 프로젝트 등록/수정, 활성 정의 조회, 준비 컨텍스트 조회, 실행 시작/종료, 정적분석 결과 적재, 운영 설정 조회/수정, Specs draft 초기화를 지원합니다.
+- 조회용 웹 UI는 Django 템플릿 기반으로 프로젝트 목록/상세, 저장소 상세, 빌드 상세, BuildInfo 목록/상세, Coverity/Bamboo 설정, Bamboo plan 상태/상세 화면을 제공합니다.
+- 프로젝트 등록 UI는 여러 저장소를 한 번에 입력할 수 있고, 각 빌드는 특정 저장소 slug에 연결되도록 구성되어 있습니다.
+- 등록 메타데이터와 `BuildPlanBuildInfo`를 바탕으로 활성 정의, prepare context, Specs preview/export draft를 합성할 수 있습니다.
 - `backend/manage.py check`, `migrate` 기준의 기본 백엔드 진입점은 확인되었습니다.
 
 ## 아직 미구현인 범위
 
-- Bamboo 준비 스테이지와 운영 API의 실제 변수 주입 연동
-- Bamboo 실행 결과, 버전, 실패 위치, 정적분석 결과의 end-to-end 적재
-- `repository.applicationLink` 운영값을 DB/API/환경설정과 연동하는 흐름
-- 등록된 프로젝트에서 직접 Specs 생성 요청과 Bamboo 플랜 등록까지 이어지는 end-to-end 운영 흐름
+- Bamboo 준비 스테이지와 운영 API의 실제 변수 주입 연동은 부분 구현 상태이며, 실제 Bamboo 작업에서의 end-to-end 검증은 아직 남아 있습니다.
+- Bamboo 실행 결과, 버전, 실패 위치, 정적분석 결과의 end-to-end 적재는 부분 구현 상태입니다.
+- 배포/릴리스 관리와 사용자/권한 관리는 아직 미구현입니다.
+- Bamboo 시스템 운영 현황 조회는 아직 미구현입니다.
 
 현재 운영 백엔드는 스캐폴딩과 기본 기능이 구현되었지만, 운영 데이터 적재/조회 흐름은 아직 확장 중입니다.
 
@@ -606,6 +607,29 @@ Repository Stored Specs로 사용할 경우에는 생성된 `bamboo-specs/` 디�
 PYTHONPATH=. python3 -m unittest discover -s tests
 ```
 
+운영 백엔드 테스트 실행:
+
+```bash
+cd backend
+python3 manage.py test --settings=config.settings.test
+```
+
+커버리지 측정:
+
+```bash
+python3 -m pip install coverage
+PYTHONPATH=. python3 -m coverage run -m unittest discover -s tests
+PYTHONPATH=. python3 -m coverage run --append backend/manage.py test --settings=config.settings.test
+python3 -m coverage report -m
+python3 -m coverage html
+```
+
+수동 E2E 테스트 케이스 문서:
+
+- [E2E 테스트 케이스 세트](./docs/tests/e2e_test_case_set.md)
+- [UI 테스트 케이스 세트](./docs/tests/ui_test_case_set.md)
+- [API 테스트 케이스 세트](./docs/tests/api_test_case_set.md)
+
 Windows `cmd` 기준:
 
 ```bat
@@ -621,6 +645,7 @@ python -m unittest discover -s tests
 - [SRS](./docs/requirements/SRS.md)
 - [SAD](./docs/designs/SAD.md)
 - [Design](./docs/designs/Design.md)
+- [E2E 테스트 케이스 세트](./docs/tests/e2e_test_case_set.md)
 - [이슈 분해](./docs/requirements/issues/BREAKDOWN.md)
 
 ## 작업 흐름

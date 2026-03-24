@@ -29,6 +29,7 @@ from apps.buildmeta.selectors.definitions import (
     get_active_definition_by_plan_key,
     get_build_plan_export_draft,
     get_build_plan_preview,
+    get_prepare_context_by_plan_key,
 )
 from apps.buildmeta.services import (
     build_git_clone_url,
@@ -46,7 +47,7 @@ from apps.buildmeta.services import (
 )
 from apps.buildmeta.services.bamboo import get_bamboo_plan_status
 from apps.buildmeta.services.executions import finish_execution, record_static_analysis_results, start_execution
-from apps.buildmeta.services.system_settings import DEFAULT_BAMBOO_TOKEN_PATH
+from apps.buildmeta.services.system_settings import DEFAULT_BAMBOO_TOKEN_PATH, get_repository_linkage_mode
 from src.bamboo_spec_generator.parser import parse_build_definition_payload
 from src.bamboo_spec_generator.validator import ValidationError, is_no_build_language, validate_build_definitions
 
@@ -431,6 +432,13 @@ class BambooPublishServiceTest(TestCase):
         self.assertTrue(settings_payload["tokenConfigured"])
         self.assertEqual("file", settings_payload["tokenSource"])
 
+    def test_get_bamboo_system_settings_prefers_environment_token(self) -> None:
+        with patch.dict(os.environ, {"BAMBOO_SERVER_TOKEN": "env-token"}, clear=False):
+            settings_payload = get_bamboo_system_settings()
+
+        self.assertTrue(settings_payload["tokenConfigured"])
+        self.assertEqual("env", settings_payload["tokenSource"])
+
 
 class DefinitionSelectorTest(TestCase):
     def setUp(self) -> None:
@@ -617,6 +625,80 @@ class DefinitionSelectorTest(TestCase):
 
         assert payload is not None
         self.assertEqual("linked", payload["definition"]["repository"]["linkageMode"])
+
+    def test_active_definition_infers_language_and_compiler_from_project_metadata_when_build_info_is_blank(self) -> None:
+        repository = ProjectRepository.objects.create(
+            project=self.project,
+            repo_slug="sample-app-api",
+            coverity_project="sample-app-api",
+            coverity_stream="sample-app-api-dev",
+            is_representative=True,
+        )
+        ProjectBuild.objects.create(
+            project=self.project,
+            repository=repository,
+            build_plan=self.plan,
+            build_name="Sample API",
+            build_type="maven",
+            runtime_stack="java",
+        )
+        BuildPlanBuildInfo.objects.create(
+            build_plan=self.plan,
+            build_key="api-linux",
+            operating_system="linux",
+            language="",
+            compiler="",
+            build_command="mvn -B clean package",
+            build_sub_path="services/sample-app-api",
+        )
+
+        payload = get_active_definition_by_plan_key("SAMPAPI")
+
+        self.assertIsNotNone(payload)
+        assert payload is not None
+        self.assertEqual("java", payload["definition"]["language"])
+        self.assertEqual("maven", payload["definition"]["compiler"])
+        self.assertEqual(["mvn", "coverity"], payload["definition"]["build"]["runtimeRequirements"]["commands"])
+        self.assertEqual(["JAVA_HOME"], payload["definition"]["build"]["runtimeRequirements"]["envVars"])
+
+    def test_prepare_context_falls_back_to_representative_repository_when_project_build_repository_is_missing(self) -> None:
+        ProjectRepository.objects.create(
+            project=self.project,
+            repo_slug="sample-app-api",
+            coverity_project="sample-app-api",
+            coverity_stream="sample-app-api-dev",
+            is_representative=True,
+        )
+        ProjectRepository.objects.create(
+            project=self.project,
+            repo_slug="sample-app-web",
+            coverity_project="sample-app-web",
+            coverity_stream="sample-app-web-dev",
+            is_representative=False,
+        )
+        ProjectBuild.objects.create(
+            project=self.project,
+            repository=None,
+            build_plan=self.plan,
+            build_name="Sample API",
+            build_type="maven",
+            runtime_stack="java",
+        )
+        BuildPlanBuildInfo.objects.create(
+            build_plan=self.plan,
+            build_key="api-linux",
+            operating_system="linux",
+            language="java",
+            compiler="maven",
+            build_sub_path="services/sample-app-api",
+        )
+
+        payload = get_prepare_context_by_plan_key("SAMPAPI")
+
+        self.assertIsNotNone(payload)
+        assert payload is not None
+        self.assertEqual("sample-app-api", payload["currentRepository"]["repoSlug"])
+        self.assertEqual("sample-app-api", payload["variables"]["BITBUCKET_REPO_SLUG"])
 
 
     def test_build_plan_preview_maps_build_infos_to_jobs(self) -> None:
@@ -812,6 +894,17 @@ class SystemSettingServiceTest(TestCase):
         payload = build_git_clone_url(project_key="CCC", repo_slug="cccrepo")
 
         self.assertEqual("https://git.example.com/scm/ccc/cccrepo.git", payload)
+
+    def test_get_repository_linkage_mode_defaults_to_linked_for_unknown_value(self) -> None:
+        set_system_setting(
+            key=SystemSetting.KEY_REPOSITORY_LINKAGE_MODE,
+            value="something-else",
+        )
+
+        self.assertEqual("linked", get_repository_linkage_mode())
+
+    def test_build_git_clone_url_returns_empty_string_without_template(self) -> None:
+        self.assertEqual("", build_git_clone_url(project_key="SAMPLE", repo_slug="sample-app-api"))
 
 
 class SpecsDraftInitializationServiceTest(TestCase):
@@ -1019,6 +1112,77 @@ class ValidatorExceptionTest(SimpleTestCase):
 
 
 class ImportBuildDefinitionsCommandTest(TestCase):
+    def test_load_definition_import_records_sorts_files_and_hashes(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            input_root = Path(temp_dir) / "build_info_json"
+            year_root = input_root / "2026"
+            year_root.mkdir(parents=True, exist_ok=True)
+            first_path = year_root / "b-build.json"
+            second_path = year_root / "a-build.json"
+            first_path.write_text(
+                json.dumps(
+                    {
+                        "buildId": "b-build",
+                        "name": "Build B",
+                        "planKey": "BUILDB",
+                        "language": "java",
+                        "compiler": "maven",
+                        "repository": {
+                            "provider": "bitbucket",
+                            "projectKey": "SAMPLE",
+                            "repoSlug": "build-b",
+                            "linkageMode": "linked",
+                            "branches": ["dev", "release", "master"],
+                        },
+                        "requirements": {"os": "linux", "extraCapabilities": []},
+                        "build": {
+                            "subPath": ".",
+                            "prepareCommand": "mvn -B dependency:go-offline",
+                            "buildCommand": "mvn -B clean package",
+                            "staticAnalysis": {"customTool": {"commands": ["custom-tool analyze {buildCommand}"]}},
+                            "runtimeRequirements": {"commands": ["mvn", "coverity"], "envVars": ["JAVA_HOME"]},
+                            "postBuildTrigger": {"type": "plan", "targetPlanKey": "POSTBUILD"},
+                        },
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            second_path.write_text(
+                json.dumps(
+                    {
+                        "buildId": "a-build",
+                        "name": "Build A",
+                        "planKey": "BUILDA",
+                        "language": "java",
+                        "compiler": "maven",
+                        "repository": {
+                            "provider": "bitbucket",
+                            "projectKey": "SAMPLE",
+                            "repoSlug": "build-a",
+                            "linkageMode": "linked",
+                            "branches": ["dev", "release", "master"],
+                        },
+                        "requirements": {"os": "linux", "extraCapabilities": []},
+                        "build": {
+                            "subPath": ".",
+                            "prepareCommand": "mvn -B dependency:go-offline",
+                            "buildCommand": "mvn -B clean package",
+                            "staticAnalysis": {"customTool": {"commands": ["custom-tool analyze {buildCommand}"]}},
+                            "runtimeRequirements": {"commands": ["mvn", "coverity"], "envVars": ["JAVA_HOME"]},
+                            "postBuildTrigger": {"type": "plan", "targetPlanKey": "POSTBUILD"},
+                        },
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+
+            records = load_definition_import_records(input_root)
+
+        self.assertEqual(["a-build.json", "b-build.json"], [record.source_path.name for record in records])
+        self.assertTrue(all(record.definition_hash.startswith("sha256:") for record in records))
+
     def test_import_build_definitions_creates_active_definition_graph(self) -> None:
         with TemporaryDirectory() as temp_dir:
             input_root = Path(temp_dir) / "build_info_json"
