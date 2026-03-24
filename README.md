@@ -417,7 +417,6 @@ Gitea 접속 정보:
 
 ```text
 Web UI: http://127.0.0.1:3000
-SSH: ssh://git@127.0.0.1:2222/<owner>/<repo>.git
 ```
 
 운영 백엔드 테스트 실행:
