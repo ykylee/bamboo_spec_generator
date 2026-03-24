@@ -1,0 +1,108 @@
+{% if inspector.stages %}
+<div class="bamboo-config-layout" data-task-inspector>
+  <aside class="bamboo-config-nav">
+    <div class="bamboo-config-nav__header">
+      <h3>{{ title }}</h3>
+      {% if body %}
+      <p>{{ body }}</p>
+      {% endif %}
+    </div>
+    <div class="bamboo-config-tree">
+      {% for stage in inspector.stages %}
+      <section class="bamboo-config-stage">
+        <div class="bamboo-config-stage__header">
+          <h4>{{ stage.name|default:"Unnamed Stage" }}</h4>
+          {% if stage.summary %}
+          <p>{{ stage.summary }}</p>
+          {% endif %}
+        </div>
+        <div class="bamboo-config-stage__body">
+          {% for job in stage.jobs %}
+          <article class="bamboo-config-job">
+            <div class="bamboo-config-job__header">
+              <strong>{{ job.name|default:job.id }}</strong>
+              <span>{{ job.buildKey|default:"-" }}</span>
+            </div>
+            <ul class="bamboo-config-task-list">
+              {% for task in job.tasks %}
+              <li>
+                <button
+                  class="bamboo-config-task-button{% if task.id == inspector.selectedTaskId %} is-active{% endif %}"
+                  type="button"
+                  data-task-select
+                  data-task-id="{{ task.id }}"
+                >
+                  <strong>{{ task.name|default:"Unnamed Task" }}</strong>
+                  <span>{{ task.summary|default:"-" }}</span>
+                </button>
+              </li>
+              {% empty %}
+              <li class="bamboo-config-empty-row">표시할 task가 없습니다.</li>
+              {% endfor %}
+            </ul>
+          </article>
+          {% empty %}
+          <div class="bamboo-config-empty-row">표시할 job이 없습니다.</div>
+          {% endfor %}
+        </div>
+      </section>
+      {% endfor %}
+    </div>
+  </aside>
+  <div class="bamboo-config-detail">
+    {% for task in inspector.tasks %}
+    <article
+      class="bamboo-config-panel{% if task.id != inspector.selectedTaskId %} bamboo-config-panel--hidden{% endif %}"
+      data-task-panel
+      data-task-id="{{ task.id }}"
+    >
+      <div class="bamboo-config-panel__eyebrow">{{ task.stageName }} / {{ task.jobName }}</div>
+      <div class="bamboo-config-panel__header">
+        <div>
+          <h3>{{ task.configurationTitle }}</h3>
+          <p>{{ task.name|default:"Unnamed Task" }}</p>
+        </div>
+        <div class="chip-row">
+          <span class="chip chip--neutral">{{ task.type|default:"task" }}</span>
+          <span class="chip chip--neutral">{{ task.buildKey|default:"-" }}</span>
+        </div>
+      </div>
+      <dl class="bamboo-config-fields">
+        {% for field in task.fields %}
+        <div class="bamboo-config-field">
+          <dt>{{ field.label }}</dt>
+          <dd>{{ field.value }}</dd>
+        </div>
+        {% endfor %}
+      </dl>
+      {% if task.snippets %}
+      <div class="bamboo-config-snippets">
+        {% for snippet in task.snippets %}
+        <details class="bamboo-config-snippet">
+          <summary class="bamboo-config-snippet__header">
+            <div>
+              <strong>{{ snippet.label }}</strong>
+              <p>{{ snippet.path }}</p>
+            </div>
+            <span class="chip chip--neutral">{{ snippet.language }}</span>
+          </summary>
+          <pre class="bamboo-config-snippet__code"><code>{{ snippet.highlightedContent }}</code></pre>
+        </details>
+        {% endfor %}
+      </div>
+      {% else %}
+      <div class="empty-state empty-state--inline">
+        <h3 class="empty-state__title">연결된 스크립트가 없습니다.</h3>
+        <p class="empty-state__body">이 task에 매핑된 draft 스크립트 또는 설정 파일이 없습니다.</p>
+      </div>
+      {% endif %}
+    </article>
+    {% endfor %}
+  </div>
+</div>
+{% else %}
+<div class="empty-state empty-state--inline">
+  <h3 class="empty-state__title">{{ empty_title }}</h3>
+  <p class="empty-state__body">{{ empty_body }}</p>
+</div>
+{% endif %}

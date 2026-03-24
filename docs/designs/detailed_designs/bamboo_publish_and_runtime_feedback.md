@@ -29,7 +29,7 @@
 ### 1. Bamboo 연결 설정
 
 - `SystemSetting`에 Bamboo 서버 URL 키를 추가한다.
-- Bamboo 인증 토큰은 DB가 아니라 서버 환경 변수 `BAMBOO_SERVER_TOKEN`으로 읽는다.
+- Bamboo 인증 토큰은 서버 환경 변수 `BAMBOO_SERVER_TOKEN` 또는 저장소 루트 관리 폴더 `ops/credentials/.credentials`에서 읽는다.
 - UI 설정 화면에서는 Bamboo 서버 URL과 토큰 감지 여부만 보여준다.
 
 ### 2. Bamboo 서비스 계층

@@ -68,6 +68,12 @@ class BuildMetadataForm(forms.Form):
 
 
 class BuildPlanMetadataForm(forms.Form):
+    REPOSITORY_LINKAGE_MODE_OVERRIDE_CHOICES = [
+        ("", "시스템 기본값 사용"),
+        ("linked", "linked"),
+        ("create_if_missing", "create_if_missing"),
+    ]
+
     static_analysis_tool_version = forms.CharField(
         label="정적분석 도구 버전",
         max_length=128,
@@ -79,6 +85,12 @@ class BuildPlanMetadataForm(forms.Form):
         max_length=255,
         required=False,
         widget=forms.TextInput(attrs={"list": "coverity-project-options"}),
+    )
+    repository_linkage_mode_override = forms.ChoiceField(
+        label="Repository Linkage Mode Override",
+        choices=REPOSITORY_LINKAGE_MODE_OVERRIDE_CHOICES,
+        required=False,
+        initial="",
     )
 
 

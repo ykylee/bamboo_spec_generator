@@ -66,13 +66,25 @@
         </div>
         <span class="chip chip--neutral">{{ stage.jobs|length }} jobs</span>
       </summary>
-      <ul class="meta-list">
-        {% for job in stage.jobs %}
-        <li><strong>{{ job.name|default:job.key }}</strong>{{ job.key|default:"키 없음" }}</li>
-        {% empty %}
-        <li><strong>Jobs</strong>조회 가능한 job 정보가 없습니다.</li>
-        {% endfor %}
-      </ul>
+      <div class="bamboo-stage-body">
+        <ul class="meta-list bamboo-stage-job-list">
+          {% for job in stage.jobs %}
+          <li class="bamboo-stage-job-item">
+            <div class="bamboo-stage-job-item__content">
+              <strong>{{ job.name|default:job.key }}</strong>
+              <span>{{ job.key|default:"키 없음" }}</span>
+            </div>
+          </li>
+          {% empty %}
+          <li class="bamboo-stage-job-item">
+            <div class="bamboo-stage-job-item__content">
+              <strong>Jobs</strong>
+              <span>조회 가능한 job 정보가 없습니다.</span>
+            </div>
+          </li>
+          {% endfor %}
+        </ul>
+      </div>
     </details>
     {% empty %}
     <div class="empty-state empty-state--inline">
@@ -81,6 +93,16 @@
     </div>
     {% endfor %}
   </div>
+</section>
+
+<section class="panel panel--signal-list">
+  <div class="panel__header">
+    <div>
+      <h2 class="panel__title">Published Specs 기준 Task 구성</h2>
+      <p class="panel__body">Bamboo REST live 응답에는 task 상세가 제한적이어서, 마지막으로 publish된 Specs 생성 규칙 기준 task 구성을 함께 보여줍니다.</p>
+    </div>
+  </div>
+  {% include "ui/_task_inspector.html" with inspector=publishedSpecsTaskInspector title="Task tree" body="Bamboo 설정 화면처럼 stage, job, task를 왼쪽 트리에서 고르고 오른쪽에서 실제 스크립트와 설정을 확인할 수 있습니다." empty_title="표시할 Specs task 구성이 없습니다." empty_body="플랜 preview를 만들 수 없어서 publish 기준 task 구성을 표시하지 못했습니다." %}
 </section>
 
 <section class="detail-grid detail-grid--resource">
@@ -115,4 +137,34 @@
   <h2 class="empty-state__title">대상을 찾을 수 없습니다.</h2>
 </div>
 {% endif %}
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+  (function () {
+    const inspectors = Array.from(document.querySelectorAll("[data-task-inspector]"));
+    inspectors.forEach(function (root) {
+      const buttons = Array.from(root.querySelectorAll("[data-task-select]"));
+      const panels = Array.from(root.querySelectorAll("[data-task-panel]"));
+      if (!buttons.length || !panels.length) {
+        return;
+      }
+
+      function setActiveTask(taskId) {
+        buttons.forEach(function (button) {
+          button.classList.toggle("is-active", button.dataset.taskId === taskId);
+        });
+        panels.forEach(function (panel) {
+          panel.classList.toggle("bamboo-config-panel--hidden", panel.dataset.taskId !== taskId);
+        });
+      }
+
+      buttons.forEach(function (button) {
+        button.addEventListener("click", function () {
+          setActiveTask(button.dataset.taskId);
+        });
+      });
+    });
+  }());
+</script>
 {% endblock %}

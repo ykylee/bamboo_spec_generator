@@ -169,7 +169,7 @@ class GeneratorFlowTest(unittest.TestCase):
             self.assertIn("<cleanupDaemonThreads>false</cleanupDaemonThreads>", pom)
             self.assertIn("## 사전 점검", generated_readme)
             self.assertIn("## 빌드별 런타임 요구사항", generated_readme)
-            self.assertIn("scripts/<buildId>/", generated_readme)
+            self.assertIn("scripts/<bundleId>/", generated_readme)
             self.assertIn("system.builder.python", generated_readme)
             self.assertIn("coverity", generated_readme)
             self.assertIn("trigger-plan", generated_readme)
@@ -181,13 +181,13 @@ class GeneratorFlowTest(unittest.TestCase):
             )
             sample_plan = sample_plan_path.read_text(encoding="utf-8")
             self.assertIn("@BambooSpec", sample_plan)
-            self.assertIn('new Stage("Static Analysis")', sample_plan)
+            self.assertIn('new Stage("Analysis")', sample_plan)
             self.assertIn('private static final String LINKED_REPOSITORY = "SAMPLE/sample-app-api";', sample_plan)
             self.assertIn(".linkedRepositories(LINKED_REPOSITORY)", sample_plan)
             self.assertIn('Requirement.equals("operating.system", "Linux")', sample_plan)
             self.assertIn('Requirement.exists("system.builder.mvn3.Maven 3")', sample_plan)
             self.assertIn('Requirement.exists("system.builder.python")', sample_plan)
-            self.assertIn('pythonScriptTask("prepare_build.py", PREPARE_BUILD_SCRIPT)', sample_plan)
+            self.assertIn('pythonScriptTaskShell("prepare_build.py", PREPARE_BUILD_SCRIPT, "python3")', sample_plan)
             self.assertIn('private static final String PREPARE_BUILD_SCRIPT = """', sample_plan)
             self.assertIn("command = 'mvn -B dependency:go-offline'", sample_plan)
             self.assertIn('cat <<\'__BAMBOO_SPEC_PY__\' > " + SCRIPT_DIRECTORY + "/" + scriptName', sample_plan)
@@ -353,7 +353,7 @@ class GeneratorFlowTest(unittest.TestCase):
             self.assertIn('.createForVcsBranchMatching(REPOSITORY_BRANCH_MATCHING_PATTERN);', mfc_plan)
             self.assertIn('private BitbucketServerTrigger repositoryTrigger() {', mfc_plan)
             self.assertIn("return new BitbucketServerTrigger();", mfc_plan)
-            self.assertIn('pythonScriptTask("prepare_build.py", PREPARE_BUILD_SCRIPT)', mfc_plan)
+            self.assertIn('pythonScriptTaskCmdExe("prepare_build.py", PREPARE_BUILD_SCRIPT, "python")', mfc_plan)
             self.assertIn('private static final String PREPARE_BUILD_SCRIPT = """', mfc_plan)
             self.assertIn("command = 'nuget restore SampleAppMfc.sln'", mfc_plan)
             self.assertIn('powershell -NoProfile -Command ^', mfc_plan)
@@ -366,6 +366,62 @@ class GeneratorFlowTest(unittest.TestCase):
             self.assertIn('Arrays.asList(args).contains("--print-plans")', specs_publisher)
             self.assertIn('System.out.println("DRY RUN: " + plan.toString());', specs_publisher)
             self.assertIn("server.publish(plan);", specs_publisher)
+
+    def test_write_specs_project_groups_multiple_builds_into_single_plan(self) -> None:
+        api_build = parse_build_definition(Path("build_info_json/2026/sample-app-api.json"))
+        composite_linux = replace(
+            api_build,
+            build_key="main",
+            name="Sample API main",
+            language="python",
+            compiler="python",
+            build=replace(api_build.build, prepare_command="", build_command=""),
+        )
+        composite_windows = replace(
+            api_build,
+            build_key="sub",
+            name="Sample API sub",
+            language="javascript",
+            compiler="node.js",
+            requirements=replace(api_build.requirements, os="windows"),
+            build=replace(api_build.build, prepare_command="", build_command="npm build"),
+        )
+
+        with TemporaryDirectory() as temp_dir:
+            output_root = Path(temp_dir) / "bamboo-specs"
+            write_specs_project(output_root, [composite_linux, composite_windows])
+
+            grouped_plan = (
+                output_root
+                / "src"
+                / "main"
+                / "java"
+                / "com"
+                / "example"
+                / "specs"
+                / "generated"
+                / "SampleAppApiPlanSpecs.java"
+            ).read_text(encoding="utf-8")
+            registry = (
+                output_root
+                / "src"
+                / "main"
+                / "java"
+                / "com"
+                / "example"
+                / "specs"
+                / "generated"
+                / "AllPlansRegistry.java"
+            ).read_text(encoding="utf-8")
+
+            self.assertIn('new Stage("Analysis")', grouped_plan)
+            self.assertIn('new Job("sub Build", "BLD1")', grouped_plan)
+            self.assertIn('new Job("main Analysis", "ANL1")', grouped_plan)
+            self.assertIn('new Job("sub Analysis", "ANL2")', grouped_plan)
+            self.assertIn('pythonScriptTaskCmdExe("run_build.py", RUN_BUILD_SCRIPT_SUB, "python")', grouped_plan)
+            self.assertIn('pythonScriptTaskCmdExe("run_coverity.py", RUN_COVERITY_SCRIPT_SUB, "python")', grouped_plan)
+            self.assertIn('pythonScriptTaskShell("run_coverity.py", RUN_COVERITY_SCRIPT_MAIN, "python3")', grouped_plan)
+            self.assertEqual(1, registry.count("new SampleAppApiPlanSpecs().plan()"))
 
     def test_create_if_missing_outputs_repository_tracking_metadata(self) -> None:
         build = parse_build_definition(Path("build_info_json/2026/sample-app-api.json"))

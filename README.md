@@ -490,7 +490,7 @@ mvn -q -DskipTests compile
 필수 환경변수:
 
 - `BAMBOO_URL`: Bamboo 서버 URL
-- `BAMBOO_TOKEN_FILE`: Bamboo 토큰 파일 경로. 생략 시 `.credentials`
+- `BAMBOO_TOKEN_FILE`: Bamboo 토큰 파일 경로. 생략 시 저장소 루트의 `ops/credentials/.credentials`
 
 토큰 파일 형식:
 
@@ -545,7 +545,7 @@ cd bamboo-specs
 mvn -q exec:java -Dexec.args="--dry-run"
 mvn -q exec:java -Dexec.args="--print-plans"
 export BAMBOO_URL=https://bamboo.example.com
-export BAMBOO_TOKEN_FILE=/path/to/.credentials
+export BAMBOO_TOKEN_FILE=/path/to/ops/credentials/.credentials
 mvn -q exec:java
 ```
 
@@ -555,10 +555,11 @@ mvn -q exec:java
 python3 -m src.bamboo_spec_generator.cli --output-root bamboo-specs
 cd bamboo-specs
 mvn -q -DskipTests compile
-printf '%s\n' 'token=<personal-access-token>' > .credentials
-chmod 600 .credentials
+mkdir -p ../ops/credentials
+printf '%s\n' 'token=<personal-access-token>' > ../ops/credentials/.credentials
+chmod 600 ../ops/credentials/.credentials
 export BAMBOO_URL=https://atlassian.ddn777.synology.me/bamboo
-export BAMBOO_TOKEN_FILE=.credentials
+export BAMBOO_TOKEN_FILE=../ops/credentials/.credentials
 mvn -q exec:java
 ```
 
@@ -578,7 +579,7 @@ cd bamboo-specs
 mvn -q exec:java -Dexec.args="--dry-run"
 mvn -q exec:java -Dexec.args="--print-plans"
 set BAMBOO_URL=https://bamboo.example.com
-set BAMBOO_TOKEN_FILE=C:\path\to\.credentials
+set BAMBOO_TOKEN_FILE=C:\path\to\ops\credentials\.credentials
 mvn -q exec:java
 ```
 

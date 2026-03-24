@@ -868,6 +868,7 @@ class ProjectViewTest(TestCase):
             "success": True,
             "message": "Bamboo Specs publish가 완료되었습니다.",
             "output": "",
+            "detail": "published successfully",
         }
         bamboo_status_mock.return_value = {
             "configured": True,
@@ -884,6 +885,7 @@ class ProjectViewTest(TestCase):
         self.assertEqual(200, response.status_code)
         publish_mock.assert_called_once_with("SAMPAPI")
         self.assertContains(response, "Bamboo Specs publish가 완료되었습니다.")
+        self.assertContains(response, "published successfully")
 
     @patch("apps.ui.views.get_bamboo_plan_status")
     def test_project_build_detail_shows_publish_history(self, bamboo_status_mock) -> None:
@@ -915,6 +917,7 @@ class ProjectViewTest(TestCase):
         queue_mock.return_value = {
             "message": "Bamboo plan 실행을 요청했습니다.",
             "fullPlanKey": "SAMPLE-SAMPAPI",
+            "detail": "stage=Build",
         }
         bamboo_status_mock.return_value = {
             "configured": True,
@@ -944,9 +947,12 @@ class ProjectViewTest(TestCase):
         )
         self.assertContains(response, "Bamboo plan 실행을 요청했습니다.")
         self.assertContains(response, "Custom Revision")
+        self.assertContains(response, "stage=Build")
 
+    @patch("apps.ui.views.get_build_plan_export_draft")
+    @patch("apps.ui.views.get_build_plan_preview")
     @patch("apps.ui.views.get_bamboo_plan_details")
-    def test_project_bamboo_plan_detail_renders_live_plan(self, plan_details_mock) -> None:
+    def test_project_bamboo_plan_detail_renders_live_plan(self, plan_details_mock, preview_mock, export_draft_mock) -> None:
         plan_details_mock.return_value = {
             "projectKey": "SAMPLE",
             "planKey": "SAMPAPI",
@@ -969,6 +975,43 @@ class ProjectViewTest(TestCase):
             "actions": [],
             "variables": [{"key": "sample", "value": "value"}],
         }
+        preview_mock.return_value = {
+            "stages": [
+                {
+                    "id": "build",
+                    "name": "Build",
+                    "summary": "build summary",
+                    "jobs": [{"jobId": "JOB1", "name": "Build Job", "taskCount": 2}],
+                }
+            ],
+            "jobs": [
+                {
+                    "jobId": "JOB1",
+                    "name": "Build Job",
+                    "buildKey": "api-linux",
+                    "operatingSystem": "linux",
+                    "taskGroups": [
+                        {
+                            "stageName": "Build",
+                            "tasks": [
+                                {"name": "Checkout Source", "type": "checkout", "detail": "SAMPLE/repo"},
+                                {"name": "Run Build Script", "type": "script", "detail": "pre=- · clean=- · build=mvn package"},
+                            ],
+                        }
+                    ],
+                }
+            ],
+        }
+        export_draft_mock.return_value = {
+            "files": [
+                {
+                    "path": "drafts/SAMPAPI/jobs/api-linux/run_build.py",
+                    "label": "api-linux run_build.py",
+                    "language": "python",
+                    "content": "print('build')",
+                }
+            ]
+        }
 
         response = self.client.get("/projects/SAMPLE/builds/SAMPAPI/bamboo/")
 
@@ -977,6 +1020,14 @@ class ProjectViewTest(TestCase):
         self.assertContains(response, "SAMPLE-SAMPAPI")
         self.assertContains(response, "Build Job")
         self.assertContains(response, "sample")
+        self.assertContains(response, "Published Specs 기준 Task 구성")
+        self.assertContains(response, "Task tree")
+        self.assertContains(response, "Checkout Source")
+        self.assertContains(response, "Run Build Script")
+        self.assertContains(response, "build=mvn package")
+        self.assertContains(response, "api-linux run_build.py")
+        self.assertContains(response, "Script configuration")
+        self.assertContains(response, "color:")
 
     def test_project_build_detail_updates_build_plan_metadata(self) -> None:
         response = self.client.post(
@@ -985,6 +1036,7 @@ class ProjectViewTest(TestCase):
                 "form_kind": "build_plan_metadata",
                 "static_analysis_tool_version": "coverity-2024.12",
                 "coverity_project": "sample-api-coverity",
+                "repository_linkage_mode_override": "create_if_missing",
             },
         )
 
@@ -993,6 +1045,7 @@ class ProjectViewTest(TestCase):
         build_plan = BuildPlan.objects.get(plan_key="SAMPAPI")
         self.assertEqual("coverity-2024.12", build_plan.static_analysis_tool_version)
         self.assertEqual("sample-api-coverity", build_plan.coverity_project)
+        self.assertEqual("create_if_missing", build_plan.repository_linkage_mode_override)
 
     def test_project_build_detail_registers_build_info(self) -> None:
         response = self.client.post(
@@ -1040,8 +1093,10 @@ class ProjectViewTest(TestCase):
         self.assertContains(response, "api-linux")
         self.assertContains(response, "mvn -B clean package")
         self.assertContains(response, "services/api")
-        self.assertContains(response, "Run Build")
-        self.assertContains(response, "Register Build Start")
+        self.assertContains(response, "Run Build Script")
+        self.assertContains(response, "Prepare Build Script")
+        self.assertContains(response, "Specs Task 구성 상세")
+        self.assertContains(response, "Task tree")
         self.assertContains(response, "drafts/SAMPAPI/jobs/api-linux/coverity.yaml")
         self.assertNotContains(response, "plan-preview.json")
         self.assertContains(response, "linux")

@@ -111,6 +111,7 @@ def get_project_detail(jira_project_key: str) -> dict | None:
                 "activeDefinitionYear": "",
                 "staticAnalysisToolVersion": build.build_plan.static_analysis_tool_version,
                 "coverityProject": build.build_plan.coverity_project,
+                "repositoryLinkageModeOverride": build.build_plan.repository_linkage_mode_override,
                 "buildInfoCount": build.build_plan.build_infos.count(),
                 "latestVersion": (
                     build.build_plan.latest_version.version_text

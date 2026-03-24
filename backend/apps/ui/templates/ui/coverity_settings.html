@@ -58,7 +58,8 @@
       </div>
     </form>
     <ul class="meta-list">
-      <li><strong>Bamboo Token</strong>{% if bambooSettings.tokenConfigured %}서버 환경 변수 설정됨{% else %}서버 환경 변수 누락{% endif %}</li>
+      <li><strong>Bamboo Token</strong>{% if bambooSettings.tokenConfigured %}{% if bambooSettings.tokenSource == "env" %}서버 환경 변수 설정됨{% elif bambooSettings.tokenSource == "file" %}관리 폴더 파일 설정됨{% else %}설정됨{% endif %}{% else %}미설정{% endif %}</li>
+      <li><strong>Managed Token File</strong>{{ bambooSettings.tokenFilePath }}</li>
     </ul>
   </article>
 

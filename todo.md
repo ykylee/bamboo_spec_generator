@@ -55,9 +55,10 @@
 - stage/job/branch/action/variable 누락 시 fallback 정책을 정리한다.
 
 4. Bamboo publish/실행 실패 UX 개선
-- 신규
-- Maven publish 실패 로그와 Bamboo API 오류를 구조화해 화면에 보여준다.
-- 단순 문자열 메시지 대신 operator가 판단 가능한 수준으로 다듬는다.
+- 1차 완료
+- publish/run 결과를 요약 메시지와 세부 정보로 분리해 화면에 노출한다.
+- publish 로그와 queue 요청 파라미터를 operator 확인용 detail 영역에서 볼 수 있다.
+- 이후에는 실패 유형별 분류, 하이라이트, 민감정보 마스킹이 더 필요하다.
 
 5. Bamboo end-to-end 실환경 검증
 - 신규

@@ -24,6 +24,11 @@ from src.bamboo_spec_generator.validator import is_no_build_language  # noqa: E4
 
 
 def get_active_definition_by_plan_key(plan_key: str) -> dict | None:
+    definitions = get_active_definitions_by_plan_key(plan_key)
+    return definitions[0] if definitions else None
+
+
+def get_active_definitions_by_plan_key(plan_key: str) -> list[dict]:
     try:
         plan = (
             BuildPlan.objects.select_related("project_build__project", "project_build__repository")
@@ -31,18 +36,27 @@ def get_active_definition_by_plan_key(plan_key: str) -> dict | None:
             .get(plan_key=plan_key)
         )
     except ObjectDoesNotExist:
-        return None
+        return []
     if not hasattr(plan, "project_build"):
-        return None
-    build_info = _resolve_primary_build_info(plan)
-    payload = _build_definition_payload_from_registration(plan=plan, build_info=build_info)
-    return {
-        "planKey": plan.plan_key,
-        "buildId": plan.build_id,
-        "year": str(timezone.now().year),
-        "definitionVersion": "",
-        "definition": payload,
-    }
+        return []
+
+    build_infos = list(plan.build_infos.all().order_by("build_key"))
+    if not build_infos:
+        build_infos = [None]
+
+    definitions = []
+    for build_info in build_infos:
+        payload = _build_definition_payload_from_registration(plan=plan, build_info=build_info)
+        definitions.append(
+            {
+                "planKey": plan.plan_key,
+                "buildId": plan.build_id,
+                "year": str(timezone.now().year),
+                "definitionVersion": "",
+                "definition": payload,
+            }
+        )
+    return definitions
 
 
 def get_prepare_context_by_plan_key(plan_key: str) -> dict | None:
@@ -67,7 +81,7 @@ def get_prepare_context_by_plan_key(plan_key: str) -> dict | None:
         current_repository = next((repo for repo in repositories if repo.is_representative), None)
     if current_repository is None and repositories:
         current_repository = repositories[0]
-    linkage_mode = _repository_linkage_mode(project=project, repository=current_repository)
+    linkage_mode = _repository_linkage_mode(plan=plan, project=project, repository=current_repository)
     clone_url = (
         build_git_clone_url(
             project_key=project.bitbucket_project_key,
@@ -137,7 +151,7 @@ def get_build_plan_preview(plan_key: str) -> dict | None:
     prepare_job = {
         "jobId": "plan-prepare",
         "buildKey": "plan-prepare",
-        "name": "plan-prepare",
+        "name": "Prepare Job",
         "operatingSystem": "",
         "language": "",
         "compiler": "",
@@ -157,14 +171,20 @@ def get_build_plan_preview(plan_key: str) -> dict | None:
                 "stageName": "Prepare",
                 "tasks": [
                     {
-                        "name": "Register Build Start",
-                        "type": "metadata",
-                        "detail": f"plan={plan.plan_key} · version update",
+                        "name": "Checkout Source",
+                        "type": "checkout",
+                        "detail": (
+                            f"{project.bitbucket_project_key}/{repository.repo_slug}"
+                            if repository
+                            else "Repository 미연결"
+                        ),
                     },
                     {
-                        "name": "Record Execution Context",
-                        "type": "metadata",
-                        "detail": f"project={project.jira_project_key} · buildInfos={len(build_infos)}",
+                        "name": "Prepare Build Script",
+                        "type": "script",
+                        "detail": (
+                            f"plan={plan.plan_key} · project={project.jira_project_key} · buildInfos={len(build_infos)}"
+                        ),
                     },
                 ],
             }
@@ -174,7 +194,8 @@ def get_build_plan_preview(plan_key: str) -> dict | None:
         ],
     }
 
-    jobs = []
+    build_jobs = []
+    analysis_jobs = []
     for build_info in build_infos:
         build_definition = _build_definition_for_export(plan=plan, build_info=build_info)
         operating_system = build_definition.requirements.os
@@ -194,66 +215,81 @@ def get_build_plan_preview(plan_key: str) -> dict | None:
         custom_commands = list(build_definition.build.static_analysis.custom_tool_commands)
         rendered_custom_commands = [command.replace("{buildCommand}", build_command) for command in custom_commands]
 
-        jobs.append(
-            {
-                "jobId": build_info.build_key,
-                "buildKey": build_info.build_key,
-                "name": build_info.build_key or f"{plan.plan_key}-job",
-                "operatingSystem": operating_system,
-                "language": language,
-                "compiler": compiler,
-                "preProcess": pre_process,
-                "buildCommand": build_command,
-                "cleanCommand": clean_command,
-                "hasBuildStage": has_build_stage,
-                "coverityStream": coverity_stream,
-                "buildSubPath": build_definition.build.sub_path,
-                "analysisExcludedFiles": analysis_excluded_files,
-                "repositorySlug": repository.repo_slug if repository else "",
-                "executionCount": build_info.executions.count(),
-                "detailUrl": f"/projects/{project.jira_project_key}/builds/{plan.plan_key}/infos/{build_info.build_key}/",
-                "taskGroups": [
-                    *(
-                        [
-                            {
-                                "stageId": "build",
-                                "stageName": "Build",
-                                "tasks": [
-                                    {
-                                        "name": "Checkout Source",
-                                        "type": "checkout",
-                                        "detail": (
-                                            f"{project.bitbucket_project_key}/{repository.repo_slug}"
-                                            if repository
-                                            else "Repository 미연결"
-                                        ),
-                                    },
-                                    {
-                                        "name": "Pre Process",
-                                        "type": "script",
-                                        "detail": pre_process or "미지정",
-                                    },
-                                    {
-                                        "name": "Clean Command",
-                                        "type": "script",
-                                        "detail": clean_command or "미지정",
-                                    },
-                                    {
-                                        "name": "Run Build",
-                                        "type": "script",
-                                        "detail": build_command or "미지정",
-                                    },
-                                    {
-                                        "name": "Package Binary",
-                                        "type": "artifact",
-                                        "detail": "deployable binary package",
-                                    },
-                                ],
-                            }
-                        ]
-                        if has_build_stage
-                        else []
+        common_job_payload = {
+            "buildKey": build_info.build_key,
+            "operatingSystem": operating_system,
+            "language": language,
+            "compiler": compiler,
+            "preProcess": pre_process,
+            "buildCommand": build_command,
+            "cleanCommand": clean_command,
+            "coverityStream": coverity_stream,
+            "buildSubPath": build_definition.build.sub_path,
+            "analysisExcludedFiles": analysis_excluded_files,
+            "repositorySlug": repository.repo_slug if repository else "",
+            "executionCount": build_info.executions.count(),
+            "detailUrl": f"/projects/{project.jira_project_key}/builds/{plan.plan_key}/infos/{build_info.build_key}/",
+            "sourceSummary": [
+                {
+                    "label": "OS/언어/컴파일러",
+                    "value": "빌드 정보" if build_info.operating_system or build_info.language or build_info.compiler else "플랜 메타데이터",
+                },
+                {
+                    "label": "명령어",
+                    "value": "빌드 정보" if build_info.pre_process or build_info.build_command or build_info.clean_command else "기본값",
+                },
+                {
+                    "label": "경로/Stream",
+                    "value": (
+                        "빌드 정보"
+                        if build_info.build_sub_path or build_info.coverity_stream or build_info.analysis_excluded_files
+                        else "기본 연결"
                     ),
+                },
+            ],
+        }
+        if has_build_stage:
+            build_jobs.append(
+                {
+                    **common_job_payload,
+                    "jobId": f"{build_info.build_key}-build",
+                    "name": _build_stage_job_name(build_info.build_key, plan.plan_key),
+                    "hasBuildStage": True,
+                    "taskGroups": [
+                        {
+                            "stageId": "build",
+                            "stageName": "Build",
+                            "tasks": [
+                                {
+                                    "name": "Checkout Source",
+                                    "type": "checkout",
+                                    "detail": (
+                                        f"{project.bitbucket_project_key}/{repository.repo_slug}"
+                                        if repository
+                                        else "Repository 미연결"
+                                    ),
+                                },
+                                {
+                                    "name": "Run Build Script",
+                                    "type": "script",
+                                    "detail": _summarize_build_script(
+                                        pre_process=pre_process,
+                                        clean_command=clean_command,
+                                        build_command=build_command,
+                                    ),
+                                },
+                            ],
+                        }
+                    ],
+                }
+            )
+        analysis_jobs.append(
+            {
+                **common_job_payload,
+                "jobId": f"{build_info.build_key}-analysis",
+                "name": _analysis_stage_job_name(build_info.build_key, plan.plan_key),
+                "hasBuildStage": False,
+                "taskGroups": [
                     {
                         "stageId": "analysis",
                         "stageName": "Analysis",
@@ -268,40 +304,17 @@ def get_build_plan_preview(plan_key: str) -> dict | None:
                                 ),
                             },
                             {
-                                "name": "Coverity Scan",
-                                "type": "analysis",
+                                "name": "Run Coverity Script",
+                                "type": "script",
                                 "detail": coverity_stream or "Coverity Stream 미지정",
                             },
                             {
-                                "name": "Custom Analysis",
-                                "type": "analysis",
+                                "name": "Run Custom Analysis Script",
+                                "type": "script",
                                 "detail": ", ".join(rendered_custom_commands) if rendered_custom_commands else "미지정",
                             },
-                            {
-                                "name": "Publish Report",
-                                "type": "artifact",
-                                "detail": "analysis report bundle",
-                            },
                         ],
-                    },
-                ],
-                "sourceSummary": [
-                    {
-                        "label": "OS/언어/컴파일러",
-                        "value": "빌드 정보" if build_info.operating_system or build_info.language or build_info.compiler else "플랜 메타데이터",
-                    },
-                    {
-                        "label": "명령어",
-                        "value": "빌드 정보" if build_info.pre_process or build_info.build_command or build_info.clean_command else "기본값",
-                    },
-                    {
-                        "label": "경로/Stream",
-                        "value": (
-                            "빌드 정보"
-                            if build_info.build_sub_path or build_info.coverity_stream or build_info.analysis_excluded_files
-                            else "기본 연결"
-                        ),
-                    },
+                    }
                 ],
             }
         )
@@ -309,7 +322,7 @@ def get_build_plan_preview(plan_key: str) -> dict | None:
     trigger_job = {
         "jobId": "plan-trigger",
         "buildKey": "plan-trigger",
-        "name": "plan-trigger",
+        "name": "Trigger Follow-up",
         "operatingSystem": "",
         "language": "",
         "compiler": "",
@@ -328,8 +341,8 @@ def get_build_plan_preview(plan_key: str) -> dict | None:
                 "stageName": "Post Process",
                 "tasks": [
                     {
-                        "name": "Trigger Follow-up",
-                        "type": "trigger",
+                        "name": "Trigger Follow-up Script",
+                        "type": "script",
                         "detail": plan_definition.build.post_build_trigger.target_plan_key or "미지정",
                     }
                 ],
@@ -358,7 +371,7 @@ def get_build_plan_preview(plan_key: str) -> dict | None:
         {
             "id": "build",
             "name": "Build",
-            "jobCount": sum(1 for job in jobs if job["hasBuildStage"]),
+            "jobCount": len(build_jobs),
             "summary": "checkout부터 build와 binary package 생성까지 build job에서 수행합니다. 스크립트 언어처럼 build가 없는 경우 이 단계는 생략됩니다.",
             "jobs": [
                 {
@@ -367,14 +380,13 @@ def get_build_plan_preview(plan_key: str) -> dict | None:
                     "operatingSystem": job["operatingSystem"],
                     "taskCount": len(next(group for group in job["taskGroups"] if group["stageId"] == "build")["tasks"]),
                 }
-                for job in jobs
-                if job["hasBuildStage"]
+                for job in build_jobs
             ],
         },
         {
             "id": "analysis",
             "name": "Analysis",
-            "jobCount": len(jobs),
+            "jobCount": len(analysis_jobs),
             "summary": "analysis job은 build 산출물을 받지 않고 checkout부터 다시 시작해 report를 생성합니다.",
             "jobs": [
                 {
@@ -383,7 +395,7 @@ def get_build_plan_preview(plan_key: str) -> dict | None:
                     "operatingSystem": job["operatingSystem"],
                     "taskCount": len(next(group for group in job["taskGroups"] if group["stageId"] == "analysis")["tasks"]),
                 }
-                for job in jobs
+                for job in analysis_jobs
             ],
         },
         {
@@ -427,7 +439,7 @@ def get_build_plan_preview(plan_key: str) -> dict | None:
             "runtimeEnvVars": list(plan_definition.build.runtime_requirements.env_vars),
         },
         "stages": stages,
-        "jobs": [prepare_job] + jobs + [trigger_job],
+        "jobs": [prepare_job] + build_jobs + analysis_jobs + [trigger_job],
         "staticAnalysis": {
             "customToolCommands": list(plan_definition.build.static_analysis.custom_tool_commands),
             "postBuildTriggerType": plan_definition.build.post_build_trigger.type,
@@ -541,7 +553,7 @@ def _build_definition_for_plan_summary(*, plan: BuildPlan, build_infos: list):
 def _build_definition_payload_from_registration(*, plan: BuildPlan, build_info) -> dict:
     project = plan.project_build.project
     repository = getattr(plan.project_build, "repository", None)
-    linkage_mode = _repository_linkage_mode(project=project, repository=repository)
+    linkage_mode = _repository_linkage_mode(plan=plan, project=project, repository=repository)
     clone_url = (
         build_git_clone_url(
             project_key=project.bitbucket_project_key,
@@ -631,10 +643,16 @@ def _normalize_build_sub_path(value: str) -> str:
     return normalized or "."
 
 
-def _repository_linkage_mode(*, project, repository) -> str:
+def _repository_linkage_mode(*, plan: BuildPlan, project, repository) -> str:
     if repository is None:
         return "linked"
-    if get_repository_linkage_mode() == "create_if_missing":
+    override_mode = (plan.repository_linkage_mode_override or "").strip().lower()
+    if override_mode in {
+        BuildPlan.REPOSITORY_LINKAGE_MODE_LINKED,
+        BuildPlan.REPOSITORY_LINKAGE_MODE_CREATE_IF_MISSING,
+    }:
+        return override_mode
+    if get_repository_linkage_mode() == BuildPlan.REPOSITORY_LINKAGE_MODE_CREATE_IF_MISSING:
         return "create_if_missing"
     return "linked"
 
@@ -663,3 +681,22 @@ def _default_runtime_env_vars(*, language: str, compiler: str) -> list[str]:
     if normalized_compiler == "python" or normalized_language == "python":
         return ["PYTHONPATH"]
     return ["PATH"]
+
+
+def _summarize_build_script(*, pre_process: str, clean_command: str, build_command: str) -> str:
+    segments = [
+        f"pre={pre_process or '-'}",
+        f"clean={clean_command or '-'}",
+        f"build={build_command or '-'}",
+    ]
+    return " · ".join(segments)
+
+
+def _build_stage_job_name(build_key: str, plan_key: str) -> str:
+    normalized = (build_key or "").strip()
+    return f"{normalized or plan_key} Build".strip()
+
+
+def _analysis_stage_job_name(build_key: str, plan_key: str) -> str:
+    normalized = (build_key or "").strip()
+    return f"{normalized or plan_key} Analysis".strip()

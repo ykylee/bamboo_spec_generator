@@ -133,6 +133,11 @@
           {{ metadataForm.coverity_project }}
           {% if metadataForm.coverity_project.errors %}<span class="project-form__error">{{ metadataForm.coverity_project.errors|join:", " }}</span>{% endif %}
         </label>
+        <label class="project-form__field">
+          <span class="project-form__label">Repository Linkage Mode</span>
+          {{ metadataForm.repository_linkage_mode_override }}
+          {% if metadataForm.repository_linkage_mode_override.errors %}<span class="project-form__error">{{ metadataForm.repository_linkage_mode_override.errors|join:", " }}</span>{% endif %}
+        </label>
       </div>
       <div class="project-form__actions">
         <button class="action-button" type="submit">수정 저장</button>
@@ -147,6 +152,7 @@
     <ul class="meta-list">
       <li><strong>정적분석 도구 버전</strong> 플랜 단위 공통 버전 문자열을 관리합니다.</li>
       <li><strong>Coverity Project</strong> 저장소별 Coverity와 별도로, 빌드 플랜이 직접 참조하는 프로젝트명을 관리합니다.</li>
+      <li><strong>Repository Linkage Mode</strong> 기본값은 시스템 설정을 따르되, 필요한 플랜만 여기서 override 합니다.</li>
       <li><strong>빌드 정보</strong> 빌드 환경구성은 이 화면 아래 Preview와 상세 편집으로 연결됩니다.</li>
     </ul>
   </aside>
@@ -403,6 +409,16 @@
         {% endfor %}
       </div>
     </div>
+    <div class="panel panel--signal-list">
+      <div class="panel__header">
+        <div>
+          <p class="panel__eyebrow">Bamboo-style Task Inspector</p>
+          <h3 class="panel__title">Specs Task 구성 상세</h3>
+        </div>
+      </div>
+      <p class="panel__body">실제 Bamboo 설정 화면처럼 왼쪽 트리에서 task를 고르고, 오른쪽에서 설정 요약과 생성 스크립트를 바로 확인할 수 있습니다.</p>
+      {% include "ui/_task_inspector.html" with inspector=buildPreviewTaskInspector title="Task tree" body="Preview로 생성된 stage, job, task 구조입니다." empty_title="아직 Task Preview가 없습니다." empty_body="빌드 정보를 등록하면 이 영역에 Bamboo Task 구성이 생성됩니다." %}
+    </div>
   </div>
 </section>
 {% endif %}
@@ -437,7 +453,7 @@
 </section>
 {% endif %}
 
-<section class="panel panel--signal-list">
+<section class="panel panel--signal-list" id="bamboo-operations-panel">
   <div class="panel__header">
     <div>
       <p class="panel__eyebrow">Bamboo Operations</p>
@@ -459,6 +475,18 @@
   {% endif %}
   {% if bambooError %}
   <div class="form-alert form-alert--error">{{ bambooError }}</div>
+  {% endif %}
+  {% if bambooDetail %}
+  <details class="export-draft-item" open>
+    <summary class="export-draft-item__summary">
+      <div>
+        <strong>Bamboo 실행 세부 정보</strong>
+        <p>operator 확인용 상세 로그/요청 파라미터</p>
+      </div>
+      <span class="chip chip--neutral">detail</span>
+    </summary>
+    <pre class="export-draft-item__code"><code>{{ bambooDetail }}</code></pre>
+  </details>
   {% endif %}
   <div class="detail-grid detail-grid--resource">
     <article class="panel panel--signal-list">
@@ -483,12 +511,12 @@
         <h3 class="panel__title">작업</h3>
       </div>
       <div class="hero__actions">
-        <form method="post" action="{% url 'project-build-detail' project.jiraProjectKey build.planKey %}">
+        <form method="post" action="{% url 'project-build-detail' project.jiraProjectKey build.planKey %}#bamboo-operations-panel">
           {% csrf_token %}
           <input type="hidden" name="form_kind" value="bamboo_publish">
           <button class="action-button" type="submit">Bamboo Publish</button>
         </form>
-        <form method="post" action="{% url 'project-build-detail' project.jiraProjectKey build.planKey %}">
+        <form method="post" action="{% url 'project-build-detail' project.jiraProjectKey build.planKey %}#bamboo-operations-panel">
           {% csrf_token %}
           <input type="hidden" name="form_kind" value="bamboo_run">
           <div class="project-form__grid">
@@ -516,21 +544,33 @@
       </div>
     </article>
   </div>
-  <div class="panel panel--signal-list">
+  <div class="panel panel--signal-list bamboo-history-panel">
     <div class="panel__header">
       <h3 class="panel__title">최근 Publish 이력</h3>
     </div>
-    <ul class="entity-preview-list">
+    <ul class="entity-preview-list bamboo-history-list">
       {% for publishExecution in bambooPublishExecutions %}
-      <li class="entity-preview-item">
-        <div>
+      <li class="entity-preview-item bamboo-history-item">
+        <div class="bamboo-history-item__summary">
           <strong>{{ publishExecution.status }}</strong>
           <p>{{ publishExecution.createdAt }} · rc={{ publishExecution.returnCode|default:"-" }}</p>
           <p>{{ publishExecution.message|default:"메시지 없음" }}</p>
         </div>
-        <div class="chip-row">
+        <div class="chip-row bamboo-history-item__chips">
           <span class="chip chip--neutral">{{ publishExecution.triggerSource|default:"web_ui" }}</span>
         </div>
+        {% if publishExecution.output %}
+        <details class="export-draft-item bamboo-history-item__output">
+          <summary class="export-draft-item__summary">
+            <div>
+              <strong>출력 보기</strong>
+              <p>publish 실행 로그</p>
+            </div>
+            <span class="chip chip--neutral">output</span>
+          </summary>
+          <pre class="export-draft-item__code"><code>{{ publishExecution.output }}</code></pre>
+        </details>
+        {% endif %}
       </li>
       {% empty %}
       <li class="empty-state empty-state--inline">
@@ -742,6 +782,33 @@
     jobButtons.forEach(function (button) {
       button.addEventListener("click", function () {
         setActiveJob(button.dataset.jobId);
+      });
+    });
+  }());
+</script>
+<script>
+  (function () {
+    const inspectors = Array.from(document.querySelectorAll("[data-task-inspector]"));
+    inspectors.forEach(function (root) {
+      const buttons = Array.from(root.querySelectorAll("[data-task-select]"));
+      const panels = Array.from(root.querySelectorAll("[data-task-panel]"));
+      if (!buttons.length || !panels.length) {
+        return;
+      }
+
+      function setActiveTask(taskId) {
+        buttons.forEach(function (button) {
+          button.classList.toggle("is-active", button.dataset.taskId === taskId);
+        });
+        panels.forEach(function (panel) {
+          panel.classList.toggle("bamboo-config-panel--hidden", panel.dataset.taskId !== taskId);
+        });
+      }
+
+      buttons.forEach(function (button) {
+        button.addEventListener("click", function () {
+          setActiveTask(button.dataset.taskId);
+        });
       });
     });
   }());

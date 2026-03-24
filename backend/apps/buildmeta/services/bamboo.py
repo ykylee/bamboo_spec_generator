@@ -9,9 +9,11 @@ import sys
 import tempfile
 from urllib import error, parse, request
 
+from django.utils import timezone
+
 from apps.buildmeta.models import BambooPublishExecution, BuildPlan
 
-from .system_settings import get_bamboo_system_settings
+from .system_settings import DEFAULT_BAMBOO_TOKEN_PATH, get_bamboo_system_settings
 
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
@@ -23,25 +25,38 @@ from src.bamboo_spec_generator.writer import write_specs_project  # noqa: E402
 
 
 class BambooOperationError(RuntimeError):
-    pass
+    def __init__(self, summary: str, detail: str = "") -> None:
+        super().__init__(summary)
+        self.summary = summary
+        self.detail = detail
 
 
 @dataclass(frozen=True)
 class BambooClientConfig:
     server_url: str
     token: str
+    token_file_path: str | None = None
     timeout_seconds: float = 15.0
 
 
 def get_bamboo_client_config() -> BambooClientConfig:
     settings_payload = get_bamboo_system_settings()
     server_url = str(settings_payload["serverUrl"]).rstrip("/")
-    token = os.environ.get("BAMBOO_SERVER_TOKEN", "").strip()
+    env_token = os.environ.get("BAMBOO_SERVER_TOKEN", "").strip()
+    file_token = DEFAULT_BAMBOO_TOKEN_PATH.read_text(encoding="utf-8").strip() if DEFAULT_BAMBOO_TOKEN_PATH.is_file() else ""
+    token = _normalize_bamboo_token(env_token or file_token)
     if not server_url:
         raise BambooOperationError("Bamboo 서버 URL이 설정되지 않았습니다.")
     if not token:
-        raise BambooOperationError("BAMBOO_SERVER_TOKEN 환경 변수가 설정되지 않았습니다.")
-    return BambooClientConfig(server_url=server_url, token=token)
+        raise BambooOperationError(
+            "Bamboo 토큰이 설정되지 않았습니다.",
+            f"환경 변수 `BAMBOO_SERVER_TOKEN` 또는 `{DEFAULT_BAMBOO_TOKEN_PATH}` 파일이 필요합니다.",
+        )
+    return BambooClientConfig(
+        server_url=server_url,
+        token=token,
+        token_file_path=None if env_token else str(DEFAULT_BAMBOO_TOKEN_PATH) if file_token else None,
+    )
 
 
 def get_bamboo_plan_status(plan_key: str) -> dict:
@@ -74,7 +89,8 @@ def get_bamboo_plan_status(plan_key: str) -> dict:
             **identity,
             "configured": True,
             "exists": False,
-            "message": str(exc),
+            "message": exc.summary,
+            "detail": exc.detail,
         }
 
     if plan_payload is None:
@@ -110,14 +126,14 @@ def get_bamboo_plan_status(plan_key: str) -> dict:
 def get_bamboo_plan_details(plan_key: str) -> dict:
     plan = _get_build_plan(plan_key)
     if plan is None:
-        raise BambooOperationError("Build plan not found.")
+        raise BambooOperationError("Build plan을 찾지 못했습니다.")
 
     identity = _build_plan_identity(plan)
     client = _BambooClient(get_bamboo_client_config())
     plan_payload = client.get_plan(
         identity["projectKey"],
         identity["planKey"],
-        expand="stages.stage.jobs.job,branches.branch,actions.action,variableContext",
+        expand="stages.stage.jobs.job,stages.stage.plans.plan,branches.branch,actions.action,variableContext",
     )
     if plan_payload is None:
         raise BambooOperationError("Bamboo에 해당 plan이 등록되어 있지 않습니다.")
@@ -141,11 +157,11 @@ def get_bamboo_plan_details(plan_key: str) -> dict:
 
 
 def publish_bamboo_specs(plan_key: str) -> dict:
-    from apps.buildmeta.selectors.definitions import get_active_definition_by_plan_key, get_prepare_context_by_plan_key
+    from apps.buildmeta.selectors.definitions import get_active_definitions_by_plan_key, get_prepare_context_by_plan_key
 
     plan = _get_build_plan(plan_key)
     if plan is None:
-        raise BambooOperationError("Build plan not found.")
+        raise BambooOperationError("Build plan을 찾지 못했습니다.")
 
     try:
         config = get_bamboo_client_config()
@@ -153,13 +169,13 @@ def publish_bamboo_specs(plan_key: str) -> dict:
         _record_publish_execution(
             plan=plan,
             status=BambooPublishExecution.STATUS_FAILED,
-            message=str(exc),
-            output="",
+            message=exc.summary,
+            output=exc.detail,
             return_code=None,
         )
         raise
-    definition_payload = get_active_definition_by_plan_key(plan_key)
-    if definition_payload is None:
+    definition_payloads = get_active_definitions_by_plan_key(plan_key)
+    if not definition_payloads:
         _record_publish_execution(
             plan=plan,
             status=BambooPublishExecution.STATUS_FAILED,
@@ -170,24 +186,33 @@ def publish_bamboo_specs(plan_key: str) -> dict:
         raise BambooOperationError("활성 Bamboo 정의를 찾지 못했습니다.")
 
     prepare_context = get_prepare_context_by_plan_key(plan_key)
-    build = parse_build_definition_payload(
-        definition_payload["definition"],
-        year=str(definition_payload["year"]),
-    )
+    builds = [
+        parse_build_definition_payload(
+            definition_payload["definition"],
+            year=str(definition_payload["year"]),
+        )
+        for definition_payload in definition_payloads
+    ]
 
     with tempfile.TemporaryDirectory(prefix=f"bamboo-publish-{plan_key.lower()}-") as temp_dir:
         output_root = Path(temp_dir) / "bamboo-specs"
-        write_specs_project(output_root, [build], prepare_contexts={plan_key: prepare_context or {}})
-        with tempfile.NamedTemporaryFile("w", encoding="utf-8", prefix="bamboo-token-", delete=False) as token_file:
-            token_file.write(config.token)
-            token_path = Path(token_file.name)
+        write_specs_project(output_root, builds, prepare_contexts={plan_key: prepare_context or {}})
+        token_path: Path | None = None
+        created_temp_token = False
+        if config.token_file_path:
+            token_path = Path(config.token_file_path)
+        else:
+            with tempfile.NamedTemporaryFile("w", encoding="utf-8", prefix="bamboo-token-", delete=False) as token_file:
+                token_file.write(config.token)
+                token_path = Path(token_file.name)
+                created_temp_token = True
 
         try:
             env = os.environ.copy()
             env["BAMBOO_URL"] = config.server_url
             env["BAMBOO_TOKEN_FILE"] = str(token_path)
             result = subprocess.run(
-                ["mvn", "-q", "exec:java"],
+                ["mvn", "-q", "-DskipTests", "compile", "exec:java"],
                 cwd=output_root,
                 env=env,
                 check=False,
@@ -198,13 +223,13 @@ def publish_bamboo_specs(plan_key: str) -> dict:
             _record_publish_execution(
                 plan=plan,
                 status=BambooPublishExecution.STATUS_FAILED,
-                message=f"Maven publish 실행에 실패했습니다: {exc}",
-                output="",
+                message="Maven publish 실행에 실패했습니다.",
+                output=str(exc),
                 return_code=None,
             )
-            raise BambooOperationError(f"Maven publish 실행에 실패했습니다: {exc}") from exc
+            raise BambooOperationError("Maven publish 실행에 실패했습니다.", str(exc)) from exc
         finally:
-            if token_path.exists():
+            if created_temp_token and token_path is not None and token_path.exists():
                 token_path.unlink()
 
     output = "\n".join(part for part in [result.stdout.strip(), result.stderr.strip()] if part).strip()
@@ -220,6 +245,7 @@ def publish_bamboo_specs(plan_key: str) -> dict:
         "returnCode": result.returncode,
         "message": "Bamboo Specs publish가 완료되었습니다." if result.returncode == 0 else "Bamboo Specs publish에 실패했습니다.",
         "output": output,
+        "detail": output,
     }
 
 
@@ -237,7 +263,7 @@ def queue_bamboo_plan_with_options(
 ) -> dict:
     plan = _get_build_plan(plan_key)
     if plan is None:
-        raise BambooOperationError("Build plan not found.")
+        raise BambooOperationError("Build plan을 찾지 못했습니다.")
 
     identity = _build_plan_identity(plan)
     client = _BambooClient(get_bamboo_client_config())
@@ -256,6 +282,12 @@ def queue_bamboo_plan_with_options(
         "executeAllStages": execute_all_stages,
         "customRevision": custom_revision,
         "variables": variables or {},
+        "detail": _format_queue_detail(
+            stage=stage,
+            execute_all_stages=execute_all_stages,
+            custom_revision=custom_revision,
+            variables=variables or {},
+        ),
         "raw": payload,
     }
 
@@ -277,6 +309,25 @@ def _record_publish_execution(
         trigger_source="web_ui",
         requested_by="",
     )
+
+
+def _format_queue_detail(
+    *,
+    stage: str,
+    execute_all_stages: bool,
+    custom_revision: str,
+    variables: dict[str, str],
+) -> str:
+    lines = [
+        f"stage={stage or '-'}",
+        f"executeAllStages={'true' if execute_all_stages else 'false'}",
+        f"customRevision={custom_revision or '-'}",
+    ]
+    if variables:
+        lines.append("variables=")
+        for key, value in sorted(variables.items()):
+            lines.append(f"  {key}={value}")
+    return "\n".join(lines)
 
 
 class _BambooClient:
@@ -338,9 +389,9 @@ class _BambooClient:
             if allow_not_found and exc.code == 404:
                 return None
             payload = exc.read().decode("utf-8", errors="replace")
-            raise BambooOperationError(f"Bamboo API 요청이 실패했습니다: {exc.code} {payload}".strip()) from exc
+            raise BambooOperationError("Bamboo API 요청이 실패했습니다.", f"{exc.code} {payload}".strip()) from exc
         except error.URLError as exc:
-            raise BambooOperationError(f"Bamboo API 연결에 실패했습니다: {exc.reason}") from exc
+            raise BambooOperationError("Bamboo API 연결에 실패했습니다.", str(exc.reason)) from exc
 
 
 def _get_build_plan(plan_key: str) -> BuildPlan | None:
@@ -352,18 +403,27 @@ def _get_build_plan(plan_key: str) -> BuildPlan | None:
 
 
 def _build_plan_identity(plan: BuildPlan) -> dict[str, str]:
-    try:
-        project_build = plan.project_build
-    except BuildPlan.project_build.RelatedObjectDoesNotExist:
-        project_build = None
-    project = project_build.project if project_build is not None else None
-    project_key = project.bitbucket_project_key if project is not None else ""
+    project_key = _resolve_bamboo_project_key(plan)
     full_plan_key = f"{project_key}-{plan.plan_key}" if project_key else plan.plan_key
     return {
         "projectKey": project_key,
         "planKey": plan.plan_key,
         "fullPlanKey": full_plan_key,
     }
+
+
+def _resolve_bamboo_project_key(plan: BuildPlan) -> str:
+    active_definition = plan.definitions.filter(is_active=True).order_by("-created_at").first()
+    if active_definition is not None and active_definition.year.strip():
+        return f"Y{active_definition.year.strip()}"
+    return f"Y{timezone.now().year}"
+
+
+def _normalize_bamboo_token(value: str) -> str:
+    normalized = (value or "").strip()
+    if normalized.startswith("token="):
+        return normalized.split("=", 1)[1].strip()
+    return normalized
 
 
 def _plan_browse_url(identity: dict[str, str]) -> str:
@@ -404,10 +464,7 @@ def _extract_stages(payload: dict) -> list[dict]:
         stage_items = [stage_items]
     stages: list[dict] = []
     for stage in stage_items or []:
-        jobs_container = stage.get("jobs", {}) if isinstance(stage, dict) else {}
-        jobs = jobs_container.get("job") if isinstance(jobs_container, dict) else []
-        if isinstance(jobs, dict):
-            jobs = [jobs]
+        jobs = _extract_stage_jobs(stage)
         stages.append(
             {
                 "name": stage.get("name", ""),
@@ -423,6 +480,26 @@ def _extract_stages(payload: dict) -> list[dict]:
             }
         )
     return stages
+
+
+def _extract_stage_jobs(stage: dict) -> list[dict]:
+    if not isinstance(stage, dict):
+        return []
+
+    jobs_container = stage.get("jobs", {})
+    jobs = jobs_container.get("job") if isinstance(jobs_container, dict) else []
+    if isinstance(jobs, dict):
+        jobs = [jobs]
+    if jobs:
+        return [job for job in jobs if isinstance(job, dict)]
+
+    plans_container = stage.get("plans", {})
+    plans = plans_container.get("plan") if isinstance(plans_container, dict) else []
+    if isinstance(plans, dict):
+        plans = [plans]
+    if plans is None:
+        plans = []
+    return [plan for plan in plans if isinstance(plan, dict)]
 
 
 def _extract_named_items(container: dict | None, item_key: str) -> list[dict]:

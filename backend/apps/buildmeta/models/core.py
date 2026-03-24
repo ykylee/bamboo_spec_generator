@@ -47,11 +47,23 @@ class Project(TimestampedModel):
 
 
 class BuildPlan(TimestampedModel):
+    REPOSITORY_LINKAGE_MODE_LINKED = "linked"
+    REPOSITORY_LINKAGE_MODE_CREATE_IF_MISSING = "create_if_missing"
+    REPOSITORY_LINKAGE_MODE_CHOICES = [
+        (REPOSITORY_LINKAGE_MODE_LINKED, "linked"),
+        (REPOSITORY_LINKAGE_MODE_CREATE_IF_MISSING, "create_if_missing"),
+    ]
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     build_id = models.CharField(max_length=255, unique=True)
     plan_key = models.CharField(max_length=64, unique=True)
     static_analysis_tool_version = models.CharField(max_length=128, blank=True)
     coverity_project = models.CharField(max_length=255, blank=True)
+    repository_linkage_mode_override = models.CharField(
+        max_length=32,
+        choices=REPOSITORY_LINKAGE_MODE_CHOICES,
+        blank=True,
+    )
     latest_version = models.ForeignKey(
         "buildmeta.BuildVersion",
         null=True,
