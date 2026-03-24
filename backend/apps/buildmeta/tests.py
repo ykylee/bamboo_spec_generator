@@ -328,6 +328,8 @@ class BambooPublishServiceTest(TestCase):
         self.assertEqual(BambooPublishExecution.STATUS_SUCCESS, history.status)
         self.assertEqual(0, history.return_code)
         self.assertIn("published", history.output)
+        self.assertIsNotNone(history.snapshot_preview_json)
+        self.assertIsNotNone(history.snapshot_export_draft_json)
 
     @patch.dict("os.environ", {"BAMBOO_SERVER_TOKEN": "token"}, clear=False)
     @patch("apps.buildmeta.services.bamboo.subprocess.run")

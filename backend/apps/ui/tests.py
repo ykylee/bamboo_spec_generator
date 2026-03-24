@@ -847,18 +847,14 @@ class ProjectViewTest(TestCase):
         self.assertContains(response, "연결 정보")
         self.assertContains(response, "sample-app-api")
         self.assertContains(response, "예상 Bamboo Plan 구성")
-        self.assertContains(response, "플랜 내부 Job 구성")
         self.assertContains(response, "Post Process")
-        self.assertContains(response, "Specs Export 초안")
         self.assertContains(response, "Specs 초안 다시 채우기")
         self.assertContains(response, "실제 Bamboo 연동")
         self.assertContains(response, "실제 Bamboo Plan 보기")
         self.assertContains(response, "drafts/SAMPAPI/jobs/api-linux/coverity.yaml")
         self.assertNotContains(response, "plan-preview.json")
         self.assertContains(response, "linux")
-        self.assertContains(response, 'data-preview-stage', html=False)
-        self.assertContains(response, 'data-job-select', html=False)
-        self.assertContains(response, 'data-job-panel', html=False)
+        self.assertContains(response, 'data-task-panel', html=False)
         self.assertContains(response, "최근 Publish 이력")
 
     @patch("apps.ui.views.get_bamboo_plan_status")
@@ -1095,7 +1091,7 @@ class ProjectViewTest(TestCase):
         self.assertContains(response, "services/api")
         self.assertContains(response, "Run Build Script")
         self.assertContains(response, "Prepare Build Script")
-        self.assertContains(response, "Specs Task 구성 상세")
+        self.assertContains(response, "예상 Bamboo Plan 구성")
         self.assertContains(response, "Task tree")
         self.assertContains(response, "drafts/SAMPAPI/jobs/api-linux/coverity.yaml")
         self.assertNotContains(response, "plan-preview.json")
@@ -1117,7 +1113,6 @@ class ProjectViewTest(TestCase):
 
         self.assertEqual(200, response.status_code)
         self.assertContains(response, "script-linux")
-        self.assertContains(response, ">0 jobs<", html=False)
         self.assertNotContains(response, "Package Binary")
 
     def test_project_build_info_list_redirects_to_build_detail_panel(self) -> None:

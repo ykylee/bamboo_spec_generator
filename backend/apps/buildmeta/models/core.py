@@ -276,6 +276,8 @@ class BambooPublishExecution(TimestampedModel):
     status = models.CharField(max_length=32, choices=STATUS_CHOICES)
     message = models.TextField(blank=True)
     output = models.TextField(blank=True)
+    snapshot_preview_json = models.JSONField(null=True, blank=True)
+    snapshot_export_draft_json = models.JSONField(null=True, blank=True)
     return_code = models.IntegerField(null=True, blank=True)
     trigger_source = models.CharField(max_length=64, blank=True)
     requested_by = models.CharField(max_length=255, blank=True)

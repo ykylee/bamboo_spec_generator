@@ -157,7 +157,12 @@ def get_bamboo_plan_details(plan_key: str) -> dict:
 
 
 def publish_bamboo_specs(plan_key: str) -> dict:
-    from apps.buildmeta.selectors.definitions import get_active_definitions_by_plan_key, get_prepare_context_by_plan_key
+    from apps.buildmeta.selectors.definitions import (
+        get_active_definitions_by_plan_key,
+        get_build_plan_export_draft,
+        get_build_plan_preview,
+        get_prepare_context_by_plan_key,
+    )
 
     plan = _get_build_plan(plan_key)
     if plan is None:
@@ -193,6 +198,8 @@ def publish_bamboo_specs(plan_key: str) -> dict:
         )
         for definition_payload in definition_payloads
     ]
+    preview_snapshot = get_build_plan_preview(plan_key)
+    export_draft_snapshot = get_build_plan_export_draft(plan_key)
 
     with tempfile.TemporaryDirectory(prefix=f"bamboo-publish-{plan_key.lower()}-") as temp_dir:
         output_root = Path(temp_dir) / "bamboo-specs"
@@ -238,6 +245,8 @@ def publish_bamboo_specs(plan_key: str) -> dict:
         status=BambooPublishExecution.STATUS_SUCCESS if result.returncode == 0 else BambooPublishExecution.STATUS_FAILED,
         message="Bamboo Specs publish가 완료되었습니다." if result.returncode == 0 else "Bamboo Specs publish에 실패했습니다.",
         output=output,
+        snapshot_preview_json=preview_snapshot if result.returncode == 0 else None,
+        snapshot_export_draft_json=export_draft_snapshot if result.returncode == 0 else None,
         return_code=result.returncode,
     )
     return {
@@ -299,12 +308,16 @@ def _record_publish_execution(
     message: str,
     output: str,
     return_code: int | None,
+    snapshot_preview_json: dict | None = None,
+    snapshot_export_draft_json: dict | None = None,
 ) -> BambooPublishExecution:
     return BambooPublishExecution.objects.create(
         build_plan=plan,
         status=status,
         message=message,
         output=output,
+        snapshot_preview_json=snapshot_preview_json,
+        snapshot_export_draft_json=snapshot_export_draft_json,
         return_code=return_code,
         trigger_source="web_ui",
         requested_by="",

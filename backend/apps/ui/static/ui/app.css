@@ -1931,7 +1931,7 @@ a {
 }
 
 .plan-preview-panel {
-  overflow: hidden;
+  overflow: visible;
 }
 
 .plan-preview {
@@ -2559,7 +2559,7 @@ a {
   display: grid;
   align-content: start;
   position: sticky;
-  top: 96px;
+  top: 108px;
   max-height: calc(100vh - 120px);
   overflow: auto;
   padding-right: 4px;

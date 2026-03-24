@@ -9,7 +9,7 @@ from pygments.lexers import get_lexer_by_name
 from pygments.lexers.special import TextLexer
 from pygments.util import ClassNotFound
 
-from apps.buildmeta.models import BuildPlan, BuildPlanBuildInfo, Project, ProjectRepository
+from apps.buildmeta.models import BambooPublishExecution, BuildPlan, BuildPlanBuildInfo, Project, ProjectRepository
 from apps.buildmeta.selectors.definitions import get_build_plan_export_draft, get_build_plan_preview
 from apps.buildmeta.selectors.executions import (
     list_build_plan_summaries,
@@ -492,8 +492,9 @@ def project_bamboo_plan_detail(request, jira_project_key: str, plan_key: str):
     except BambooOperationError as exc:
         bamboo_plan = None
         bamboo_error = str(exc)
-    published_specs_preview = get_build_plan_preview(plan_key)
-    published_specs_export_draft = get_build_plan_export_draft(plan_key)
+    publish_snapshot = _get_latest_successful_publish_snapshot(plan_key)
+    published_specs_preview = publish_snapshot.get("preview") or get_build_plan_preview(plan_key)
+    published_specs_export_draft = publish_snapshot.get("exportDraft") or get_build_plan_export_draft(plan_key)
 
     context = {
         "project": project,
@@ -932,6 +933,23 @@ def _build_task_inspector(preview: dict | None, export_draft: dict | None) -> di
         "stages": stages,
         "tasks": task_panels,
         "selectedTaskId": selected_task_id,
+    }
+
+
+def _get_latest_successful_publish_snapshot(plan_key: str) -> dict:
+    execution = (
+        BambooPublishExecution.objects.filter(
+            build_plan__plan_key=plan_key,
+            status=BambooPublishExecution.STATUS_SUCCESS,
+        )
+        .order_by("-created_at")
+        .first()
+    )
+    if execution is None:
+        return {"preview": None, "exportDraft": None}
+    return {
+        "preview": execution.snapshot_preview_json,
+        "exportDraft": execution.snapshot_export_draft_json,
     }
 
 
