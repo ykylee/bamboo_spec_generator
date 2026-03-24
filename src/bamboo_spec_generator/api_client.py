@@ -55,6 +55,7 @@ class OperationsApiClient:
         branch_kind: str,
         commit_hash: str,
         build_number: str,
+        build_key: str = "",
         started_at: str | None = None,
     ) -> dict:
         payload = {
@@ -62,6 +63,8 @@ class OperationsApiClient:
             "commitHash": commit_hash,
             "buildNumber": build_number,
         }
+        if build_key:
+            payload["buildKey"] = build_key
         if started_at is not None:
             payload["startedAt"] = started_at
         return self._request_json("POST", f"/api/v1/build-plans/{parse.quote(plan_key)}/executions/start", body=payload)

@@ -1,0 +1,170 @@
+{% extends "ui/base.html" %}
+
+{% block title %}{% if build %}{{ build.buildName }} Bamboo Plan | Bamboo Spec Generator{% else %}Bamboo Plan | Bamboo Spec Generator{% endif %}{% endblock %}
+{% block page_heading %}실제 Bamboo Plan{% endblock %}
+
+{% block content %}
+{% if project and build %}
+<section class="signal-hero signal-hero--workspace">
+  <div class="signal-hero__content">
+    <p class="signal-hero__eyebrow">Bamboo Live View</p>
+    <h1 class="hero__title">{{ build.buildName }}</h1>
+    <p class="signal-hero__body">등록 정보 기반 Preview가 아니라 Bamboo 서버에 실제 등록된 plan 구성을 조회합니다.</p>
+    <div class="hero__actions">
+      <a class="action-button action-button--ghost" href="{% url 'project-build-detail' project.jiraProjectKey build.planKey %}">빌드 상세로 돌아가기</a>
+      {% if bambooPlan and bambooPlan.planUrl %}
+      <a class="action-button" href="{{ bambooPlan.planUrl }}" target="_blank" rel="noreferrer">Bamboo 열기</a>
+      {% endif %}
+    </div>
+  </div>
+</section>
+
+{% if bambooError %}
+<div class="form-alert form-alert--error">{{ bambooError }}</div>
+{% endif %}
+
+{% if bambooPlan %}
+<section class="detail-grid detail-grid--resource">
+  <article class="panel panel--signal-list">
+    <div class="panel__header">
+      <h2 class="panel__title">Plan 요약</h2>
+    </div>
+    <ul class="meta-list">
+      <li><strong>Project Key</strong>{{ bambooPlan.projectKey }}</li>
+      <li><strong>Plan Key</strong>{{ bambooPlan.planKey }}</li>
+      <li><strong>Full Plan Key</strong>{{ bambooPlan.fullPlanKey }}</li>
+      <li><strong>Short Name</strong>{{ bambooPlan.summary.shortName|default:"-" }}</li>
+      <li><strong>Description</strong>{{ bambooPlan.summary.description|default:"-" }}</li>
+      <li><strong>Enabled</strong>{% if bambooPlan.summary.enabled %}Yes{% else %}No{% endif %}</li>
+      <li><strong>Building</strong>{% if bambooPlan.summary.building %}Yes{% else %}No{% endif %}</li>
+    </ul>
+  </article>
+
+  <article class="panel panel--signal-list">
+    <div class="panel__header">
+      <h2 class="panel__title">Branch / Action</h2>
+    </div>
+    <ul class="meta-list">
+      <li><strong>Branches</strong>{{ bambooPlan.branches|length }}</li>
+      <li><strong>Actions</strong>{{ bambooPlan.actions|length }}</li>
+      <li><strong>Variables</strong>{{ bambooPlan.variables|length }}</li>
+    </ul>
+  </article>
+</section>
+
+<section class="panel panel--signal-list">
+  <div class="panel__header">
+    <h2 class="panel__title">Stage / Job 구조</h2>
+  </div>
+  <div class="export-draft-list">
+    {% for stage in bambooPlan.stages %}
+    <details class="export-draft-item"{% if forloop.first %} open{% endif %}>
+      <summary class="export-draft-item__summary">
+        <div>
+          <strong>{{ stage.name|default:"Unnamed Stage" }}</strong>
+          <p>{{ stage.description|default:"설명 없음" }}</p>
+        </div>
+        <span class="chip chip--neutral">{{ stage.jobs|length }} jobs</span>
+      </summary>
+      <div class="bamboo-stage-body">
+        <ul class="meta-list bamboo-stage-job-list">
+          {% for job in stage.jobs %}
+          <li class="bamboo-stage-job-item">
+            <div class="bamboo-stage-job-item__content">
+              <strong>{{ job.name|default:job.key }}</strong>
+              <span>{{ job.key|default:"키 없음" }}</span>
+            </div>
+          </li>
+          {% empty %}
+          <li class="bamboo-stage-job-item">
+            <div class="bamboo-stage-job-item__content">
+              <strong>Jobs</strong>
+              <span>조회 가능한 job 정보가 없습니다.</span>
+            </div>
+          </li>
+          {% endfor %}
+        </ul>
+      </div>
+    </details>
+    {% empty %}
+    <div class="empty-state empty-state--inline">
+      <h3 class="empty-state__title">Stage 정보가 없습니다.</h3>
+      <p class="empty-state__body">Bamboo REST 응답에 stage 확장 정보가 포함되지 않았습니다.</p>
+    </div>
+    {% endfor %}
+  </div>
+</section>
+
+<section class="panel panel--signal-list">
+  <div class="panel__header">
+    <div>
+      <h2 class="panel__title">Published Specs 기준 Task 구성</h2>
+      <p class="panel__body">Bamboo REST live 응답에는 task 상세가 제한적이어서, 마지막으로 successful publish 했을 때 저장한 Specs snapshot 기준 task 구성을 함께 보여줍니다.</p>
+    </div>
+  </div>
+  {% include "ui/_task_inspector.html" with inspector=publishedSpecsTaskInspector title="Task tree" body="마지막 successful publish snapshot 기준으로 저장된 stage, job, task 구조입니다." empty_title="표시할 Specs task 구성이 없습니다." empty_body="성공 publish snapshot이 없어서 publish 기준 task 구성을 표시하지 못했습니다." %}
+</section>
+
+<section class="detail-grid detail-grid--resource">
+  <article class="panel panel--signal-list">
+    <div class="panel__header">
+      <h2 class="panel__title">Branches</h2>
+    </div>
+    <ul class="meta-list">
+      {% for branch in bambooPlan.branches %}
+      <li><strong>{{ branch.shortName|default:branch.name|default:"branch" }}</strong>{{ branch.key|default:"-" }}</li>
+      {% empty %}
+      <li><strong>Branches</strong>제공되지 않음</li>
+      {% endfor %}
+    </ul>
+  </article>
+  <article class="panel panel--signal-list">
+    <div class="panel__header">
+      <h2 class="panel__title">Variables</h2>
+    </div>
+    <ul class="meta-list">
+      {% for item in bambooPlan.variables %}
+      <li><strong>{{ item.key }}</strong>{{ item.value|default:"" }}</li>
+      {% empty %}
+      <li><strong>Variables</strong>제공되지 않음</li>
+      {% endfor %}
+    </ul>
+  </article>
+</section>
+{% endif %}
+{% else %}
+<div class="empty-state">
+  <h2 class="empty-state__title">대상을 찾을 수 없습니다.</h2>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+  (function () {
+    const inspectors = Array.from(document.querySelectorAll("[data-task-inspector]"));
+    inspectors.forEach(function (root) {
+      const buttons = Array.from(root.querySelectorAll("[data-task-select]"));
+      const panels = Array.from(root.querySelectorAll("[data-task-panel]"));
+      if (!buttons.length || !panels.length) {
+        return;
+      }
+
+      function setActiveTask(taskId) {
+        buttons.forEach(function (button) {
+          button.classList.toggle("is-active", button.dataset.taskId === taskId);
+        });
+        panels.forEach(function (panel) {
+          panel.classList.toggle("bamboo-config-panel--hidden", panel.dataset.taskId !== taskId);
+        });
+      }
+
+      buttons.forEach(function (button) {
+        button.addEventListener("click", function () {
+          setActiveTask(button.dataset.taskId);
+        });
+      });
+    });
+  }());
+</script>
+{% endblock %}

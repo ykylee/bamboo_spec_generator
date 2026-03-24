@@ -1,4 +1,5 @@
 from .core import (
+    BambooPublishExecution,
     BuildDefinitionHistory,
     BuildExecution,
     BuildPlan,
@@ -13,6 +14,7 @@ from .core import (
 )
 
 __all__ = [
+    "BambooPublishExecution",
     "BuildDefinitionHistory",
     "BuildExecution",
     "BuildPlan",

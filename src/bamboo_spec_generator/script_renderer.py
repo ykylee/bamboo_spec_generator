@@ -115,6 +115,7 @@ def _build_replacements(
     return {
         "{{SUB_PATH}}": repr(build.build.sub_path),
         "{{PLAN_KEY}}": repr(build.plan_key),
+        "{{BUILD_KEY}}": repr(build.build_key),
         "{{PREPARE_COMMAND}}": repr(build.build.prepare_command),
         "{{PREPARE_CONTEXT_EXPORTS}}": _prepare_context_exports(prepare_context),
         "{{BUILD_COMMAND}}": repr(build.build.build_command),

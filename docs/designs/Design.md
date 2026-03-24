@@ -2,7 +2,7 @@
 
 ## 문서 메타데이터
 
-- 문서 일자: 2026-03-18
+- 문서 일자: 2026-03-24
 - 문서 유형: Design
 - 상태: 초안
 - 관련 SAD: [./SAD.md](./SAD.md)
@@ -17,7 +17,8 @@
 ## 구현 범위 구분
 
 - 1~5장은 현재 구현과 직접 연결되는 상세 설계다.
-- 6~12장은 향후 DB 및 운영 메타데이터 확장을 위한 상세 설계다.
+- 6장은 ORM, migration, selector/service, 실행 이력/버전/정적분석 저장까지 부분 구현되었다.
+- 7~12장은 향후 DB 및 운영 메타데이터 확장을 위한 상세 설계다.
 - 저장소 연결의 `branches`, `create_if_missing`, `applicationLink`는 현재 Java Specs 생성까지 반영된다. 남은 범위는 운영 환경별 application link 값 공급과 세부 운영 정책 확정이다.
 - 현재 추가된 함수 단위 상세 설계:
   - [프로젝트 등록 및 Specs 생성 준비도](./detailed_designs/project_registration_and_generation_readiness.md)
@@ -184,7 +185,7 @@ scripts/plan_tasks/
 
 ## 6. 빌드 메타데이터 DB 설계
 
-현재 미구현 범위다.
+현재 일부 구현 범위다. ORM 모델, migration, 정의 import/sync, 실행 이력/버전 저장, 정적분석 결과 upsert, publish 이력 저장이 포함된다.
 
 ### 논리 엔터티
 
@@ -196,16 +197,22 @@ scripts/plan_tasks/
   - 프로젝트에 속한 개별 빌드 항목
 - `BuildPlan`
   - 플랜 대표 정보와 `latest_version_id`
+- `BuildPlanBuildInfo`
+  - 플랜 아래 다중 OS/언어/컴파일러/명령 조합을 보관하는 빌드 상세 메타데이터
 - `BuildPlanDefinition`
   - 생성기 입력 정의 스냅샷
 - `BuildVersion`
   - 버전 대표 상태와 최신 요약
 - `BuildExecution`
   - 개별 빌드 실행 이력
+- `BambooPublishExecution`
+  - Bamboo Specs publish 시도 이력과 preview/export draft snapshot
 - `StaticAnalysisResult`
   - 정적분석 결과 상세
 - `BuildDefinitionHistory`
   - 정의 변경 이력
+- `SystemSetting`
+  - Coverity/Bamboo/Git clone URL/repository linkage mode 같은 운영 공통 설정
 
 ### 향후 확장 엔터티
 
@@ -226,18 +233,34 @@ scripts/plan_tasks/
   - `repo_slug`, `coverity_project`, `coverity_stream`, `is_representative`
 - `ProjectBuild`
   - `project_id`, `build_plan_id`, `build_name`, `build_type`
+- `BuildPlan`
+  - `build_id`, `plan_key`, `static_analysis_tool_version`, `coverity_project`, `repository_linkage_mode_override`, `latest_version_id`
+- `BuildPlanBuildInfo`
+  - `build_key`, `operating_system`, `language`, `compiler`, `pre_process`, `build_command`, `clean_command`, `coverity_stream`, `build_sub_path`
 - `BuildVersion`
   - `version_text`, `major`, `minor`, `patch`, `branch_kind`, `commit_hash`, `is_latest`
 - `BuildExecution`
   - `build_number`, `commit_hash`, `success`, `result_status`, `stage_name`, `job_name`, `task_name`
+- `BambooPublishExecution`
+  - `status`, `message`, `output`, `return_code`, `snapshot_preview_json`, `snapshot_export_draft_json`
+- `SystemSetting`
+  - `key`, `value`, `description`
 
 ### 프로젝트/저장소/빌드 관계
 
 - 하나의 `Project`는 여러 `ProjectRepository`를 가질 수 있다.
 - 하나의 `Project`는 여러 `ProjectBuild`를 가질 수 있다.
 - 하나의 `ProjectBuild`는 하나의 `BuildPlan`과 연결된다.
+- 하나의 `BuildPlan`은 여러 `BuildPlanBuildInfo`를 가질 수 있다.
 - 결과 취합 시에는 `BuildPlan` 단위 조회뿐 아니라 상위 `Project`에 연결된 모든 `ProjectRepository`를 함께 조회할 수 있어야 한다.
 - 장기적으로는 `BuildVersion -> Release -> DeploymentExecution -> DeploymentEnvironment` 흐름으로 CD 상태를 이어서 추적할 수 있어야 한다.
+
+### 현재 구현된 운영 흐름
+
+- 등록 메타데이터와 `BuildPlanBuildInfo`를 조합해 활성 정의와 prepare context를 합성한다.
+- 플랜 단위 preview/export draft를 생성해 UI와 publish 기록에서 재사용한다.
+- Specs draft 초기화 서비스가 등록된 메타데이터를 기준으로 `BuildPlanBuildInfo`를 보정하거나 생성한다.
+- Bamboo 연동 서비스가 plan status/detail 조회, Specs publish, plan queue 실행, publish 이력 저장을 수행한다.
 
 ### ERD 초안
 
@@ -252,11 +275,13 @@ erDiagram
     Project ||--o{ ProjectBuild : has
     Project ||--o{ BuildPlanDefinition : owns
     ProjectBuild ||--|| BuildPlan : maps_to
+    BuildPlan ||--o{ BuildPlanBuildInfo : has
     BuildPlan ||--o{ BuildPlanDefinition : versions
     BuildPlan ||--o{ BuildVersion : has
     BuildVersion ||--o{ BuildExecution : records
     BuildExecution ||--o{ StaticAnalysisResult : includes
     BuildPlan ||--o{ BuildDefinitionHistory : tracks
+    BuildPlan ||--o{ BambooPublishExecution : publishes
 
     Project {
         string id PK
@@ -286,7 +311,21 @@ erDiagram
         string id PK
         string build_id
         string plan_key
+        string static_analysis_tool_version
+        string coverity_project
+        string repository_linkage_mode_override
         string latest_version_id FK
+    }
+
+    BuildPlanBuildInfo {
+        string id PK
+        string build_plan_id FK
+        string build_key
+        string operating_system
+        string language
+        string compiler
+        string coverity_stream
+        string build_sub_path
     }
 
     BuildPlanDefinition {
@@ -313,6 +352,7 @@ erDiagram
     BuildExecution {
         string id PK
         string build_plan_id FK
+        string build_info_id FK
         string build_version_id FK
         string build_number
         string commit_hash
@@ -338,6 +378,13 @@ erDiagram
         string change_type
         string change_summary
     }
+
+    BambooPublishExecution {
+        string id PK
+        string build_plan_id FK
+        string status
+        int return_code
+    }
 ```
 
 미리보기:
@@ -350,11 +397,13 @@ erDiagram
 - `ProjectRepository`는 프로젝트에 속한 여러 저장소를 표현한다.
 - `ProjectBuild`는 프로젝트 아래 여러 빌드 항목을 표현한다.
 - `BuildPlan`은 Bamboo 플랜 단위의 대표 엔터티다.
+- `BuildPlanBuildInfo`는 플랜 아래 실제 생성 단위를 세분화하는 빌드 상세 메타데이터다.
 - `BuildPlanDefinition`은 생성기 입력 스냅샷을 나타낸다.
 - `BuildVersion`은 버전 단위 대표 상태를 가진다.
 - `BuildExecution`은 실제 실행 이력을 누적 저장한다.
 - `StaticAnalysisResult`는 실행 단위의 정적분석 결과를 분리 저장한다.
 - `BuildDefinitionHistory`는 정의 변경 이력을 남긴다.
+- `BambooPublishExecution`은 Bamboo 반영 시도의 결과와 snapshot을 저장한다.
 
 ### 준비 스테이지 조회 관점
 
@@ -433,11 +482,31 @@ erDiagram
   - `id`: PK
   - `build_id`: not null
   - `plan_key`: not null
+  - `static_analysis_tool_version`: nullable
+  - `coverity_project`: nullable
+  - `repository_linkage_mode_override`: nullable
   - `latest_version_id`: nullable FK -> `BuildVersion.id`
   - `created_at`, `updated_at`: not null
 - 제약
   - `build_id` unique
   - `plan_key` unique
+
+#### BuildPlanBuildInfo
+
+- 목적: 플랜 아래 빌드별 상세 명령, OS, 언어, 컴파일러, 하위 경로를 보관
+- 주요 컬럼
+  - `id`: PK
+  - `build_plan_id`: FK -> `BuildPlan.id`, not null
+  - `build_key`: not null
+  - `operating_system`: nullable
+  - `pre_process`, `clean_command`, `build_command`: nullable
+  - `language`, `compiler`: nullable
+  - `analysis_excluded_files`: nullable
+  - `coverity_stream`: nullable
+  - `build_sub_path`: nullable
+  - `created_at`, `updated_at`: not null
+- 제약
+  - `(build_plan_id, build_key)` unique
 
 #### BuildPlanDefinition
 
@@ -492,7 +561,7 @@ erDiagram
   - `started_at`, `finished_at`: nullable
   - `created_at`: not null
 - 제약
-  - `(build_plan_id, build_number)` unique
+  - `(build_plan_id, build_info_id, build_number)` unique
   - `commit_hash`는 버전의 `commit_hash`와 일치해야 함
 
 #### StaticAnalysisResult
@@ -518,7 +587,32 @@ erDiagram
   - `build_plan_definition_id`: FK -> `BuildPlanDefinition.id`, not null
   - `change_type`: not null
   - `change_summary`: nullable
-  - `created_at`: not null
+
+#### BambooPublishExecution
+
+- 목적: Bamboo Specs publish 시도와 결과 snapshot 저장
+- 주요 컬럼
+  - `id`: PK
+  - `build_plan_id`: FK -> `BuildPlan.id`, not null
+  - `status`: not null
+  - `message`: not null
+  - `output`: nullable
+  - `snapshot_preview_json`, `snapshot_export_draft_json`: nullable
+  - `return_code`: nullable
+  - `trigger_source`, `requested_by`: nullable
+  - `created_at`, `updated_at`: not null
+
+#### SystemSetting
+
+- 목적: Coverity/Bamboo/repository linkage 같은 운영 공통 설정 저장
+- 주요 컬럼
+  - `id`: PK
+  - `key`: not null
+  - `value`: nullable
+  - `description`: nullable
+  - `created_at`, `updated_at`: not null
+- 제약
+  - `key` unique
 
 ### 인덱스 초안
 
@@ -583,7 +677,7 @@ erDiagram
 
 ## 7. 버전 규칙 설계
 
-현재 미구현 범위다.
+현재 백엔드 서비스 계층에서 초안 구현되었다.
 
 - 형식: `v<major>.<minor>.<patch>`
 - `master`
@@ -597,7 +691,7 @@ erDiagram
 
 ## 8. 동일 커밋 재빌드 설계
 
-현재 미구현 범위다.
+현재 백엔드 서비스 계층에서 초안 구현되었다.
 
 ### 처리 순서
 
@@ -615,7 +709,7 @@ erDiagram
 
 ## 9. 실패 위치 및 정적분석 결과 설계
 
-실패 위치 및 정적분석 결과의 DB 저장은 현재 미구현이며, 생성기 구현에는 정적분석 실행용 스크립트와 Coverity YAML 생성만 포함된다.
+실패 위치와 정적분석 결과 저장은 백엔드 서비스/API 기준으로 부분 구현되었고, 외부 빌드 시스템에서 이를 end-to-end로 적재하는 연동은 아직 미구현이다.
 
 ### 실패 위치
 
@@ -657,7 +751,7 @@ erDiagram
 - `generator.py`: Java Specs 생성
 - `script_assets.py`, `script_renderer.py`: 자산 선택/렌더링
 - `api_client.py`: 운영 API 활성 정의 조회 클라이언트
-- `backend/`: Django 백엔드 스캐폴딩, ORM 모델, migration, Admin, Ninja API, 기본 조회 UI
+- `backend/`: Django 백엔드, ORM 모델, migration, Admin, Ninja API, 프로젝트 등록/수정, BuildInfo 관리, 운영 설정, 조회 UI
 - `backend` 설정: SQLite/PostgreSQL 스위치와 개발용 DB 초기화 명령
 
 현재 미구현 항목:

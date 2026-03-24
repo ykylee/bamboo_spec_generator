@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import io
 import json
 import os
 import unittest
+from urllib import error
 from unittest.mock import patch
 
 from src.bamboo_spec_generator.api_client import OperationsApiClient, OperationsApiConfig, OperationsApiError
@@ -251,6 +253,47 @@ class OperationsApiClientTest(unittest.TestCase):
         self.assertEqual("http://localhost:8000/api/v1/build-plans/SAMPAPI/executions", request_obj.full_url)
         self.assertEqual("GET", request_obj.get_method())
         self.assertEqual("execution-1", payload[0]["buildExecutionId"])
+
+    @patch("src.bamboo_spec_generator.api_client.request.urlopen")
+    def test_list_executions_rejects_non_array_response(self, urlopen_mock) -> None:
+        urlopen_mock.return_value = _FakeResponse({"unexpected": "object"})
+        client = OperationsApiClient(
+            OperationsApiConfig(base_url="http://localhost:8000", token="token", timeout_seconds=3.0)
+        )
+
+        with self.assertRaises(OperationsApiError):
+            client.list_executions("SAMPAPI")
+
+    @patch("src.bamboo_spec_generator.api_client.request.urlopen")
+    def test_get_active_definition_wraps_http_error(self, urlopen_mock) -> None:
+        urlopen_mock.side_effect = error.HTTPError(
+            "http://localhost:8000/api/v1/build-plans/SAMPAPI/active-definition",
+            404,
+            "Not Found",
+            hdrs=None,
+            fp=io.BytesIO(b'{"message":"missing"}'),
+        )
+        client = OperationsApiClient(
+            OperationsApiConfig(base_url="http://localhost:8000", token="token", timeout_seconds=3.0)
+        )
+
+        with self.assertRaises(OperationsApiError) as context:
+            client.get_active_definition("SAMPAPI")
+
+        self.assertIn("404", str(context.exception))
+        self.assertIn("missing", str(context.exception))
+
+    @patch("src.bamboo_spec_generator.api_client.request.urlopen")
+    def test_request_json_wraps_url_error(self, urlopen_mock) -> None:
+        urlopen_mock.side_effect = error.URLError("connection refused")
+        client = OperationsApiClient(
+            OperationsApiConfig(base_url="http://localhost:8000", token="token", timeout_seconds=3.0)
+        )
+
+        with self.assertRaises(OperationsApiError) as context:
+            client.get_prepare_context("SAMPAPI")
+
+        self.assertIn("connection refused", str(context.exception))
 
     @patch("src.bamboo_spec_generator.api_client.request.urlopen")
     def test_record_static_analysis_results_posts_results(self, urlopen_mock) -> None:

@@ -2,7 +2,7 @@
 
 ## 문서 메타데이터
 
-- 문서 일자: 2026-03-19
+- 문서 일자: 2026-03-24
 - 문서 유형: CRS
 - 상태: 초안
 - 대상 프로젝트: `bamboo_spec_generator`
@@ -17,11 +17,15 @@
 - 현재 구현 기준 입력 소스는 연도별 JSON 파일이다.
 - 현재 구현은 단일 Bamboo Specs 프로젝트 생성, 공통 워크플로우, 작업 하위 경로, MSBuild 보정용 스크립트 자산, Python 기반 Task 스크립트 렌더링을 지원한다.
 - 생성기는 운영 백엔드 API에서 활성 빌드 정의를 읽기 위한 클라이언트와 `--api-plan-key` 진입점을 가진다.
-- Django 기반 운영 백엔드 스캐폴딩, ORM 모델, migration, Admin, Ninja API, 조회용 기본 화면이 추가되었다.
+- Django 기반 운영 백엔드에는 ORM 모델, migration, Admin, Ninja API, 프로젝트 등록/수정, 조회용 웹 UI, BuildInfo 관리 화면이 추가되었다.
 - 운영 백엔드는 개발 기본값으로 SQLite를 사용하고, 환경변수 스위치로 PostgreSQL로 전환할 수 있다.
 - 개발용 DB 초기화 명령 `init_dev_db`, PostgreSQL 초기화 명령 `init_postgres_db --force`가 추가되었다.
+- JSON 빌드 정의 import/sync 관리 명령과 정의 변경 이력 관리가 추가되었다.
 - 빌드 결과 저장, 버전 관리, 동일 커밋 재빌드 처리 규칙은 백엔드 서비스 계층에 초안 수준으로 반영되었지만 실제 Bamboo 연동과 end-to-end 적재는 아직 미완료다.
-- Bitbucket 저장소 식별 정보는 입력과 생성물에 반영되지만, 브랜치 트리거 생성과 `create_if_missing` 세부 처리는 아직 구현되지 않았다.
+- Bitbucket 저장소 식별 정보, 브랜치 트리거, `create_if_missing` 기반 plan-local repository 생성은 Java Specs 생성에 반영되어 있다.
+- 운영 설정으로 Git clone URL 템플릿, 기본 repository linkage mode, Bamboo 서버 URL, Coverity 설정을 DB에서 관리할 수 있다.
+- 등록된 프로젝트 메타데이터와 `BuildPlanBuildInfo`를 조합해 활성 정의/준비 컨텍스트를 합성하고 Specs preview/export draft를 생성할 수 있다.
+- 운영 UI와 서비스에는 Bamboo plan 상태/상세 조회, Specs publish, Bamboo 실행 요청, publish 이력 저장이 부분 구현되어 있다.
 
 ## 배경
 
@@ -176,8 +180,8 @@
 
 - 연도 정보는 기본적으로 디렉터리 구조에서 해석한다.
 - 초기 입력 소스는 JSON이지만 장기적으로 DB가 시스템 오브 레코드가 되는 방향을 가정한다.
-- 현재 구현은 JSON 입력만 지원하며 DB 관련 항목은 후속 구현 범위로 둔다.
 - 현재 구현은 JSON 입력이 기본이며, 운영 API 기반 입력은 단일 `plan_key` 조회 경로로 부분 구현되었다.
+- 운영 DB를 생성기가 직접 조회하는 경로는 없으며, DB 기반 요구사항은 Django/Ninja API를 통한 접근을 전제로 한다.
 - `release`는 초기 범위에서 단일 브랜치명으로 본다.
 - MSBuild 관련 상세 예외는 후속 설계에서 구체화한다.
 - 운영 DBMS는 PostgreSQL을 사용한다.

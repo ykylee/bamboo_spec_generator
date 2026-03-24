@@ -3,6 +3,7 @@ from __future__ import annotations
 from django.contrib import admin
 
 from .models import (
+    BambooPublishExecution,
     BuildDefinitionHistory,
     BuildExecution,
     BuildPlan,
@@ -49,6 +50,11 @@ class BuildVersionAdmin(admin.ModelAdmin):
 @admin.register(BuildExecution)
 class BuildExecutionAdmin(admin.ModelAdmin):
     list_display = ("build_plan", "build_number", "result_status", "success", "started_at", "finished_at")
+
+
+@admin.register(BambooPublishExecution)
+class BambooPublishExecutionAdmin(admin.ModelAdmin):
+    list_display = ("build_plan", "status", "return_code", "trigger_source", "created_at")
 
 
 @admin.register(StaticAnalysisResult)

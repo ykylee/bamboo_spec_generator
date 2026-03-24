@@ -12,6 +12,7 @@ from .generator import (
     generate_coverity_yaml,
     generate_pom_xml,
     generate_plan_java,
+    generate_plan_java_for_builds,
     generate_registry_java,
     generate_specs_publisher_java,
     to_java_class_name,
@@ -62,7 +63,7 @@ def write_specs_project(
         "루트 `pom.xml`은 `com.atlassian.bamboo:bamboo-specs-parent`를 상속합니다.\n"
         "생성된 Java Specs 클래스는 `@BambooSpec`를 사용하며, `src/main/java/` 아래에 위치합니다.\n"
         "각 빌드별 Coverity 설정 파일은 `coverity/<buildId>/coverity.yaml` 아래에 생성됩니다.\n"
-        "각 빌드별 렌더링된 Python Task 스크립트와 실행 보조 자산은 `scripts/<buildId>/` 아래에 기록됩니다.\n"
+        "각 빌드별 렌더링된 Python Task 스크립트와 실행 보조 자산은 `scripts/<bundleId>/` 아래에 기록됩니다.\n"
         "저장소 연결 모드와 브랜치 정책은 `repository-links.json` 및 각 번들의 `manifest.json`에 함께 기록됩니다.\n"
         "각 Task의 실행 로직은 Bamboo `ScriptTask`의 inline body에 직접 포함됩니다.\n\n"
         "## 사전 점검\n\n"
@@ -79,7 +80,7 @@ def write_specs_project(
         "1. Bamboo 서버 버전에 맞게 `pom.xml`의 Bamboo Specs 부모 버전을 조정합니다.\n"
         "2. Bamboo Linked Repository 이름이 `projectKey/repoSlug` 규칙과 일치하도록 Bamboo 쪽 구성을 준비합니다.\n"
         "3. `repository-links.json`에서 각 플랜의 `linkageMode`, 브랜치 정책, 후속 등록 필요 여부를 확인합니다.\n"
-        "4. `scripts/<buildId>/`에 기록된 최종 스크립트와 OS별 launcher로 생성 내용을 검토할 수 있습니다.\n"
+        "4. `scripts/<bundleId>/`에 기록된 최종 스크립트와 OS별 launcher로 생성 내용을 검토할 수 있습니다.\n"
         "5. Repository Stored Specs로 사용할 경우 이 디렉터리를 Bamboo가 읽는 저장소 루트의 `bamboo-specs/`로 배치합니다.\n"
         "6. publish 전에는 `mvn -q exec:java -Dexec.args=\"--dry-run\"`으로 계획을 점검합니다.\n"
         "7. 플랜 목록만 보려면 `mvn -q exec:java -Dexec.args=\"--print-plans\"`를 사용합니다.\n"
@@ -97,13 +98,24 @@ def write_specs_project(
     publisher_path.write_text(generate_specs_publisher_java(PACKAGE_NAME), encoding="utf-8")
     written_files.append(publisher_path)
 
+    builds_by_plan_key: dict[str, list[BuildDefinition]] = {}
     for build in builds:
-        class_name = to_java_class_name(build.build_id)
+        builds_by_plan_key.setdefault(build.plan_key, []).append(build)
+
+    for plan_builds in builds_by_plan_key.values():
+        representative_build = plan_builds[0]
+        class_name = to_java_class_name(representative_build.build_id)
         output_path = java_root / f"{class_name}.java"
-        output_path.write_text(generate_plan_java(build, PACKAGE_NAME), encoding="utf-8")
+        if len(plan_builds) == 1:
+            output_path.write_text(generate_plan_java(representative_build, PACKAGE_NAME), encoding="utf-8")
+        else:
+            output_path.write_text(generate_plan_java_for_builds(plan_builds, PACKAGE_NAME), encoding="utf-8")
         written_files.append(output_path)
 
+    for build in builds:
         scripts_root = output_root / "scripts" / build.build_id
+        if build.build_key:
+            scripts_root = output_root / "scripts" / f"{build.build_id}-{build.build_key}"
         scripts_root.mkdir(parents=True, exist_ok=True)
         prepare_context = (prepare_contexts or {}).get(build.plan_key)
         python_scripts = render_python_scripts(build, prepare_context=prepare_context)

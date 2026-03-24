@@ -63,6 +63,7 @@ def parse_build_definition_payload(raw: dict[str, Any], *, year: str) -> BuildDe
     return BuildDefinition(
         year=year,
         build_id=raw["buildId"],
+        build_key=raw.get("buildKey", ""),
         name=raw["name"],
         plan_key=raw["planKey"],
         description=raw.get("description"),

@@ -141,10 +141,10 @@ def _infer_language_and_compiler(*, build_type: str, runtime_stack: str) -> tupl
     normalized_build_type = (build_type or "").strip().lower()
     normalized_runtime = (runtime_stack or "").strip().lower()
 
-    if normalized_build_type == "maven" or "java" in normalized_runtime:
-        return "java", "maven" if normalized_build_type == "maven" else "java"
     if normalized_build_type == "gradle":
         return "java", "gradle"
+    if normalized_build_type == "maven" or "java" in normalized_runtime:
+        return "java", "maven" if normalized_build_type == "maven" else "java"
     if normalized_build_type in {"node", "javascript", "typescript"} or "node" in normalized_runtime:
         return "javascript", "node.js"
     if normalized_build_type == "python" or "python" in normalized_runtime:

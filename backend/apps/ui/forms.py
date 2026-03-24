@@ -68,6 +68,12 @@ class BuildMetadataForm(forms.Form):
 
 
 class BuildPlanMetadataForm(forms.Form):
+    REPOSITORY_LINKAGE_MODE_OVERRIDE_CHOICES = [
+        ("", "시스템 기본값 사용"),
+        ("linked", "linked"),
+        ("create_if_missing", "create_if_missing"),
+    ]
+
     static_analysis_tool_version = forms.CharField(
         label="정적분석 도구 버전",
         max_length=128,
@@ -79,6 +85,12 @@ class BuildPlanMetadataForm(forms.Form):
         max_length=255,
         required=False,
         widget=forms.TextInput(attrs={"list": "coverity-project-options"}),
+    )
+    repository_linkage_mode_override = forms.ChoiceField(
+        label="Repository Linkage Mode Override",
+        choices=REPOSITORY_LINKAGE_MODE_OVERRIDE_CHOICES,
+        required=False,
+        initial="",
     )
 
 
@@ -126,3 +138,37 @@ class CoveritySystemSettingsForm(forms.Form):
             attrs={"placeholder": "https://git.example.com/scm/{project_key_lower}/{repo_slug}.git"}
         ),
     )
+    bamboo_server_url = forms.CharField(
+        label="Bamboo Server URL",
+        required=False,
+        widget=forms.TextInput(
+            attrs={"placeholder": "https://bamboo.example.com"}
+        ),
+    )
+
+
+class BambooRunForm(forms.Form):
+    stage = forms.CharField(label="Stage", required=False, max_length=255)
+    execute_all_stages = forms.BooleanField(label="Execute All Stages", required=False, initial=True)
+    custom_revision = forms.CharField(
+        label="Custom Revision",
+        required=False,
+        max_length=255,
+        widget=forms.TextInput(attrs={"placeholder": "branch name, tag, or commit hash"}),
+    )
+    variables_text = forms.CharField(
+        label="Variables",
+        required=False,
+        widget=forms.Textarea(attrs={"rows": 4, "placeholder": "bamboo.variable.example=value"}),
+    )
+
+    def clean_variables_text(self) -> str:
+        value = self.cleaned_data["variables_text"]
+        lines = [line.strip() for line in value.splitlines() if line.strip()]
+        for line in lines:
+            if "=" not in line:
+                raise forms.ValidationError("변수는 `key=value` 형식으로 입력해야 합니다.")
+            key, _sep, _rest = line.partition("=")
+            if not key.strip():
+                raise forms.ValidationError("변수 키는 비워둘 수 없습니다.")
+        return value

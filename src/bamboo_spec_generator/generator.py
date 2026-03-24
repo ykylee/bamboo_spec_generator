@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from .coverity import generate_coverity_yaml
-from .java_assets import load_python_wrapper_method
 from .model import BuildDefinition
 from .script_renderer import render_python_scripts
 
@@ -13,18 +12,26 @@ def to_java_class_name(build_id: str) -> str:
 
 
 def generate_plan_java(build: BuildDefinition, package_name: str) -> str:
-    class_name = to_java_class_name(build.build_id)
-    description = _escape_java(build.description or build.name)
-    project_key = _project_key(build.year)
-    linked_repository_name = _linked_repository_name(build)
-    repository_branches = _repository_branches_java_array(build)
-    repository_branch_policy_entries = _repository_branch_policy_java_entries(build)
-    python_scripts = generate_python_scripts(build)
-    python_command = _python_command(build)
-    python_wrapper_method = load_python_wrapper_method(build)
-    repository_metadata_comment = _repository_metadata_comment(build)
-    repository_attachment_chain = _repository_attachment_chain(build)
-    repository_factory_method = _repository_factory_method(build)
+    return generate_plan_java_for_builds([build], package_name)
+
+
+def generate_plan_java_for_builds(builds: list[BuildDefinition], package_name: str) -> str:
+    if not builds:
+        raise ValueError("At least one build definition is required.")
+
+    primary_build = builds[0]
+    class_name = to_java_class_name(primary_build.build_id)
+    description = _escape_java(primary_build.description or primary_build.name)
+    project_key = _project_key(primary_build.year)
+    linked_repository_name = _linked_repository_name(primary_build)
+    repository_branches = _repository_branches_java_array(primary_build)
+    repository_branch_policy_entries = _repository_branch_policy_java_entries(primary_build)
+    repository_metadata_comment = _repository_metadata_comment(primary_build)
+    repository_attachment_chain = _repository_attachment_chain(primary_build)
+    repository_factory_method = _repository_factory_method(primary_build)
+    script_constants = _script_constants_java(builds)
+    stage_methods = _plan_stage_methods(builds)
+    stage_entries = _plan_stage_entries(builds)
 
     return f"""package {package_name};
 
@@ -45,22 +52,17 @@ import com.atlassian.bamboo.specs.builders.task.VcsCheckoutTask;
 @BambooSpec
 public class {class_name} {{
     private static final String PROJECT_KEY = "{project_key}";
-    private static final String PLAN_KEY = "{build.plan_key}";
-    private static final String YEAR = "{build.year}";
+    private static final String PLAN_KEY = "{primary_build.plan_key}";
+    private static final String YEAR = "{primary_build.year}";
     private static final String LINKED_REPOSITORY = "{linked_repository_name}";
-    private static final String REPOSITORY_LINKAGE_MODE = "{build.repository.linkage_mode}";
+    private static final String REPOSITORY_LINKAGE_MODE = "{primary_build.repository.linkage_mode}";
     private static final String[] REPOSITORY_BRANCHES = new String[] {{{repository_branches}}};
     private static final String[] REPOSITORY_BRANCH_TRIGGER_POLICY = new String[] {{{repository_branch_policy_entries}}};
-    private static final String REPOSITORY_BRANCH_MATCHING_PATTERN = "{_escape_java(_repository_branch_matching_pattern(build))}";
-    private static final String BITBUCKET_APPLICATION_LINK = "{_escape_java(_bitbucket_application_link(build))}";
-    private static final String GIT_CLONE_URL = "{_escape_java(_git_clone_url(build))}";
-    private static final String PYTHON_COMMAND = "{python_command}";
+    private static final String REPOSITORY_BRANCH_MATCHING_PATTERN = "{_escape_java(_repository_branch_matching_pattern(primary_build))}";
+    private static final String BITBUCKET_APPLICATION_LINK = "{_escape_java(_bitbucket_application_link(primary_build))}";
+    private static final String GIT_CLONE_URL = "{_escape_java(_git_clone_url(primary_build))}";
     private static final String SCRIPT_DIRECTORY = ".bamboo-specs";
-    private static final String PREPARE_BUILD_SCRIPT = {_java_text_block(python_scripts["prepare_build.py"], 4)};
-    private static final String RUN_BUILD_SCRIPT = {_java_text_block(python_scripts["run_build.py"], 4)};
-    private static final String RUN_COVERITY_SCRIPT = {_java_text_block(python_scripts["run_coverity.py"], 4)};
-    private static final String RUN_CUSTOM_ANALYSIS_SCRIPT = {_java_text_block(python_scripts["run_custom_analysis.py"], 4)};
-    private static final String TRIGGER_FOLLOW_UP_SCRIPT = {_java_text_block(python_scripts["trigger_follow_up.py"], 4)};
+{script_constants}
 
     public Plan plan() {{
         return createPlan();
@@ -78,10 +80,7 @@ public class {class_name} {{
             .planBranchManagement(planBranchManagement())
             .triggers(repositoryTrigger())
             .stages(
-                prepareStage(),
-                buildStage(),
-                staticAnalysisStage(),
-                triggerFollowUpStage()
+{stage_entries}
             );
     }}
 
@@ -95,66 +94,199 @@ public class {class_name} {{
     }}
 
 {repository_factory_method}
+{stage_methods}
 
-    private Stage prepareStage() {{
+    private ScriptTask pythonScriptTask(String scriptName, String scriptBody) {{
+        return pythonScriptTaskShell(scriptName, scriptBody, "python3");
+    }}
+
+    private ScriptTask pythonScriptTaskShell(String scriptName, String scriptBody, String pythonCommand) {{
+        return new ScriptTask()
+            .inlineBody(pythonWrapperCommandShell(scriptName, scriptBody, pythonCommand))
+            .interpreterShell();
+    }}
+
+    private ScriptTask pythonScriptTaskCmdExe(String scriptName, String scriptBody, String pythonCommand) {{
+        return new ScriptTask()
+            .inlineBody(pythonWrapperCommandCmdExe(scriptName, scriptBody, pythonCommand))
+            .interpreterCmdExe();
+    }}
+
+    private String pythonWrapperCommandShell(String scriptName, String scriptBody, String pythonCommand) {{
+        return String.join("\\n",
+            "set -eu",
+            "mkdir -p " + SCRIPT_DIRECTORY,
+            "cat <<'__BAMBOO_SPEC_PY__' > " + SCRIPT_DIRECTORY + "/" + scriptName,
+            scriptBody,
+            "__BAMBOO_SPEC_PY__",
+            pythonCommand + " " + SCRIPT_DIRECTORY + "/" + scriptName);
+    }}
+
+    private String pythonWrapperCommandCmdExe(String scriptName, String scriptBody, String pythonCommand) {{
+        return String.join("\\r\\n",
+            "@echo off",
+            "setlocal",
+            "powershell -NoProfile -Command ^",
+            "  \\\"$scriptDir = '" + SCRIPT_DIRECTORY + "'; ^",
+            "   if (-not (Test-Path $scriptDir)) {{ New-Item -ItemType Directory -Path $scriptDir | Out-Null }}; ^",
+            "   $path = Join-Path $scriptDir '" + scriptName + "'; ^",
+            "   $script = @'",
+            scriptBody,
+            "'@; ^",
+            "   Set-Content -Path $path -Value $script -Encoding UTF8; ^",
+            "   & " + pythonCommand + " $path; ^",
+            "   exit $LASTEXITCODE\\\"");
+    }}
+}}
+"""
+
+
+def _script_constants_java(builds: list[BuildDefinition]) -> str:
+    lines: list[str] = []
+    for index, build in enumerate(builds, start=1):
+        python_scripts = generate_python_scripts(build)
+        prefix = _script_prefix(build, index)
+        if index == 1:
+            lines.append(
+                f'    private static final String PREPARE_BUILD_SCRIPT = {_java_text_block(python_scripts["prepare_build.py"], 4)};'
+            )
+            lines.append(
+                f'    private static final String TRIGGER_FOLLOW_UP_SCRIPT = {_java_text_block(python_scripts["trigger_follow_up.py"], 4)};'
+            )
+        if _has_build_stage(build):
+            lines.append(
+                f'    private static final String RUN_BUILD_SCRIPT_{prefix} = {_java_text_block(python_scripts["run_build.py"], 4)};'
+            )
+        lines.append(
+            f'    private static final String RUN_COVERITY_SCRIPT_{prefix} = {_java_text_block(python_scripts["run_coverity.py"], 4)};'
+        )
+        lines.append(
+            f'    private static final String RUN_CUSTOM_ANALYSIS_SCRIPT_{prefix} = {_java_text_block(python_scripts["run_custom_analysis.py"], 4)};'
+        )
+    return "\n".join(lines)
+
+
+def _plan_stage_entries(builds: list[BuildDefinition]) -> str:
+    entries = ["                prepareStage()"]
+    if any(_has_build_stage(build) for build in builds):
+        entries.append("                buildStage()")
+    entries.append("                staticAnalysisStage()")
+    entries.append("                triggerFollowUpStage()")
+    return ",\n".join(entries)
+
+
+def _plan_stage_methods(builds: list[BuildDefinition]) -> str:
+    primary_build = builds[0]
+    methods = [_prepare_stage_method(primary_build)]
+    if any(_has_build_stage(build) for build in builds):
+        methods.append(_build_stage_method(builds))
+    methods.append(_static_analysis_stage_method(builds))
+    methods.append(_trigger_stage_method(primary_build))
+    return "\n\n".join(methods)
+
+
+def _prepare_stage_method(build: BuildDefinition) -> str:
+    return f"""    private Stage prepareStage() {{
         return new Stage("Prepare")
             .jobs(new Job("Prepare Job", "PREP")
 {_requirements_chain(build, 4)}
                 .tasks(
                     new VcsCheckoutTask().addCheckoutOfDefaultRepository(),
-                    pythonScriptTask("prepare_build.py", PREPARE_BUILD_SCRIPT)
+                    {_python_task_invocation(build, "prepare_build.py", "PREPARE_BUILD_SCRIPT")}
                 ));
-    }}
+    }}"""
 
-    private Stage buildStage() {{
+
+def _build_stage_method(builds: list[BuildDefinition]) -> str:
+    jobs = []
+    build_index = 1
+    for index, build in enumerate(builds, start=1):
+        if not _has_build_stage(build):
+            continue
+        jobs.append(
+            f"""                new Job("{_escape_java(_build_stage_job_name(build))}", "BLD{build_index}")
+{_requirements_chain(build, 5)}
+                    .tasks(
+                        new VcsCheckoutTask().addCheckoutOfDefaultRepository(),
+                        {_python_task_invocation(build, "run_build.py", f"RUN_BUILD_SCRIPT_{_script_prefix(build, index)}")}
+                    )"""
+        )
+        build_index += 1
+    jobs_text = ",\n".join(jobs)
+    return f"""    private Stage buildStage() {{
         return new Stage("Build")
-            .jobs(new Job("Build Job", "BLD")
-{_requirements_chain(build, 4)}
-                .tasks(
-                    new VcsCheckoutTask().addCheckoutOfDefaultRepository(),
-                    pythonScriptTask("run_build.py", RUN_BUILD_SCRIPT)
-                ));
-    }}
-
-    private Stage staticAnalysisStage() {{
-        return new Stage("Static Analysis")
             .jobs(
-                new Job("Coverity Scan", "COV")
-{_requirements_chain(build, 5)}
-                    .tasks(
-                        new VcsCheckoutTask().addCheckoutOfDefaultRepository(),
-                        pythonScriptTask("run_coverity.py", RUN_COVERITY_SCRIPT)
-                    ),
-                new Job("Custom Analysis", "CUST")
-{_requirements_chain(build, 5)}
-                    .tasks(
-                        new VcsCheckoutTask().addCheckoutOfDefaultRepository(),
-                        pythonScriptTask("run_custom_analysis.py", RUN_CUSTOM_ANALYSIS_SCRIPT)
-                    )
+{jobs_text}
             );
-    }}
+    }}"""
 
-    private Stage triggerFollowUpStage() {{
-        return new Stage("Trigger Follow-up")
-            .jobs(new Job("Trigger Job", "TRIG")
+
+def _static_analysis_stage_method(builds: list[BuildDefinition]) -> str:
+    jobs = []
+    for index, build in enumerate(builds, start=1):
+        jobs.append(
+            f"""                new Job("{_escape_java(_analysis_stage_job_name(build))}", "ANL{index}")
+{_requirements_chain(build, 5)}
+                    .tasks(
+                        new VcsCheckoutTask().addCheckoutOfDefaultRepository(),
+                        {_python_task_invocation(build, "run_coverity.py", f"RUN_COVERITY_SCRIPT_{_script_prefix(build, index)}")},
+                        {_python_task_invocation(build, "run_custom_analysis.py", f"RUN_CUSTOM_ANALYSIS_SCRIPT_{_script_prefix(build, index)}")}
+                    )"""
+        )
+    jobs_text = ",\n".join(jobs)
+    return f"""    private Stage staticAnalysisStage() {{
+        return new Stage("Analysis")
+            .jobs(
+{jobs_text}
+            );
+    }}"""
+
+
+def _trigger_stage_method(build: BuildDefinition) -> str:
+    return f"""    private Stage triggerFollowUpStage() {{
+        return new Stage("Post Process")
+            .jobs(new Job("Trigger Follow-up", "TRIG")
                 .tasks(
-                    pythonScriptTask("trigger_follow_up.py", TRIGGER_FOLLOW_UP_SCRIPT)
+                    {_python_task_invocation(build, "trigger_follow_up.py", "TRIGGER_FOLLOW_UP_SCRIPT")}
                 ));
-    }}
+    }}"""
 
-    private ScriptTask pythonScriptTask(String scriptName, String scriptBody) {{
-        return new ScriptTask()
-            .inlineBody(pythonWrapperCommand(scriptName, scriptBody))
-            .interpreterShell();
-    }}
 
-{python_wrapper_method}
-}}
-"""
+def _script_prefix(build: BuildDefinition, index: int) -> str:
+    build_key = "".join(ch if ch.isalnum() else "_" for ch in (build.build_key or f"build_{index}").upper())
+    return build_key or f"BUILD_{index}"
+
+
+def _job_display_name(build: BuildDefinition) -> str:
+    return build.build_key or build.name or build.plan_key
+
+
+def _build_stage_job_name(build: BuildDefinition) -> str:
+    return f"{_job_display_name(build)} Build".strip()
+
+
+def _analysis_stage_job_name(build: BuildDefinition) -> str:
+    return f"{_job_display_name(build)} Analysis".strip()
+
+
+def _has_build_stage(build: BuildDefinition) -> bool:
+    normalized_language = (build.language or "").strip().lower()
+    normalized_compiler = (build.compiler or "").strip().lower()
+    return not (
+        normalized_language in {"python"} and normalized_compiler in {"python"} and not build.build.prepare_command.strip() and not build.build.build_command.strip()
+    )
+
+
+def _python_task_invocation(build: BuildDefinition, script_name: str, script_constant_name: str) -> str:
+    python_command = _python_command(build)
+    if build.requirements.os.lower() == "windows":
+        return f'pythonScriptTaskCmdExe("{script_name}", {script_constant_name}, "{python_command}")'
+    return f'pythonScriptTaskShell("{script_name}", {script_constant_name}, "{python_command}")'
 
 
 def generate_registry_java(builds: list[BuildDefinition], package_name: str) -> str:
-    class_names = [to_java_class_name(build.build_id) for build in builds]
+    grouped_builds = _group_builds_by_plan_key(builds)
+    class_names = [to_java_class_name(plan_builds[0].build_id) for plan_builds in grouped_builds.values()]
     registry_lines = ",\n".join(f"            new {name}().plan()" for name in class_names)
 
     return f"""package {package_name};
@@ -283,6 +415,13 @@ def generate_pom_xml(package_name: str) -> str:
 
 def generate_python_scripts(build: BuildDefinition) -> dict[str, str]:
     return render_python_scripts(build)
+
+
+def _group_builds_by_plan_key(builds: list[BuildDefinition]) -> dict[str, list[BuildDefinition]]:
+    grouped: dict[str, list[BuildDefinition]] = {}
+    for build in builds:
+        grouped.setdefault(build.plan_key, []).append(build)
+    return grouped
 
 
 def _requirements_chain(build: BuildDefinition, indent_size: int) -> str:

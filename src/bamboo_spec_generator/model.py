@@ -51,6 +51,7 @@ class BuildConfigDefinition:
 class BuildDefinition:
     year: str
     build_id: str
+    build_key: str
     name: str
     plan_key: str
     description: str | None

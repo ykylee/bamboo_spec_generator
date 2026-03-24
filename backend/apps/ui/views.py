@@ -2,20 +2,33 @@ from __future__ import annotations
 
 from django.core.paginator import Paginator
 from django.shortcuts import redirect, render
+from django.utils.safestring import mark_safe
+from pygments import highlight
+from pygments.formatters import HtmlFormatter
+from pygments.lexers import get_lexer_by_name
+from pygments.lexers.special import TextLexer
+from pygments.util import ClassNotFound
 
-from apps.buildmeta.models import BuildPlan, BuildPlanBuildInfo, Project, ProjectRepository
+from apps.buildmeta.models import BambooPublishExecution, BuildPlan, BuildPlanBuildInfo, Project, ProjectRepository
 from apps.buildmeta.selectors.definitions import get_build_plan_export_draft, get_build_plan_preview
 from apps.buildmeta.selectors.executions import (
     list_build_plan_summaries,
     list_executions_by_plan_key,
     list_latest_failed_builds,
+    list_publish_executions_by_plan_key,
 )
 from apps.buildmeta.selectors.projects import get_project_detail, list_project_summaries
 from apps.buildmeta.services import (
+    BambooOperationError,
     create_project,
+    get_bamboo_plan_details,
+    get_bamboo_plan_status,
+    get_bamboo_system_settings,
     get_coverity_system_settings,
     initialize_specs_draft_data,
     initialize_specs_draft_for_plan,
+    publish_bamboo_specs,
+    queue_bamboo_plan_with_options,
     set_system_setting,
     update_build_plan_metadata,
     update_project,
@@ -24,6 +37,7 @@ from apps.buildmeta.services import (
 
 from .forms import (
     BuildMetadataForm,
+    BambooRunForm,
     BuildInfoMetadataForm,
     BuildPlanMetadataForm,
     CoveritySystemSettingsForm,
@@ -152,6 +166,7 @@ def build_plan_list(request):
 
 def coverity_settings(request):
     settings_payload = get_coverity_system_settings()
+    bamboo_settings = get_bamboo_system_settings()
     form = CoveritySystemSettingsForm(
         initial={
                 "connect_url": settings_payload["connectUrl"],
@@ -159,6 +174,7 @@ def coverity_settings(request):
                 "commit_enabled": settings_payload["commitEnabled"],
                 "repository_linkage_mode": settings_payload["repositoryLinkageMode"],
                 "git_clone_url_template": settings_payload["gitCloneUrlTemplate"],
+                "bamboo_server_url": bamboo_settings["serverUrl"],
             }
         )
     message = ""
@@ -167,7 +183,7 @@ def coverity_settings(request):
 
     if request.method == "POST":
         form_kind = request.POST.get("form_kind", "").strip()
-        if form_kind == "coverity_settings":
+        if form_kind == "system_settings":
             form = CoveritySystemSettingsForm(request.POST)
             if form.is_valid():
                 set_system_setting(
@@ -195,9 +211,14 @@ def coverity_settings(request):
                     value=form.cleaned_data["repository_linkage_mode"].strip() or "linked",
                     description="Repository linkage mode",
                 )
-                message = "Coverity 운영 설정을 저장했습니다."
+                set_system_setting(
+                    key="bamboo.server.url",
+                    value=form.cleaned_data["bamboo_server_url"].strip(),
+                    description="Bamboo server URL",
+                )
+                message = "운영 설정을 저장했습니다."
             else:
-                error = "Coverity 설정 입력값을 다시 확인해 주세요."
+                error = "시스템 설정 입력값을 다시 확인해 주세요."
         elif form_kind == "init_specs_drafts":
             init_summary = initialize_specs_draft_data(reset_existing=True)
             message = "등록된 샘플의 Specs 초안 데이터를 현재 기준으로 다시 초기화했습니다."
@@ -207,6 +228,7 @@ def coverity_settings(request):
         "message": message,
         "error": error,
         "initSummary": init_summary,
+        "bambooSettings": get_bamboo_system_settings(),
         "navProjectSearchItems": _build_nav_project_search_items(list_project_summaries()),
     }
     return render(request, "ui/coverity_settings.html", context)
@@ -329,6 +351,10 @@ def project_build_detail(request, jira_project_key: str, plan_key: str):
     build_info_error = ""
     draft_refresh_message = ""
     draft_refresh_error = ""
+    bamboo_message = ""
+    bamboo_error = ""
+    bamboo_detail = ""
+    bamboo_run_form = BambooRunForm(initial={"execute_all_stages": True})
     metadata_open = request.GET.get("edit", "").lower() in {"1", "true", "open"}
     build_info_open = request.GET.get("add_build_info", "").lower() in {"1", "true", "open"}
 
@@ -342,6 +368,7 @@ def project_build_detail(request, jira_project_key: str, plan_key: str):
                     plan_key=plan_key,
                     static_analysis_tool_version=metadata_form.cleaned_data["static_analysis_tool_version"],
                     coverity_project=metadata_form.cleaned_data["coverity_project"],
+                    repository_linkage_mode_override=metadata_form.cleaned_data["repository_linkage_mode_override"],
                 )
                 return redirect("project-build-detail", jira_project_key=jira_project_key, plan_key=plan_key)
             metadata_error = "빌드 플랜 메타데이터를 다시 확인해 주세요."
@@ -370,6 +397,39 @@ def project_build_detail(request, jira_project_key: str, plan_key: str):
                 draft_refresh_message = "이 플랜의 Specs 초안 데이터를 현재 기준으로 다시 채웠습니다."
             else:
                 draft_refresh_error = "다시 채울 초안 데이터가 없어 기존 상태를 유지했습니다."
+        elif form_kind == "bamboo_publish":
+            try:
+                result = publish_bamboo_specs(plan_key)
+            except BambooOperationError as exc:
+                bamboo_error = exc.summary
+                bamboo_detail = exc.detail
+            else:
+                if result["success"]:
+                    bamboo_message = result["message"]
+                    bamboo_detail = result.get("detail", "")
+                else:
+                    bamboo_error = result["message"]
+                    bamboo_detail = result.get("detail", "") or result["output"]
+        elif form_kind == "bamboo_run":
+            bamboo_run_form = BambooRunForm(request.POST)
+            if bamboo_run_form.is_valid():
+                try:
+                    result = queue_bamboo_plan_with_options(
+                        plan_key,
+                        stage=bamboo_run_form.cleaned_data["stage"],
+                        execute_all_stages=bamboo_run_form.cleaned_data["execute_all_stages"],
+                        custom_revision=bamboo_run_form.cleaned_data["custom_revision"],
+                        variables=_parse_bamboo_variables_text(bamboo_run_form.cleaned_data["variables_text"]),
+                    )
+                except BambooOperationError as exc:
+                    bamboo_error = exc.summary
+                    bamboo_detail = exc.detail
+                else:
+                    bamboo_message = f"{result['message']} ({result['fullPlanKey']})"
+                    bamboo_detail = result.get("detail", "")
+            else:
+                bamboo_error = "Bamboo 실행 입력값을 다시 확인해 주세요."
+                bamboo_detail = bamboo_run_form.errors.as_text()
 
     project = get_project_detail(jira_project_key)
     if project is None:
@@ -383,6 +443,9 @@ def project_build_detail(request, jira_project_key: str, plan_key: str):
         (item for item in project["repositories"] if item["repoSlug"] == build["repositorySlug"]),
         None,
     )
+    bamboo_status = get_bamboo_plan_status(plan_key)
+    build_plan_export_draft = get_build_plan_export_draft(plan_key)
+    build_plan_preview = get_build_plan_preview(plan_key)
     context = {
         "project": project,
         "build": build,
@@ -394,14 +457,61 @@ def project_build_detail(request, jira_project_key: str, plan_key: str):
         "buildInfoError": build_info_error,
         "buildInfoOpen": build_info_open,
         "buildInfoEntries": _list_build_info_entries(plan_key),
-        "buildPlanExportDraft": get_build_plan_export_draft(plan_key),
-        "buildPlanPreview": get_build_plan_preview(plan_key),
+        "buildPlanExportDraft": build_plan_export_draft,
+        "buildPlanPreview": build_plan_preview,
+        "buildPreviewTaskInspector": _build_task_inspector(
+            build_plan_preview,
+            build_plan_export_draft,
+        ),
         "draftRefreshMessage": draft_refresh_message,
         "draftRefreshError": draft_refresh_error,
+        "bambooStatus": bamboo_status,
+        "bambooMessage": bamboo_message,
+        "bambooError": bamboo_error,
+        "bambooDetail": bamboo_detail,
+        "bambooRunForm": bamboo_run_form,
+        "bambooPublishExecutions": list_publish_executions_by_plan_key(plan_key),
         "registrationSuggestions": _build_registration_suggestions(),
         "navProjectSearchItems": _build_nav_project_search_items(list_project_summaries()),
     }
     return render(request, "ui/build_detail.html", context)
+
+
+def project_bamboo_plan_detail(request, jira_project_key: str, plan_key: str):
+    project = get_project_detail(jira_project_key)
+    if project is None:
+        return render(request, "ui/bamboo_plan_detail.html", {"project": None, "build": None, "bambooPlan": None})
+
+    build = next((item for item in project["builds"] if item["planKey"] == plan_key), None)
+    if build is None:
+        return render(request, "ui/bamboo_plan_detail.html", {"project": project, "build": None, "bambooPlan": None})
+
+    try:
+        bamboo_plan = get_bamboo_plan_details(plan_key)
+        bamboo_error = ""
+    except BambooOperationError as exc:
+        bamboo_plan = None
+        bamboo_error = str(exc)
+    publish_snapshot = _get_latest_successful_publish_snapshot(plan_key)
+    published_specs_preview = publish_snapshot.get("preview") or get_build_plan_preview(plan_key)
+    published_specs_export_draft = publish_snapshot.get("exportDraft") or get_build_plan_export_draft(plan_key)
+
+    context = {
+        "project": project,
+        "build": build,
+        "bambooPlan": bamboo_plan,
+        "publishedSpecsTaskOutline": _build_published_specs_task_outline(
+            published_specs_preview,
+            published_specs_export_draft,
+        ),
+        "publishedSpecsTaskInspector": _build_task_inspector(
+            published_specs_preview,
+            published_specs_export_draft,
+        ),
+        "bambooError": bamboo_error,
+        "navProjectSearchItems": _build_nav_project_search_items(list_project_summaries()),
+    }
+    return render(request, "ui/bamboo_plan_detail.html", context)
 
 
 def project_build_info_list(request, jira_project_key: str, plan_key: str):
@@ -652,6 +762,7 @@ def _build_build_plan_metadata_initial(build: dict) -> dict:
     return {
         "static_analysis_tool_version": build["staticAnalysisToolVersion"],
         "coverity_project": build["coverityProject"],
+        "repository_linkage_mode_override": build.get("repositoryLinkageModeOverride", ""),
     }
 
 
@@ -668,6 +779,291 @@ def _build_info_initial(build_info: BuildPlanBuildInfo) -> dict:
         "coverity_stream": build_info.coverity_stream,
         "build_sub_path": build_info.build_sub_path,
     }
+
+
+def _build_published_specs_task_outline(preview: dict | None, export_draft: dict | None) -> list[dict]:
+    if not preview:
+        return []
+
+    draft_index = _index_export_draft_files(export_draft)
+    jobs_by_id = {
+        job["jobId"]: job
+        for job in preview.get("jobs", [])
+        if isinstance(job, dict) and job.get("jobId")
+    }
+    outline = []
+    for stage in preview.get("stages", []):
+        if not isinstance(stage, dict):
+            continue
+        stage_jobs = []
+        for stage_job in stage.get("jobs", []):
+            if not isinstance(stage_job, dict):
+                continue
+            job_detail = jobs_by_id.get(stage_job.get("jobId", ""))
+            if job_detail is None:
+                continue
+            matching_groups = [
+                group
+                for group in job_detail.get("taskGroups", [])
+                if isinstance(group, dict) and group.get("stageName") == stage.get("name")
+            ]
+            tasks = []
+            for group in matching_groups:
+                for task in group.get("tasks", []):
+                    if isinstance(task, dict):
+                        tasks.append(
+                            {
+                                **task,
+                                "snippets": _build_task_snippets(
+                                    build_key=job_detail.get("buildKey", ""),
+                                    task_name=task.get("name", ""),
+                                    draft_index=draft_index,
+                                ),
+                            }
+                        )
+            stage_jobs.append(
+                {
+                    "jobId": job_detail.get("jobId", ""),
+                    "name": job_detail.get("name", ""),
+                    "buildKey": job_detail.get("buildKey", ""),
+                    "operatingSystem": job_detail.get("operatingSystem", ""),
+                    "tasks": tasks,
+                }
+            )
+        outline.append(
+            {
+                "id": stage.get("id", ""),
+                "name": stage.get("name", ""),
+                "summary": stage.get("summary", ""),
+                "jobs": stage_jobs,
+            }
+        )
+    return outline
+
+
+def _build_task_inspector(preview: dict | None, export_draft: dict | None) -> dict:
+    if not preview:
+        return {"stages": [], "tasks": [], "selectedTaskId": ""}
+
+    draft_index = _index_export_draft_files(export_draft)
+    jobs_by_id = {
+        job["jobId"]: job
+        for job in preview.get("jobs", [])
+        if isinstance(job, dict) and job.get("jobId")
+    }
+    stages = []
+    task_panels = []
+    selected_task_id = ""
+    for stage_index, stage in enumerate(preview.get("stages", []), start=1):
+        if not isinstance(stage, dict):
+            continue
+        stage_jobs = []
+        for job_index, stage_job in enumerate(stage.get("jobs", []), start=1):
+            if not isinstance(stage_job, dict):
+                continue
+            job_detail = jobs_by_id.get(stage_job.get("jobId", ""))
+            if job_detail is None:
+                continue
+            matching_groups = [
+                group
+                for group in job_detail.get("taskGroups", [])
+                if isinstance(group, dict) and group.get("stageName") == stage.get("name")
+            ]
+            task_nodes = []
+            for group in matching_groups:
+                for task_index, task in enumerate(group.get("tasks", []), start=1):
+                    if not isinstance(task, dict):
+                        continue
+                    snippets = _build_task_snippets(
+                        build_key=job_detail.get("buildKey", ""),
+                        task_name=task.get("name", ""),
+                        draft_index=draft_index,
+                    )
+                    task_id = (
+                        f"{stage.get('id', 'stage')}-{job_detail.get('jobId', 'job')}-task-{task_index}"
+                    )
+                    if not selected_task_id:
+                        selected_task_id = task_id
+                    task_panel = {
+                        "id": task_id,
+                        "stageName": stage.get("name", ""),
+                        "jobName": job_detail.get("name", ""),
+                        "jobId": job_detail.get("jobId", ""),
+                        "name": task.get("name", ""),
+                        "type": task.get("type", ""),
+                        "detail": task.get("detail", ""),
+                        "buildKey": job_detail.get("buildKey", ""),
+                        "operatingSystem": job_detail.get("operatingSystem", ""),
+                        "snippets": snippets,
+                        "summary": _summarize_task_inspector_item(task, snippets),
+                        "configurationTitle": _build_task_configuration_title(task),
+                        "fields": _build_task_inspector_fields(
+                            task=task,
+                            job_detail=job_detail,
+                            snippets=snippets,
+                        ),
+                    }
+                    task_panels.append(task_panel)
+                    task_nodes.append(
+                        {
+                            "id": task_id,
+                            "name": task.get("name", ""),
+                            "type": task.get("type", ""),
+                            "summary": task_panel["summary"],
+                        }
+                    )
+            stage_jobs.append(
+                {
+                    "id": job_detail.get("jobId", ""),
+                    "name": job_detail.get("name", ""),
+                    "buildKey": job_detail.get("buildKey", ""),
+                    "tasks": task_nodes,
+                }
+            )
+        stages.append(
+            {
+                "id": stage.get("id", f"stage-{stage_index}"),
+                "name": stage.get("name", ""),
+                "summary": stage.get("summary", ""),
+                "jobs": stage_jobs,
+            }
+        )
+
+    return {
+        "stages": stages,
+        "tasks": task_panels,
+        "selectedTaskId": selected_task_id,
+    }
+
+
+def _get_latest_successful_publish_snapshot(plan_key: str) -> dict:
+    execution = (
+        BambooPublishExecution.objects.filter(
+            build_plan__plan_key=plan_key,
+            status=BambooPublishExecution.STATUS_SUCCESS,
+        )
+        .order_by("-created_at")
+        .first()
+    )
+    if execution is None:
+        return {"preview": None, "exportDraft": None}
+    return {
+        "preview": execution.snapshot_preview_json,
+        "exportDraft": execution.snapshot_export_draft_json,
+    }
+
+
+def _index_export_draft_files(export_draft: dict | None) -> dict[str, dict[str, dict]]:
+    if not export_draft:
+        return {}
+    index: dict[str, dict[str, dict]] = {}
+    for item in export_draft.get("files", []):
+        if not isinstance(item, dict):
+            continue
+        path = item.get("path", "")
+        if not isinstance(path, str):
+            continue
+        parts = path.split("/")
+        if len(parts) < 5:
+            continue
+        build_key = parts[3]
+        filename = parts[4]
+        index.setdefault(build_key, {})[filename] = item
+    return index
+
+
+def _build_task_snippets(*, build_key: str, task_name: str, draft_index: dict[str, dict[str, dict]]) -> list[dict]:
+    build_files = draft_index.get(build_key, {})
+    filenames = _task_related_filenames(task_name)
+    snippets = []
+    for filename in filenames:
+        item = build_files.get(filename)
+        if item is None:
+            continue
+        snippets.append(
+            {
+                "path": item.get("path", ""),
+                "label": item.get("label", filename),
+                "language": item.get("language", "text"),
+                "content": item.get("content", ""),
+                "highlightedContent": _highlight_code_block(
+                    item.get("content", ""),
+                    item.get("language", "text"),
+                ),
+            }
+        )
+    return snippets
+
+
+def _build_task_configuration_title(task: dict) -> str:
+    task_type = (task.get("type", "") or "").strip().lower()
+    if task_type == "script":
+        return "Script configuration"
+    if task_type == "checkout":
+        return "Checkout configuration"
+    return "Task configuration"
+
+
+def _summarize_task_inspector_item(task: dict, snippets: list[dict]) -> str:
+    detail = (task.get("detail", "") or "").strip()
+    if detail:
+        return detail
+    if snippets:
+        return ", ".join(snippet.get("label", "") for snippet in snippets if snippet.get("label"))
+    return "-"
+
+
+def _build_task_inspector_fields(*, task: dict, job_detail: dict, snippets: list[dict]) -> list[dict]:
+    related_files = ", ".join(snippet.get("label", "") for snippet in snippets if snippet.get("label")) or "-"
+    languages = ", ".join(
+        sorted({snippet.get("language", "text") for snippet in snippets if snippet.get("language")})
+    ) or "-"
+    return [
+        {"label": "Task type", "value": task.get("type", "") or "-"},
+        {"label": "Task detail", "value": task.get("detail", "") or "-"},
+        {"label": "Build key", "value": job_detail.get("buildKey", "") or "-"},
+        {"label": "Operating system", "value": job_detail.get("operatingSystem", "") or "-"},
+        {"label": "Related files", "value": related_files},
+        {"label": "Snippet languages", "value": languages},
+    ]
+
+
+def _task_related_filenames(task_name: str) -> list[str]:
+    prepare_files = ["prepare_build.py", "prepare_build.sh", "prepare_build.bat"]
+    run_build_files = ["run_build.py", "run_build.sh", "run_build.bat"]
+    coverity_files = ["coverity.yaml", "run_coverity.py", "run_coverity.sh", "run_coverity.bat"]
+    custom_analysis_files = [
+        "run_custom_analysis.py",
+        "run_custom_analysis.sh",
+        "run_custom_analysis.bat",
+    ]
+    trigger_files = ["trigger_follow_up.py", "trigger_follow_up.sh", "trigger_follow_up.bat"]
+    mapping = {
+        "Prepare Build Script": prepare_files,
+        "Run Build Script": run_build_files,
+        "Run Coverity Script": coverity_files,
+        "Run Custom Analysis Script": custom_analysis_files,
+        "Trigger Follow-up Script": trigger_files,
+    }
+    return mapping.get(task_name, [])
+
+
+def _highlight_code_block(content: str, language: str) -> str:
+    normalized_language = (language or "").strip().lower()
+    lexer_aliases = {
+        "python": "python",
+        "shell": "bash",
+        "batch": "batch",
+        "yaml": "yaml",
+        "json": "json",
+        "text": "text",
+    }
+    try:
+        lexer = get_lexer_by_name(lexer_aliases.get(normalized_language, "text"))
+    except ClassNotFound:
+        lexer = TextLexer()
+    formatter = HtmlFormatter(nowrap=True, noclasses=True)
+    return mark_safe(highlight(content or "", lexer, formatter))
 
 
 def _build_project_payload_from_detail(project: dict) -> dict:
@@ -808,3 +1204,14 @@ def _list_execution_groups(plan_key: str) -> list[dict]:
         }
         for bucket in grouped.values()
     ]
+
+
+def _parse_bamboo_variables_text(value: str) -> dict[str, str]:
+    variables: dict[str, str] = {}
+    for raw_line in value.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        key, _sep, remainder = line.partition("=")
+        variables[key.strip()] = remainder.strip()
+    return variables

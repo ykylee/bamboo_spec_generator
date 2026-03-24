@@ -20,6 +20,7 @@ class SystemSetting(TimestampedModel):
     KEY_COVERITY_COMMIT_ENABLED = "coverity.commit.enabled"
     KEY_GIT_CLONE_URL_TEMPLATE = "repository.git.clone_url_template"
     KEY_REPOSITORY_LINKAGE_MODE = "repository.linkage_mode"
+    KEY_BAMBOO_SERVER_URL = "bamboo.server.url"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     key = models.CharField(max_length=128, unique=True)
@@ -46,11 +47,23 @@ class Project(TimestampedModel):
 
 
 class BuildPlan(TimestampedModel):
+    REPOSITORY_LINKAGE_MODE_LINKED = "linked"
+    REPOSITORY_LINKAGE_MODE_CREATE_IF_MISSING = "create_if_missing"
+    REPOSITORY_LINKAGE_MODE_CHOICES = [
+        (REPOSITORY_LINKAGE_MODE_LINKED, "linked"),
+        (REPOSITORY_LINKAGE_MODE_CREATE_IF_MISSING, "create_if_missing"),
+    ]
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     build_id = models.CharField(max_length=255, unique=True)
     plan_key = models.CharField(max_length=64, unique=True)
     static_analysis_tool_version = models.CharField(max_length=128, blank=True)
     coverity_project = models.CharField(max_length=255, blank=True)
+    repository_linkage_mode_override = models.CharField(
+        max_length=32,
+        choices=REPOSITORY_LINKAGE_MODE_CHOICES,
+        blank=True,
+    )
     latest_version = models.ForeignKey(
         "buildmeta.BuildVersion",
         null=True,
@@ -247,6 +260,31 @@ class BuildExecution(models.Model):
             models.Index(fields=["build_version", "-created_at"], name="ix_execution_version_created"),
             models.Index(fields=["build_plan", "-build_number"], name="ix_execution_plan_number"),
             models.Index(fields=["build_info", "-created_at"], name="ix_exec_build_info_created"),
+        ]
+
+
+class BambooPublishExecution(TimestampedModel):
+    STATUS_SUCCESS = "successful"
+    STATUS_FAILED = "failed"
+    STATUS_CHOICES = [
+        (STATUS_SUCCESS, "successful"),
+        (STATUS_FAILED, "failed"),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    build_plan = models.ForeignKey(BuildPlan, on_delete=models.CASCADE, related_name="publish_executions")
+    status = models.CharField(max_length=32, choices=STATUS_CHOICES)
+    message = models.TextField(blank=True)
+    output = models.TextField(blank=True)
+    snapshot_preview_json = models.JSONField(null=True, blank=True)
+    snapshot_export_draft_json = models.JSONField(null=True, blank=True)
+    return_code = models.IntegerField(null=True, blank=True)
+    trigger_source = models.CharField(max_length=64, blank=True)
+    requested_by = models.CharField(max_length=255, blank=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["build_plan", "-created_at"], name="ix_publish_exec_plan_created"),
         ]
 
 

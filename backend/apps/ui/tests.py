@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from django.test import TestCase
+from unittest.mock import patch
 
 from apps.buildmeta.models import (
+    BambooPublishExecution,
     BuildExecution,
     BuildPlan,
     BuildPlanBuildInfo,
@@ -12,6 +14,20 @@ from apps.buildmeta.models import (
     ProjectBuild,
     ProjectRepository,
     SystemSetting,
+)
+from apps.buildmeta.services import BambooOperationError
+from apps.ui.views import (
+    _build_project_payload,
+    _build_registration_suggestions,
+    _build_task_configuration_title,
+    _build_task_inspector,
+    _build_task_snippets,
+    _highlight_code_block,
+    _index_export_draft_files,
+    _list_execution_groups,
+    _parse_bamboo_variables_text,
+    _serialize_build_info,
+    _summarize_task_inspector_item,
 )
 
 
@@ -215,25 +231,27 @@ class ProjectViewTest(TestCase):
         response = self.client.get("/settings/coverity/")
 
         self.assertEqual(200, response.status_code)
-        self.assertContains(response, "Coverity 운영 설정")
+        self.assertContains(response, "운영 설정")
         self.assertContains(response, "샘플 Draft 재초기화")
         self.assertContains(response, "Repository Linkage Mode")
+        self.assertContains(response, "Bamboo Server URL")
 
     def test_coverity_settings_page_updates_settings(self) -> None:
         response = self.client.post(
             "/settings/coverity/",
             {
-                "form_kind": "coverity_settings",
+                "form_kind": "system_settings",
                 "connect_url": "https://coverity.example.com",
                 "on_new_cert": "trust",
                 "commit_enabled": "on",
                 "repository_linkage_mode": "create_if_missing",
                 "git_clone_url_template": "https://git.example.com/scm/{project_key_lower}/{repo_slug}.git",
+                "bamboo_server_url": "https://bamboo.example.com",
             },
         )
 
         self.assertEqual(200, response.status_code)
-        self.assertContains(response, "Coverity 운영 설정을 저장했습니다.")
+        self.assertContains(response, "운영 설정을 저장했습니다.")
         self.assertEqual("https://coverity.example.com", SystemSetting.objects.get(key="coverity.connect.url").value)
         self.assertEqual(
             "https://git.example.com/scm/{project_key_lower}/{repo_slug}.git",
@@ -242,6 +260,10 @@ class ProjectViewTest(TestCase):
         self.assertEqual(
             "create_if_missing",
             SystemSetting.objects.get(key="repository.linkage_mode").value,
+        )
+        self.assertEqual(
+            "https://bamboo.example.com",
+            SystemSetting.objects.get(key="bamboo.server.url").value,
         )
 
     def test_coverity_settings_page_initializes_specs_drafts(self) -> None:
@@ -768,6 +790,28 @@ class ProjectViewTest(TestCase):
         self.assertEqual("/projects/SAMPLE/repositories/sample-app-web/", response["Location"])
         self.assertTrue(ProjectRepository.objects.filter(project=self.project, repo_slug="sample-app-web").exists())
 
+    def test_project_detail_repository_error_reopens_panel_and_preserves_values(self) -> None:
+        response = self.client.post(
+            "/projects/SAMPLE/",
+            data={
+                "form_kind": "repository",
+                "repo_slug": "sample-app-api",
+                "coverity_project": "duplicate-coverity",
+                "coverity_stream": "duplicate-stream",
+            },
+        )
+
+        self.assertEqual(200, response.status_code)
+        self.assertEqual(
+            "Repository 'sample-app-api' is duplicated in the request.",
+            response.context["repositoryAddError"],
+        )
+        self.assertContains(response, "sample-app-api")
+        self.assertNotContains(response, 'id="project-repository-add-panel" hidden', html=False)
+        self.assertContains(response, 'value="sample-app-api"', html=False)
+        self.assertContains(response, 'value="duplicate-coverity"', html=False)
+        self.assertContains(response, 'value="duplicate-stream"', html=False)
+
     def test_project_repository_detail_renders_linked_builds(self) -> None:
         response = self.client.get("/projects/SAMPLE/repositories/sample-app-api/")
 
@@ -775,6 +819,15 @@ class ProjectViewTest(TestCase):
         self.assertContains(response, "저장소 메타데이터")
         self.assertContains(response, "연결된 빌드")
         self.assertContains(response, "Sample API")
+
+    def test_project_repository_detail_returns_empty_state_for_missing_project_or_repository(self) -> None:
+        missing_project = self.client.get("/projects/MISSING/repositories/sample-app-api/")
+        missing_repository = self.client.get("/projects/SAMPLE/repositories/missing-repo/")
+
+        self.assertEqual(200, missing_project.status_code)
+        self.assertContains(missing_project, "프로젝트를 찾을 수 없습니다.")
+        self.assertEqual(200, missing_repository.status_code)
+        self.assertContains(missing_repository, "저장소를 찾을 수 없습니다.")
 
     def test_project_detail_renders_build_index(self) -> None:
         response = self.client.get("/projects/SAMPLE/")
@@ -811,7 +864,39 @@ class ProjectViewTest(TestCase):
         self.assertEqual("/projects/SAMPLE/builds/SAMPWEB/", response["Location"])
         self.assertTrue(ProjectBuild.objects.filter(project=self.project, build_plan__plan_key="SAMPWEB").exists())
 
-    def test_project_build_detail_renders_build_metadata(self) -> None:
+    def test_project_detail_build_error_reopens_panel_and_preserves_values(self) -> None:
+        response = self.client.post(
+            "/projects/SAMPLE/",
+            data={
+                "form_kind": "build",
+                "build_name": "Duplicate Build",
+                "build_type": "python",
+                "runtime_stack": "python3.12",
+                "build_id": "duplicate-build",
+                "plan_key": "DUPL",
+                "build_repository_slug": "missing-repo",
+            },
+        )
+
+        self.assertEqual(200, response.status_code)
+        self.assertEqual(
+            "Build repositorySlug 'missing-repo' is not registered in repositories.",
+            response.context["buildAddError"],
+        )
+        self.assertNotContains(response, 'id="project-build-add-panel" hidden', html=False)
+        self.assertContains(response, 'value="Duplicate Build"', html=False)
+        self.assertContains(response, 'value="duplicate-build"', html=False)
+        self.assertContains(response, 'value="DUPL"', html=False)
+        self.assertContains(response, 'value="missing-repo"', html=False)
+
+    @patch("apps.ui.views.get_bamboo_plan_status")
+    def test_project_build_detail_renders_build_metadata(self, bamboo_status_mock) -> None:
+        bamboo_status_mock.return_value = {
+            "configured": False,
+            "exists": False,
+            "message": "Bamboo 서버 URL이 아직 설정되지 않았습니다.",
+            "fullPlanKey": "SAMPLE-SAMPAPI",
+        }
         BuildPlanBuildInfo.objects.create(
             build_plan=BuildPlan.objects.get(plan_key="SAMPAPI"),
             build_key="api-linux",
@@ -832,16 +917,309 @@ class ProjectViewTest(TestCase):
         self.assertContains(response, "연결 정보")
         self.assertContains(response, "sample-app-api")
         self.assertContains(response, "예상 Bamboo Plan 구성")
-        self.assertContains(response, "플랜 내부 Job 구성")
         self.assertContains(response, "Post Process")
-        self.assertContains(response, "Specs Export 초안")
         self.assertContains(response, "Specs 초안 다시 채우기")
+        self.assertContains(response, "실제 Bamboo 연동")
+        self.assertContains(response, "실제 Bamboo Plan 보기")
         self.assertContains(response, "drafts/SAMPAPI/jobs/api-linux/coverity.yaml")
         self.assertNotContains(response, "plan-preview.json")
         self.assertContains(response, "linux")
-        self.assertContains(response, 'data-preview-stage', html=False)
-        self.assertContains(response, 'data-job-select', html=False)
-        self.assertContains(response, 'data-job-panel', html=False)
+        self.assertContains(response, 'data-task-panel', html=False)
+        self.assertContains(response, "최근 Publish 이력")
+
+    @patch("apps.ui.views.get_bamboo_plan_status")
+    @patch("apps.ui.views.publish_bamboo_specs")
+    def test_project_build_detail_publishes_bamboo_specs(self, publish_mock, bamboo_status_mock) -> None:
+        publish_mock.return_value = {
+            "success": True,
+            "message": "Bamboo Specs publish가 완료되었습니다.",
+            "output": "",
+            "detail": "published successfully",
+        }
+        bamboo_status_mock.return_value = {
+            "configured": True,
+            "exists": True,
+            "message": "Bamboo에 등록되어 있습니다.",
+            "fullPlanKey": "SAMPLE-SAMPAPI",
+        }
+
+        response = self.client.post(
+            "/projects/SAMPLE/builds/SAMPAPI/",
+            data={"form_kind": "bamboo_publish"},
+        )
+
+        self.assertEqual(200, response.status_code)
+        publish_mock.assert_called_once_with("SAMPAPI")
+        self.assertContains(response, "Bamboo Specs publish가 완료되었습니다.")
+        self.assertContains(response, "published successfully")
+
+    @patch("apps.ui.views.get_bamboo_plan_status")
+    @patch("apps.ui.views.publish_bamboo_specs")
+    def test_project_build_detail_publish_failure_shows_detail(self, publish_mock, bamboo_status_mock) -> None:
+        publish_mock.return_value = {
+            "success": False,
+            "message": "Bamboo Specs publish에 실패했습니다.",
+            "output": "publish failed",
+            "detail": "return code=1",
+        }
+        bamboo_status_mock.return_value = {
+            "configured": True,
+            "exists": True,
+            "message": "Bamboo에 등록되어 있습니다.",
+            "fullPlanKey": "SAMPLE-SAMPAPI",
+        }
+
+        response = self.client.post(
+            "/projects/SAMPLE/builds/SAMPAPI/",
+            data={"form_kind": "bamboo_publish"},
+        )
+
+        self.assertEqual(200, response.status_code)
+        self.assertContains(response, "Bamboo Specs publish에 실패했습니다.")
+        self.assertContains(response, "return code=1")
+
+    @patch("apps.ui.views.get_bamboo_plan_status")
+    @patch("apps.ui.views.publish_bamboo_specs")
+    def test_project_build_detail_publish_operation_error_shows_summary_and_detail(self, publish_mock, bamboo_status_mock) -> None:
+        publish_mock.side_effect = BambooOperationError("Bamboo 토큰이 설정되지 않았습니다.", "token file missing")
+        bamboo_status_mock.return_value = {
+            "configured": True,
+            "exists": False,
+            "message": "Bamboo에 아직 등록되지 않았습니다.",
+            "fullPlanKey": "SAMPLE-SAMPAPI",
+        }
+
+        response = self.client.post(
+            "/projects/SAMPLE/builds/SAMPAPI/",
+            data={"form_kind": "bamboo_publish"},
+        )
+
+        self.assertEqual(200, response.status_code)
+        self.assertContains(response, "Bamboo 토큰이 설정되지 않았습니다.")
+        self.assertContains(response, "token file missing")
+
+    @patch("apps.ui.views.get_bamboo_plan_status")
+    def test_project_build_detail_shows_publish_history(self, bamboo_status_mock) -> None:
+        bamboo_status_mock.return_value = {
+            "configured": True,
+            "exists": True,
+            "message": "Bamboo에 등록되어 있습니다.",
+            "fullPlanKey": "SAMPLE-SAMPAPI",
+        }
+        BambooPublishExecution.objects.create(
+            build_plan=BuildPlan.objects.get(plan_key="SAMPAPI"),
+            status="successful",
+            message="Bamboo Specs publish가 완료되었습니다.",
+            output="published",
+            return_code=0,
+            trigger_source="web_ui",
+        )
+
+        response = self.client.get("/projects/SAMPLE/builds/SAMPAPI/")
+
+        self.assertEqual(200, response.status_code)
+        self.assertContains(response, "최근 Publish 이력")
+        self.assertContains(response, "successful")
+        self.assertContains(response, "Bamboo Specs publish가 완료되었습니다.")
+
+    @patch("apps.ui.views.get_bamboo_plan_status")
+    @patch("apps.ui.views.queue_bamboo_plan_with_options")
+    def test_project_build_detail_queues_bamboo_plan(self, queue_mock, bamboo_status_mock) -> None:
+        queue_mock.return_value = {
+            "message": "Bamboo plan 실행을 요청했습니다.",
+            "fullPlanKey": "SAMPLE-SAMPAPI",
+            "detail": "stage=Build",
+        }
+        bamboo_status_mock.return_value = {
+            "configured": True,
+            "exists": True,
+            "message": "Bamboo에 등록되어 있습니다.",
+            "fullPlanKey": "SAMPLE-SAMPAPI",
+        }
+
+        response = self.client.post(
+            "/projects/SAMPLE/builds/SAMPAPI/",
+            data={
+                "form_kind": "bamboo_run",
+                "stage": "Build",
+                "custom_revision": "release/1.0",
+                "execute_all_stages": "on",
+                "variables_text": "bamboo.variable.release=true\ncustom.flag=yes",
+            },
+        )
+
+        self.assertEqual(200, response.status_code)
+        queue_mock.assert_called_once_with(
+            "SAMPAPI",
+            stage="Build",
+            execute_all_stages=True,
+            custom_revision="release/1.0",
+            variables={"bamboo.variable.release": "true", "custom.flag": "yes"},
+        )
+        self.assertContains(response, "Bamboo plan 실행을 요청했습니다.")
+        self.assertContains(response, "Custom Revision")
+        self.assertContains(response, "stage=Build")
+
+    @patch("apps.ui.views.get_bamboo_plan_status")
+    @patch("apps.ui.views.queue_bamboo_plan_with_options")
+    def test_project_build_detail_queue_operation_error_preserves_form_input(self, queue_mock, bamboo_status_mock) -> None:
+        queue_mock.side_effect = BambooOperationError("Bamboo API 연결에 실패했습니다.", "timed out")
+        bamboo_status_mock.return_value = {
+            "configured": True,
+            "exists": True,
+            "message": "Bamboo에 등록되어 있습니다.",
+            "fullPlanKey": "SAMPLE-SAMPAPI",
+        }
+
+        response = self.client.post(
+            "/projects/SAMPLE/builds/SAMPAPI/",
+            data={
+                "form_kind": "bamboo_run",
+                "stage": "Deploy",
+                "custom_revision": "release/2.0",
+                "execute_all_stages": "on",
+                "variables_text": "deploy.env=prod",
+            },
+        )
+
+        self.assertEqual(200, response.status_code)
+        self.assertContains(response, "Bamboo API 연결에 실패했습니다.")
+        self.assertContains(response, "timed out")
+        self.assertContains(response, 'value="Deploy"', html=False)
+        self.assertContains(response, 'value="release/2.0"', html=False)
+        self.assertContains(response, "deploy.env=prod")
+
+    @patch("apps.ui.views.get_bamboo_plan_status")
+    def test_project_build_detail_queue_validation_error_preserves_form_input(self, bamboo_status_mock) -> None:
+        bamboo_status_mock.return_value = {
+            "configured": True,
+            "exists": True,
+            "message": "Bamboo에 등록되어 있습니다.",
+            "fullPlanKey": "SAMPLE-SAMPAPI",
+        }
+
+        response = self.client.post(
+            "/projects/SAMPLE/builds/SAMPAPI/",
+            data={
+                "form_kind": "bamboo_run",
+                "stage": "Deploy",
+                "custom_revision": "release/2.0",
+                "variables_text": "invalid-variable-line",
+            },
+        )
+
+        self.assertEqual(200, response.status_code)
+        self.assertContains(response, "Bamboo 실행 입력값을 다시 확인해 주세요.")
+        self.assertContains(response, "변수는 `key=value` 형식으로 입력해야 합니다.", html=False)
+        self.assertContains(response, 'value="Deploy"', html=False)
+        self.assertContains(response, 'value="release/2.0"', html=False)
+        self.assertContains(response, "invalid-variable-line")
+
+    @patch("apps.ui.views.get_build_plan_export_draft")
+    @patch("apps.ui.views.get_build_plan_preview")
+    @patch("apps.ui.views.get_bamboo_plan_details")
+    def test_project_bamboo_plan_detail_renders_live_plan(self, plan_details_mock, preview_mock, export_draft_mock) -> None:
+        plan_details_mock.return_value = {
+            "projectKey": "SAMPLE",
+            "planKey": "SAMPAPI",
+            "fullPlanKey": "SAMPLE-SAMPAPI",
+            "planUrl": "https://bamboo.example.com/browse/SAMPLE-SAMPAPI",
+            "summary": {
+                "shortName": "Sample API",
+                "description": "sample plan",
+                "enabled": True,
+                "building": False,
+            },
+            "stages": [
+                {
+                    "name": "Build",
+                    "description": "build stage",
+                    "jobs": [{"key": "JOB1", "name": "Build Job"}],
+                }
+            ],
+            "branches": [{"name": "dev", "key": "SAMPLE-SAMPAPI0"}],
+            "actions": [],
+            "variables": [{"key": "sample", "value": "value"}],
+        }
+        preview_mock.return_value = {
+            "stages": [
+                {
+                    "id": "build",
+                    "name": "Build",
+                    "summary": "build summary",
+                    "jobs": [{"jobId": "JOB1", "name": "Build Job", "taskCount": 2}],
+                }
+            ],
+            "jobs": [
+                {
+                    "jobId": "JOB1",
+                    "name": "Build Job",
+                    "buildKey": "api-linux",
+                    "operatingSystem": "linux",
+                    "taskGroups": [
+                        {
+                            "stageName": "Build",
+                            "tasks": [
+                                {"name": "Checkout Source", "type": "checkout", "detail": "SAMPLE/repo"},
+                                {"name": "Run Build Script", "type": "script", "detail": "pre=- · clean=- · build=mvn package"},
+                            ],
+                        }
+                    ],
+                }
+            ],
+        }
+        export_draft_mock.return_value = {
+            "files": [
+                {
+                    "path": "drafts/SAMPAPI/jobs/api-linux/run_build.py",
+                    "label": "api-linux run_build.py",
+                    "language": "python",
+                    "content": "print('build')",
+                }
+            ]
+        }
+
+        response = self.client.get("/projects/SAMPLE/builds/SAMPAPI/bamboo/")
+
+        self.assertEqual(200, response.status_code)
+        self.assertContains(response, "실제 Bamboo Plan")
+        self.assertContains(response, "SAMPLE-SAMPAPI")
+        self.assertContains(response, "Build Job")
+        self.assertContains(response, "sample")
+        self.assertContains(response, "Published Specs 기준 Task 구성")
+        self.assertContains(response, "Task tree")
+        self.assertContains(response, "Checkout Source")
+        self.assertContains(response, "Run Build Script")
+        self.assertContains(response, "build=mvn package")
+        self.assertContains(response, "api-linux run_build.py")
+        self.assertContains(response, "Script configuration")
+        self.assertContains(response, "color:")
+
+    @patch("apps.ui.views.get_build_plan_export_draft")
+    @patch("apps.ui.views.get_build_plan_preview")
+    @patch("apps.ui.views.get_bamboo_plan_details", side_effect=BambooOperationError("Bamboo 조회 실패", "timeout"))
+    def test_project_bamboo_plan_detail_shows_error_when_live_lookup_fails(
+        self,
+        _plan_details_mock,
+        preview_mock,
+        export_draft_mock,
+    ) -> None:
+        preview_mock.return_value = {"stages": [], "jobs": []}
+        export_draft_mock.return_value = {"files": []}
+
+        response = self.client.get("/projects/SAMPLE/builds/SAMPAPI/bamboo/")
+
+        self.assertEqual(200, response.status_code)
+        self.assertContains(response, "Bamboo 조회 실패")
+
+    def test_project_bamboo_plan_detail_returns_empty_state_for_missing_project_or_build(self) -> None:
+        missing_project = self.client.get("/projects/MISSING/builds/SAMPAPI/bamboo/")
+        missing_build = self.client.get("/projects/SAMPLE/builds/MISSING/bamboo/")
+
+        self.assertEqual(200, missing_project.status_code)
+        self.assertContains(missing_project, "대상을 찾을 수 없습니다.")
+        self.assertEqual(200, missing_build.status_code)
+        self.assertContains(missing_build, "대상을 찾을 수 없습니다.")
 
     def test_project_build_detail_updates_build_plan_metadata(self) -> None:
         response = self.client.post(
@@ -850,6 +1228,7 @@ class ProjectViewTest(TestCase):
                 "form_kind": "build_plan_metadata",
                 "static_analysis_tool_version": "coverity-2024.12",
                 "coverity_project": "sample-api-coverity",
+                "repository_linkage_mode_override": "create_if_missing",
             },
         )
 
@@ -858,6 +1237,7 @@ class ProjectViewTest(TestCase):
         build_plan = BuildPlan.objects.get(plan_key="SAMPAPI")
         self.assertEqual("coverity-2024.12", build_plan.static_analysis_tool_version)
         self.assertEqual("sample-api-coverity", build_plan.coverity_project)
+        self.assertEqual("create_if_missing", build_plan.repository_linkage_mode_override)
 
     def test_project_build_detail_registers_build_info(self) -> None:
         response = self.client.post(
@@ -884,6 +1264,27 @@ class ProjectViewTest(TestCase):
         self.assertEqual("java", build_info.language)
         self.assertEqual("services/api", build_info.build_sub_path)
 
+    def test_project_build_detail_build_info_validation_error_reopens_panel(self) -> None:
+        response = self.client.post(
+            "/projects/SAMPLE/builds/SAMPAPI/",
+            data={
+                "form_kind": "build_info",
+                "build_key": "",
+                "operating_system": "linux",
+                "language": "java",
+                "compiler": "maven",
+                "build_sub_path": "services/api",
+            },
+        )
+
+        self.assertEqual(200, response.status_code)
+        self.assertContains(response, "빌드 정보 입력값을 다시 확인해 주세요.")
+        self.assertNotContains(response, 'id="build-info-panel" hidden', html=False)
+        self.assertContains(response, 'value="linux"', html=False)
+        self.assertContains(response, 'value="java"', html=False)
+        self.assertContains(response, 'value="maven"', html=False)
+        self.assertContains(response, 'value="services/api"', html=False)
+
     def test_project_build_detail_preview_reflects_registered_build_info(self) -> None:
         BuildPlanBuildInfo.objects.create(
             build_plan=BuildPlan.objects.get(plan_key="SAMPAPI"),
@@ -905,8 +1306,10 @@ class ProjectViewTest(TestCase):
         self.assertContains(response, "api-linux")
         self.assertContains(response, "mvn -B clean package")
         self.assertContains(response, "services/api")
-        self.assertContains(response, "Run Build")
-        self.assertContains(response, "Register Build Start")
+        self.assertContains(response, "Run Build Script")
+        self.assertContains(response, "Prepare Build Script")
+        self.assertContains(response, "예상 Bamboo Plan 구성")
+        self.assertContains(response, "Task tree")
         self.assertContains(response, "drafts/SAMPAPI/jobs/api-linux/coverity.yaml")
         self.assertNotContains(response, "plan-preview.json")
         self.assertContains(response, "linux")
@@ -927,7 +1330,6 @@ class ProjectViewTest(TestCase):
 
         self.assertEqual(200, response.status_code)
         self.assertContains(response, "script-linux")
-        self.assertContains(response, ">0 jobs<", html=False)
         self.assertNotContains(response, "Package Binary")
 
     def test_project_build_info_list_redirects_to_build_detail_panel(self) -> None:
@@ -968,3 +1370,113 @@ class ProjectViewTest(TestCase):
         self.assertEqual("windows", build_info.operating_system)
         self.assertEqual("java17", build_info.language)
         self.assertEqual("sample-api-release", build_info.coverity_stream)
+
+    def test_project_build_info_detail_handles_missing_targets_and_validation_error(self) -> None:
+        missing_project = self.client.get("/projects/MISSING/builds/SAMPAPI/infos/api-linux/")
+        missing_build = self.client.get("/projects/SAMPLE/builds/MISSING/infos/api-linux/")
+        missing_info = self.client.get("/projects/SAMPLE/builds/SAMPAPI/infos/missing-info/")
+
+        self.assertEqual(200, missing_project.status_code)
+        self.assertContains(missing_project, "프로젝트를 찾을 수 없습니다.")
+        self.assertEqual(200, missing_build.status_code)
+        self.assertContains(missing_build, "빌드를 찾을 수 없습니다.")
+        self.assertEqual(200, missing_info.status_code)
+        self.assertContains(missing_info, "빌드 정보를 찾을 수 없습니다.")
+
+        BuildPlanBuildInfo.objects.create(
+            build_plan=BuildPlan.objects.get(plan_key="SAMPAPI"),
+            build_key="api-linux",
+            operating_system="linux",
+            language="java",
+            compiler="maven",
+            coverity_stream="sample-api-dev",
+        )
+        invalid = self.client.post(
+            "/projects/SAMPLE/builds/SAMPAPI/infos/api-linux/",
+            data={
+                "build_key": "",
+                "operating_system": "linux",
+                "language": "java",
+            },
+        )
+        self.assertEqual(200, invalid.status_code)
+        self.assertContains(invalid, "빌드 정보 입력값을 다시 확인해 주세요.")
+
+    def test_view_helper_functions_cover_edge_cases(self) -> None:
+        suggestions = _build_registration_suggestions()
+        self.assertIn("sample-app-api", suggestions["repositorySlugs"])
+
+        payload = _build_project_payload(
+            registration_form=type(
+                "FormStub",
+                (),
+                {"cleaned_data": {
+                    "jira_project_key": "OPS",
+                    "bitbucket_project_key": "OPS",
+                    "representative_repo_slug": "ops-api",
+                }},
+            )(),
+            repository_rows=[{"repoSlug": "ops-api", "coverityProject": "ops", "coverityStream": "ops-dev"}],
+            build_rows=[{"buildName": "API", "buildType": "python", "runtimeStack": "python3.12", "buildId": "ops-api", "planKey": "OPSAPI", "repositorySlug": "ops-api"}],
+        )
+        self.assertEqual("ops-api", payload["representativeRepoSlug"])
+
+        indexed = _index_export_draft_files({"files": [{"path": "drafts/SAMPAPI/jobs/api-linux/run_build.py", "label": "run", "language": "python", "content": "print(1)"}, None, {"path": 10}]})
+        snippets = _build_task_snippets(build_key="api-linux", task_name="Run Build Script", draft_index=indexed)
+        self.assertEqual("run_build.py", snippets[0]["path"].split("/")[-1])
+        self.assertEqual("Checkout configuration", _build_task_configuration_title({"type": "checkout"}))
+        self.assertEqual("Task configuration", _build_task_configuration_title({"type": "unknown"}))
+        self.assertEqual("detail", _summarize_task_inspector_item({"detail": "detail"}, []))
+        self.assertEqual("-", _summarize_task_inspector_item({}, []))
+        self.assertIn("color:", _highlight_code_block("print('x')", "python"))
+        self.assertIn("plain", _highlight_code_block("plain", "unknown"))
+
+        inspector = _build_task_inspector(
+            preview={
+                "stages": [None, {"id": "build", "name": "Build", "summary": "", "jobs": [None, {"jobId": "JOB1"}]}],
+                "jobs": [{"jobId": "JOB1", "name": "Build Job", "buildKey": "api-linux", "operatingSystem": "linux", "taskGroups": [{"stageName": "Build", "tasks": [None, {"name": "Run Build Script", "type": "script", "detail": ""}]}]}],
+            },
+            export_draft={"files": [{"path": "drafts/SAMPAPI/jobs/api-linux/run_build.py", "label": "run_build.py", "language": "python", "content": "print(1)"}]},
+        )
+        self.assertEqual("build-JOB1-task-2", inspector["selectedTaskId"])
+        self.assertEqual("run_build.py", inspector["tasks"][0]["fields"][4]["value"])
+
+        variables = _parse_bamboo_variables_text("\nfoo = bar\nbaz= qux\n")
+        self.assertEqual({"foo": "bar", "baz": "qux"}, variables)
+
+    def test_execution_group_and_build_info_serialization_helpers(self) -> None:
+        build_info = BuildPlanBuildInfo.objects.create(
+            build_plan=BuildPlan.objects.get(plan_key="SAMPAPI"),
+            build_key="api-linux",
+            operating_system="linux",
+            language="java",
+            compiler="maven",
+            coverity_stream="sample-api-dev",
+        )
+        serialized = _serialize_build_info(build_info)
+        self.assertEqual("api-linux", serialized["buildKey"])
+        self.assertEqual(0, serialized["executionCount"])
+
+        with patch(
+            "apps.ui.views.list_executions_by_plan_key",
+            return_value=[
+                {
+                    "buildKey": "api-linux",
+                    "resultStatus": "successful",
+                    "version": "v1.0.0",
+                    "staticAnalysisResults": [{"toolName": "coverity"}, {"toolName": "semgrep"}],
+                },
+                {
+                    "buildKey": "",
+                    "resultStatus": "",
+                    "version": "v0.1.0",
+                    "staticAnalysisResults": [],
+                },
+            ],
+        ):
+            groups = _list_execution_groups("SAMPAPI")
+
+        self.assertEqual(2, len(groups))
+        primary = next(group for group in groups if group["buildKey"] == "api-linux")
+        self.assertEqual(["coverity", "semgrep"], primary["toolNames"])
+        self.assertEqual("successful", primary["latestResult"])

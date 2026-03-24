@@ -2,14 +2,18 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import os
 from tempfile import TemporaryDirectory
 from textwrap import dedent
 from unittest.mock import Mock, patch
+from urllib import error
 
 from django.core.management import CommandError, call_command
 from django.test import SimpleTestCase, TestCase
+from django.utils import timezone
 
 from apps.buildmeta.models import (
+    BambooPublishExecution,
     BuildDefinitionHistory,
     BuildExecution,
     BuildPlan,
@@ -23,23 +27,59 @@ from apps.buildmeta.models import (
     SystemSetting,
 )
 from apps.buildmeta.selectors.definitions import (
+    _analysis_stage_job_name,
+    _build_definition_payload_from_registration,
+    _build_stage_job_name,
+    _default_custom_tool_commands,
+    _default_runtime_commands,
+    _default_runtime_env_vars,
+    _normalize_build_sub_path,
+    _normalize_operating_system,
+    _repository_linkage_mode,
+    _resolve_language_and_compiler,
+    _resolve_primary_build_info,
+    _summarize_build_script,
     get_active_definition_by_plan_key,
+    get_active_definitions_by_plan_key,
     get_build_plan_export_draft,
     get_build_plan_preview,
+    get_prepare_context_by_plan_key,
 )
 from apps.buildmeta.services import (
     build_git_clone_url,
     create_project,
+    get_bamboo_plan_details,
+    get_bamboo_plan_status,
+    get_bamboo_system_settings,
     get_coverity_system_settings,
     get_system_setting,
     initialize_specs_draft_data,
     initialize_specs_draft_for_plan,
     load_definition_import_records,
+    publish_bamboo_specs,
     set_system_setting,
     sync_definition_records,
     update_project,
 )
+from apps.buildmeta.services.bamboo import (
+    BambooClientConfig,
+    BambooOperationError,
+    _BambooClient,
+    _build_plan_identity,
+    _extract_latest_result,
+    _extract_named_items,
+    _extract_stage_jobs,
+    _extract_stages,
+    _extract_variables,
+    _format_queue_detail,
+    _normalize_bamboo_token,
+    _plan_browse_url,
+    _resolve_bamboo_project_key,
+    get_bamboo_client_config,
+    queue_bamboo_plan,
+)
 from apps.buildmeta.services.executions import finish_execution, record_static_analysis_results, start_execution
+from apps.buildmeta.services.system_settings import DEFAULT_BAMBOO_TOKEN_PATH, get_repository_linkage_mode
 from src.bamboo_spec_generator.parser import parse_build_definition_payload
 from src.bamboo_spec_generator.validator import ValidationError, is_no_build_language, validate_build_definitions
 
@@ -244,6 +284,502 @@ class ExecutionServiceTest(TestCase):
         self.assertEqual("api-windows", second_payload["buildKey"])
 
 
+class BambooPublishServiceTest(TestCase):
+    def setUp(self) -> None:
+        self.project = Project.objects.create(
+            jira_project_key="SAMPLE",
+            bitbucket_project_key="SAMPLE",
+            representative_repo_slug="sample-app-api",
+        )
+        self.repository = ProjectRepository.objects.create(
+            project=self.project,
+            repo_slug="sample-app-api",
+            coverity_project="sample-app-api",
+            coverity_stream="sample-app-api-dev",
+            is_representative=True,
+        )
+        self.plan = BuildPlan.objects.create(build_id="sample-app-api", plan_key="SAMPAPI")
+        ProjectBuild.objects.create(
+            project=self.project,
+            repository=self.repository,
+            build_plan=self.plan,
+            build_name="Sample API",
+            build_type="maven",
+            runtime_stack="java",
+        )
+        BuildPlanBuildInfo.objects.create(
+            build_plan=self.plan,
+            build_key="api-linux",
+            operating_system="linux",
+            pre_process="mvn -B dependency:go-offline",
+            build_command="mvn -B clean package",
+            language="java",
+            compiler="maven",
+            coverity_stream="sample-app-api-dev",
+            build_sub_path="services/sample-app-api",
+        )
+        SystemSetting.objects.create(
+            key=SystemSetting.KEY_BAMBOO_SERVER_URL,
+            value="https://bamboo.example.com",
+        )
+
+    @patch.dict("os.environ", {"BAMBOO_SERVER_TOKEN": "token"}, clear=False)
+    @patch("apps.buildmeta.services.bamboo.write_specs_project")
+    @patch("apps.buildmeta.services.bamboo.subprocess.run")
+    def test_publish_bamboo_specs_uses_all_registered_build_infos(
+        self,
+        subprocess_run_mock,
+        write_specs_project_mock,
+    ) -> None:
+        BuildPlanBuildInfo.objects.create(
+            build_plan=self.plan,
+            build_key="api-windows",
+            operating_system="windows",
+            build_command="npm build",
+            clean_command="npm clean",
+            language="javascript",
+            compiler="node.js",
+            coverity_stream="sample-app-api-win",
+            build_sub_path="web/sample-app-api",
+        )
+        subprocess_run_mock.return_value = Mock(returncode=0, stdout="published", stderr="")
+
+        publish_bamboo_specs("SAMPAPI")
+
+        builds = write_specs_project_mock.call_args.args[1]
+        self.assertEqual(["api-linux", "api-windows"], [build.build_key for build in builds])
+
+    @patch.dict("os.environ", {"BAMBOO_SERVER_TOKEN": "token"}, clear=False)
+    @patch("apps.buildmeta.services.bamboo.subprocess.run")
+    def test_publish_bamboo_specs_records_success_history(self, subprocess_run_mock) -> None:
+        subprocess_run_mock.return_value = Mock(returncode=0, stdout="published", stderr="")
+
+        payload = publish_bamboo_specs("SAMPAPI")
+
+        self.assertTrue(payload["success"])
+        history = BambooPublishExecution.objects.get(build_plan=self.plan)
+        self.assertEqual(BambooPublishExecution.STATUS_SUCCESS, history.status)
+        self.assertEqual(0, history.return_code)
+        self.assertIn("published", history.output)
+        self.assertIsNotNone(history.snapshot_preview_json)
+        self.assertIsNotNone(history.snapshot_export_draft_json)
+
+    @patch.dict("os.environ", {"BAMBOO_SERVER_TOKEN": "token"}, clear=False)
+    @patch("apps.buildmeta.services.bamboo.subprocess.run")
+    def test_publish_bamboo_specs_records_failure_history(self, subprocess_run_mock) -> None:
+        subprocess_run_mock.return_value = Mock(returncode=1, stdout="", stderr="publish failed")
+
+        payload = publish_bamboo_specs("SAMPAPI")
+
+        self.assertFalse(payload["success"])
+        history = BambooPublishExecution.objects.get(build_plan=self.plan)
+        self.assertEqual(BambooPublishExecution.STATUS_FAILED, history.status)
+        self.assertEqual(1, history.return_code)
+        self.assertIn("publish failed", history.output)
+
+    @patch.dict("os.environ", {"BAMBOO_SERVER_TOKEN": "token"}, clear=False)
+    @patch("apps.buildmeta.services.bamboo.request.urlopen")
+    def test_queue_bamboo_plan_with_options_sends_query_parameters(self, urlopen_mock) -> None:
+        current_year = timezone.now().year
+        response_mock = Mock()
+        response_mock.read.return_value = json.dumps({"buildResultKey": f"Y{current_year}-SAMPAPI-101"}).encode("utf-8")
+        urlopen_mock.return_value.__enter__.return_value = response_mock
+
+        from apps.buildmeta.services.bamboo import queue_bamboo_plan_with_options
+
+        payload = queue_bamboo_plan_with_options(
+            "SAMPAPI",
+            stage="Build",
+            execute_all_stages=True,
+            custom_revision="release/1.0",
+            variables={"bamboo.variable.release": "true", "custom.flag": "yes"},
+        )
+
+        request_obj = urlopen_mock.call_args.args[0]
+        self.assertIn(f"/rest/api/latest/queue/Y{current_year}-SAMPAPI?", request_obj.full_url)
+        self.assertIn("stage=Build", request_obj.full_url)
+        self.assertIn("executeAllStages=true", request_obj.full_url)
+        self.assertIn("customRevision=release%2F1.0", request_obj.full_url)
+        self.assertIn("bamboo.variable.release=true", request_obj.full_url)
+        self.assertIn("custom.flag=yes", request_obj.full_url)
+        self.assertEqual("Build", payload["stage"])
+        self.assertTrue(payload["executeAllStages"])
+
+    @patch.dict(os.environ, {}, clear=False)
+    @patch("apps.buildmeta.services.bamboo.request.urlopen")
+    def test_get_bamboo_plan_status_uses_year_project_key_and_normalized_file_token(self, urlopen_mock) -> None:
+        current_year = timezone.now().year
+        token_path = DEFAULT_BAMBOO_TOKEN_PATH
+        original = token_path.read_text(encoding="utf-8") if token_path.exists() else None
+        token_path.parent.mkdir(parents=True, exist_ok=True)
+        token_path.write_text("token=sample-token\n", encoding="utf-8")
+        try:
+            os.environ.pop("BAMBOO_SERVER_TOKEN", None)
+            response_mock = Mock()
+            response_mock.read.return_value = json.dumps(
+                {
+                    "enabled": True,
+                    "isSuspended": False,
+                    "isBuilding": False,
+                    "description": "sample plan",
+                    "shortName": "Sample API",
+                }
+            ).encode("utf-8")
+            latest_result_mock = Mock()
+            latest_result_mock.read.return_value = json.dumps({"results": {"result": []}}).encode("utf-8")
+            urlopen_mock.side_effect = [
+                Mock(__enter__=Mock(return_value=response_mock), __exit__=Mock(return_value=False)),
+                Mock(__enter__=Mock(return_value=latest_result_mock), __exit__=Mock(return_value=False)),
+            ]
+
+            payload = get_bamboo_plan_status("SAMPAPI")
+        finally:
+            if original is None:
+                token_path.unlink(missing_ok=True)
+            else:
+                token_path.write_text(original, encoding="utf-8")
+
+        plan_request = urlopen_mock.call_args_list[0].args[0]
+        self.assertIn(f"/rest/api/latest/plan/Y{current_year}/SAMPAPI", plan_request.full_url)
+        self.assertEqual("Bearer sample-token", plan_request.headers["Authorization"])
+        self.assertTrue(payload["exists"])
+        self.assertEqual(f"Y{current_year}", payload["projectKey"])
+        self.assertEqual(f"Y{current_year}-SAMPAPI", payload["fullPlanKey"])
+
+    @patch.dict("os.environ", {"BAMBOO_SERVER_TOKEN": "token"}, clear=False)
+    @patch("apps.buildmeta.services.bamboo.request.urlopen")
+    def test_get_bamboo_plan_status_accepts_direct_latest_result_shape(self, urlopen_mock) -> None:
+        plan_response = Mock()
+        plan_response.read.return_value = json.dumps(
+            {
+                "enabled": True,
+                "isSuspended": False,
+                "isBuilding": False,
+                "description": "sample plan",
+                "shortName": "Sample API",
+            }
+        ).encode("utf-8")
+        latest_result_response = Mock()
+        latest_result_response.read.return_value = json.dumps(
+            {
+                "buildState": "Successful",
+                "buildNumber": 101,
+                "planResultKey": "Y2026-SAMPAPI-101",
+                "link": "https://bamboo.example.com/browse/Y2026-SAMPAPI-101",
+            }
+        ).encode("utf-8")
+        urlopen_mock.side_effect = [
+            Mock(__enter__=Mock(return_value=plan_response), __exit__=Mock(return_value=False)),
+            Mock(__enter__=Mock(return_value=latest_result_response), __exit__=Mock(return_value=False)),
+        ]
+
+        payload = get_bamboo_plan_status("SAMPAPI")
+
+        self.assertEqual("Successful", payload["latestResultState"])
+        self.assertEqual("101", payload["latestBuildNumber"])
+        self.assertEqual("Y2026-SAMPAPI-101", payload["latestResultKey"])
+        self.assertEqual("https://bamboo.example.com/browse/Y2026-SAMPAPI-101", payload["latestResultUrl"])
+
+    @patch.dict("os.environ", {"BAMBOO_SERVER_TOKEN": "token"}, clear=False)
+    @patch("apps.buildmeta.services.bamboo.request.urlopen")
+    def test_get_bamboo_plan_details_accepts_legacy_wrapped_shapes(self, urlopen_mock) -> None:
+        response_mock = Mock()
+        response_mock.read.return_value = json.dumps(
+            {
+                "shortName": "Sample API",
+                "description": "sample plan",
+                "enabled": True,
+                "isSuspended": False,
+                "isBuilding": False,
+                "stages": {
+                    "stage": {
+                        "name": "Build",
+                        "description": "build stage",
+                        "plans": {
+                            "plan": {
+                                "key": "JOB1",
+                                "name": "Build Job",
+                            }
+                        },
+                    }
+                },
+                "branches": {
+                    "name": "release",
+                    "key": "Y2026-SAMPAPI0",
+                },
+                "actions": {
+                    "action": {
+                        "name": "Cleanup",
+                        "key": "cleanup",
+                    }
+                },
+                "variableContext": {
+                    "variables": {
+                        "variable": [
+                            {"key": "sample", "value": "value"},
+                            {"name": "timeout", "valueAsString": 30},
+                        ]
+                    }
+                },
+            }
+        ).encode("utf-8")
+        urlopen_mock.return_value.__enter__.return_value = response_mock
+
+        payload = get_bamboo_plan_details("SAMPAPI")
+
+        self.assertEqual("Sample API", payload["summary"]["shortName"])
+        self.assertEqual(
+            [{"name": "Build", "description": "build stage", "jobs": [{"key": "JOB1", "name": "Build Job"}]}],
+            payload["stages"],
+        )
+        self.assertEqual([{"name": "release", "key": "Y2026-SAMPAPI0"}], payload["branches"])
+        self.assertEqual([{"name": "Cleanup", "key": "cleanup"}], payload["actions"])
+        self.assertEqual(
+            [{"key": "sample", "value": "value"}, {"key": "timeout", "value": "30"}],
+            payload["variables"],
+        )
+
+    @patch.dict(os.environ, {}, clear=False)
+    def test_get_bamboo_system_settings_reads_managed_token_file(self) -> None:
+        token_path = DEFAULT_BAMBOO_TOKEN_PATH
+        original = token_path.read_text(encoding="utf-8") if token_path.exists() else None
+        token_path.parent.mkdir(parents=True, exist_ok=True)
+        token_path.write_text("token=sample-token\n", encoding="utf-8")
+        try:
+            os.environ.pop("BAMBOO_SERVER_TOKEN", None)
+            settings_payload = get_bamboo_system_settings()
+        finally:
+            if original is None:
+                token_path.unlink(missing_ok=True)
+            else:
+                token_path.write_text(original, encoding="utf-8")
+
+        self.assertTrue(settings_payload["tokenConfigured"])
+        self.assertEqual("file", settings_payload["tokenSource"])
+
+    def test_get_bamboo_system_settings_prefers_environment_token(self) -> None:
+        with patch.dict(os.environ, {"BAMBOO_SERVER_TOKEN": "env-token"}, clear=False):
+            settings_payload = get_bamboo_system_settings()
+
+        self.assertTrue(settings_payload["tokenConfigured"])
+        self.assertEqual("env", settings_payload["tokenSource"])
+
+    def test_get_bamboo_client_config_requires_server_url(self) -> None:
+        SystemSetting.objects.filter(key=SystemSetting.KEY_BAMBOO_SERVER_URL).delete()
+        with patch.dict(os.environ, {"BAMBOO_SERVER_TOKEN": "token"}, clear=False):
+            with self.assertRaisesMessage(BambooOperationError, "Bamboo 서버 URL이 설정되지 않았습니다."):
+                get_bamboo_client_config()
+
+    def test_get_bamboo_client_config_requires_token(self) -> None:
+        set_system_setting(key=SystemSetting.KEY_BAMBOO_SERVER_URL, value="https://bamboo.example.com")
+        token_path = DEFAULT_BAMBOO_TOKEN_PATH
+        original = token_path.read_text(encoding="utf-8") if token_path.exists() else None
+        token_path.unlink(missing_ok=True)
+        try:
+            with patch.dict(os.environ, {"BAMBOO_SERVER_TOKEN": ""}, clear=False):
+                with self.assertRaisesMessage(BambooOperationError, "Bamboo 토큰이 설정되지 않았습니다."):
+                    get_bamboo_client_config()
+        finally:
+            if original is not None:
+                token_path.parent.mkdir(parents=True, exist_ok=True)
+                token_path.write_text(original, encoding="utf-8")
+
+    @patch.dict("os.environ", {"BAMBOO_SERVER_TOKEN": "token"}, clear=False)
+    def test_get_bamboo_plan_status_returns_missing_plan_error(self) -> None:
+        payload = get_bamboo_plan_status("MISSING")
+
+        self.assertEqual({"configured": False, "exists": False, "error": "Build plan not found."}, payload)
+
+    @patch.dict("os.environ", {"BAMBOO_SERVER_TOKEN": "token"}, clear=False)
+    def test_get_bamboo_plan_status_returns_configuration_message_when_url_missing(self) -> None:
+        SystemSetting.objects.filter(key=SystemSetting.KEY_BAMBOO_SERVER_URL).delete()
+
+        payload = get_bamboo_plan_status("SAMPAPI")
+
+        self.assertFalse(payload["configured"])
+        self.assertEqual("Bamboo 서버 URL이 아직 설정되지 않았습니다.", payload["message"])
+
+    @patch.dict("os.environ", {"BAMBOO_SERVER_TOKEN": ""}, clear=False)
+    def test_get_bamboo_plan_status_returns_configuration_message_when_token_missing(self) -> None:
+        payload = get_bamboo_plan_status("SAMPAPI")
+
+        self.assertFalse(payload["configured"])
+        self.assertEqual("Bamboo 서버 토큰이 아직 설정되지 않았습니다.", payload["message"])
+
+    @patch.dict("os.environ", {"BAMBOO_SERVER_TOKEN": "token"}, clear=False)
+    @patch("apps.buildmeta.services.bamboo.request.urlopen")
+    def test_get_bamboo_plan_status_returns_plan_url_when_plan_not_found(self, urlopen_mock) -> None:
+        http_error = error.HTTPError(
+            url="https://bamboo.example.com/rest/api/latest/plan/Y2026/SAMPAPI",
+            code=404,
+            msg="Not Found",
+            hdrs=None,
+            fp=None,
+        )
+        urlopen_mock.side_effect = http_error
+
+        payload = get_bamboo_plan_status("SAMPAPI")
+
+        self.assertFalse(payload["exists"])
+        self.assertEqual("Bamboo에 아직 등록되지 않았습니다.", payload["message"])
+        self.assertTrue(payload["planUrl"].endswith(f"/browse/{payload['fullPlanKey']}"))
+
+    @patch.dict("os.environ", {"BAMBOO_SERVER_TOKEN": "token"}, clear=False)
+    @patch("apps.buildmeta.services.bamboo.subprocess.run", side_effect=OSError("mvn missing"))
+    def test_publish_bamboo_specs_raises_and_records_os_error(self, _subprocess_run_mock) -> None:
+        with self.assertRaisesMessage(BambooOperationError, "Maven publish 실행에 실패했습니다."):
+            publish_bamboo_specs("SAMPAPI")
+
+        history = BambooPublishExecution.objects.get(build_plan=self.plan)
+        self.assertEqual(BambooPublishExecution.STATUS_FAILED, history.status)
+        self.assertIn("mvn missing", history.output)
+
+    @patch.dict("os.environ", {"BAMBOO_SERVER_TOKEN": "token"}, clear=False)
+    def test_publish_bamboo_specs_rejects_missing_definition(self) -> None:
+        with patch("apps.buildmeta.selectors.definitions.get_active_definitions_by_plan_key", return_value=[]):
+            with self.assertRaisesMessage(BambooOperationError, "활성 Bamboo 정의를 찾지 못했습니다."):
+                publish_bamboo_specs("SAMPAPI")
+
+        history = BambooPublishExecution.objects.get(build_plan=self.plan)
+        self.assertEqual(BambooPublishExecution.STATUS_FAILED, history.status)
+        self.assertEqual("활성 Bamboo 정의를 찾지 못했습니다.", history.message)
+
+    def test_queue_bamboo_plan_rejects_missing_plan(self) -> None:
+        with self.assertRaisesMessage(BambooOperationError, "Build plan을 찾지 못했습니다."):
+            queue_bamboo_plan("MISSING")
+
+
+class BambooHelperTest(TestCase):
+    def test_format_queue_detail_renders_defaults_and_sorted_variables(self) -> None:
+        payload = _format_queue_detail(
+            stage="",
+            execute_all_stages=False,
+            custom_revision="",
+            variables={"z.flag": "1", "a.flag": "2"},
+        )
+
+        self.assertEqual(
+            "stage=-\nexecuteAllStages=false\ncustomRevision=-\nvariables=\n  a.flag=2\n  z.flag=1",
+            payload,
+        )
+
+    def test_normalize_bamboo_token_strips_prefix(self) -> None:
+        self.assertEqual("sample-token", _normalize_bamboo_token("token=sample-token\n"))
+        self.assertEqual("plain-token", _normalize_bamboo_token(" plain-token "))
+
+    def test_extract_latest_result_supports_direct_payload_and_string_link(self) -> None:
+        payload = _extract_latest_result(
+            {
+                "state": "Successful",
+                "number": 42,
+                "key": "Y2026-SAMPAPI-42",
+                "link": "https://bamboo.example.com/browse/Y2026-SAMPAPI-42",
+            }
+        )
+
+        self.assertEqual("Successful", payload["state"])
+        self.assertEqual("42", payload["number"])
+        self.assertEqual("Y2026-SAMPAPI-42", payload["key"])
+        self.assertTrue(payload["link"].endswith("Y2026-SAMPAPI-42"))
+
+    def test_extract_stages_and_jobs_support_list_and_plan_fallback(self) -> None:
+        stages = _extract_stages(
+            {
+                "stages": [
+                    {"name": "Build", "description": "build", "jobs": [{"key": "JOB1", "name": "Build Job"}]},
+                    {"name": "Analysis", "plans": {"key": "JOB2", "name": "Analysis Job"}},
+                ]
+            }
+        )
+
+        self.assertEqual(
+            [
+                {"name": "Build", "description": "build", "jobs": [{"key": "JOB1", "name": "Build Job"}]},
+                {"name": "Analysis", "description": "", "jobs": [{"key": "JOB2", "name": "Analysis Job"}]},
+            ],
+            stages,
+        )
+
+    def test_extract_stage_jobs_and_named_items_handle_invalid_containers(self) -> None:
+        self.assertEqual([], _extract_stage_jobs("not-a-dict"))  # type: ignore[arg-type]
+        self.assertEqual([{"name": "cleanup", "key": "clean"}], _extract_named_items({"name": "cleanup", "key": "clean"}, "action"))
+        self.assertEqual([{"name": "dev"}], _extract_named_items([{"name": "dev"}], "branch"))
+
+    def test_extract_variables_handles_nested_list_and_flat_mapping(self) -> None:
+        nested = _extract_variables({"variables": [{"name": "timeout", "valueAsString": 30}, {"key": "enabled", "value": True}]})
+        flat = _extract_variables({"sample": "value", "count": 1, "none": None, "nested": {"skip": True}})
+
+        self.assertEqual([{"key": "enabled", "value": "True"}, {"key": "timeout", "value": "30"}], nested)
+        self.assertEqual(
+            [{"key": "count", "value": "1"}, {"key": "none", "value": ""}, {"key": "sample", "value": "value"}],
+            flat,
+        )
+
+    def test_extract_variables_returns_empty_for_declared_but_invalid_shape(self) -> None:
+        self.assertEqual([], _extract_variables({"variables": "invalid"}))
+
+    def test_bamboo_client_request_json_handles_empty_http_error_and_url_error(self) -> None:
+        client = _BambooClient(BambooClientConfig(server_url="https://bamboo.example.com", token="token"))
+
+        http_error = error.HTTPError(
+            url="https://bamboo.example.com/rest/api/latest/queue/SAMPLE",
+            code=500,
+            msg="Server Error",
+            hdrs=None,
+            fp=None,
+        )
+        http_error.read = lambda: b""
+        with patch("apps.buildmeta.services.bamboo.request.urlopen", side_effect=http_error):
+            with self.assertRaisesMessage(BambooOperationError, "Bamboo API 요청이 실패했습니다."):
+                client._request_json("POST", "/rest/api/latest/queue/SAMPLE")
+
+        with patch("apps.buildmeta.services.bamboo.request.urlopen", side_effect=error.URLError("timeout")):
+            with self.assertRaisesMessage(BambooOperationError, "Bamboo API 연결에 실패했습니다."):
+                client._request_json("GET", "/rest/api/latest/plan/SAMPLE/API")
+
+    def test_bamboo_client_request_json_returns_default_for_blank_body(self) -> None:
+        client = _BambooClient(BambooClientConfig(server_url="https://bamboo.example.com", token="token"))
+        response_mock = Mock()
+        response_mock.read.return_value = b"   "
+        with patch("apps.buildmeta.services.bamboo.request.urlopen", return_value=Mock(__enter__=Mock(return_value=response_mock), __exit__=Mock(return_value=False))):
+            payload = client._request_json("GET", "/rest/api/latest/plan/SAMPLE/API", default={"ok": True})
+
+        self.assertEqual({"ok": True}, payload)
+
+    def test_build_plan_identity_uses_definition_year_and_browse_url(self) -> None:
+        project = Project.objects.create(
+            jira_project_key="SAMPLE",
+            bitbucket_project_key="SAMPLE",
+            representative_repo_slug="sample",
+        )
+        plan = BuildPlan.objects.create(build_id="sample", plan_key="SAMPAPI")
+        ProjectBuild.objects.create(
+            project=project,
+            build_plan=plan,
+            repository=None,
+            build_name="Sample",
+            build_type="maven",
+            runtime_stack="java",
+        )
+        BuildPlanDefinition.objects.create(
+            build_plan=plan,
+            project=project,
+            year="2024",
+            source_kind=BuildPlanDefinition.SOURCE_KIND_JSON,
+            definition_json={"buildId": "sample", "planKey": "SAMPAPI"},
+            definition_hash="sha256:sample",
+            is_active=True,
+        )
+
+        identity = _build_plan_identity(BuildPlan.objects.get(pk=plan.pk))
+        with patch("apps.buildmeta.services.bamboo.get_bamboo_system_settings", return_value={"serverUrl": "https://bamboo.example.com"}):
+            browse_url = _plan_browse_url(identity)
+
+        self.assertEqual("Y2024", _resolve_bamboo_project_key(BuildPlan.objects.get(pk=plan.pk)))
+        self.assertEqual("Y2024-SAMPAPI", identity["fullPlanKey"])
+        self.assertEqual("https://bamboo.example.com/browse/Y2024-SAMPAPI", browse_url)
+
+
 class DefinitionSelectorTest(TestCase):
     def setUp(self) -> None:
         self.project = Project.objects.create(
@@ -288,6 +824,16 @@ class DefinitionSelectorTest(TestCase):
         self.assertEqual("BITBUCKET_SERVER", payload["definition"]["repository"]["applicationLink"])
         self.assertEqual("services/sample-app-api", payload["definition"]["build"]["subPath"])
 
+    def test_active_definition_returns_none_or_empty_for_missing_plan_and_missing_project_build(self) -> None:
+        self.assertIsNone(get_active_definition_by_plan_key("MISSING"))
+        self.assertEqual([], get_active_definitions_by_plan_key("MISSING"))
+
+        orphan_plan = BuildPlan.objects.create(build_id="orphan", plan_key="ORPHAN")
+        self.assertIsNone(get_active_definition_by_plan_key("ORPHAN"))
+        self.assertEqual([], get_active_definitions_by_plan_key("ORPHAN"))
+
+        self.assertIsNone(orphan_plan.project_build if hasattr(orphan_plan, "project_build") else None)
+
     def test_active_definition_uses_create_if_missing_when_git_clone_template_exists(self) -> None:
         repository = ProjectRepository.objects.create(
             project=self.project,
@@ -319,15 +865,83 @@ class DefinitionSelectorTest(TestCase):
             key=SystemSetting.KEY_REPOSITORY_LINKAGE_MODE,
             value="create_if_missing",
         )
+        set_system_setting(
+            key=SystemSetting.KEY_GIT_CLONE_URL_TEMPLATE,
+            value="https://git.example.com/scm/{project_key_lower}/{repo_slug}.git",
+        )
 
         payload = get_active_definition_by_plan_key("SAMPAPI")
 
         assert payload is not None
         self.assertEqual("create_if_missing", payload["definition"]["repository"]["linkageMode"])
-        self.assertEqual(
-            "https://git.example.com/scm/sample/sample-app-api.git",
-            payload["definition"]["repository"]["cloneUrl"],
+
+    def test_active_definition_prefers_plan_repository_linkage_override(self) -> None:
+        repository = ProjectRepository.objects.create(
+            project=self.project,
+            repo_slug="sample-app-api",
+            coverity_project="sample-app-api",
+            coverity_stream="sample-app-api-dev",
+            is_representative=True,
         )
+        self.plan.repository_linkage_mode_override = "create_if_missing"
+        self.plan.save(update_fields=["repository_linkage_mode_override", "updated_at"])
+        ProjectBuild.objects.create(
+            project=self.project,
+            repository=repository,
+            build_plan=self.plan,
+            build_name="Sample API",
+            build_type="maven",
+            runtime_stack="java",
+        )
+        BuildPlanBuildInfo.objects.create(
+            build_plan=self.plan,
+            build_key="api-linux",
+            operating_system="linux",
+            build_command="mvn -B clean package",
+            language="java",
+            compiler="maven",
+        )
+
+        payload = get_active_definition_by_plan_key("SAMPAPI")
+
+        assert payload is not None
+        self.assertEqual("create_if_missing", payload["definition"]["repository"]["linkageMode"])
+
+    def test_active_definition_plan_override_beats_system_default(self) -> None:
+        repository = ProjectRepository.objects.create(
+            project=self.project,
+            repo_slug="sample-app-api",
+            coverity_project="sample-app-api",
+            coverity_stream="sample-app-api-dev",
+            is_representative=True,
+        )
+        self.plan.repository_linkage_mode_override = "linked"
+        self.plan.save(update_fields=["repository_linkage_mode_override", "updated_at"])
+        ProjectBuild.objects.create(
+            project=self.project,
+            repository=repository,
+            build_plan=self.plan,
+            build_name="Sample API",
+            build_type="maven",
+            runtime_stack="java",
+        )
+        BuildPlanBuildInfo.objects.create(
+            build_plan=self.plan,
+            build_key="api-linux",
+            operating_system="linux",
+            build_command="mvn -B clean package",
+            language="java",
+            compiler="maven",
+        )
+        set_system_setting(
+            key=SystemSetting.KEY_REPOSITORY_LINKAGE_MODE,
+            value="create_if_missing",
+        )
+
+        payload = get_active_definition_by_plan_key("SAMPAPI")
+
+        assert payload is not None
+        self.assertEqual("linked", payload["definition"]["repository"]["linkageMode"])
 
     def test_active_definition_keeps_linked_mode_when_only_git_clone_template_exists(self) -> None:
         repository = ProjectRepository.objects.create(
@@ -361,6 +975,116 @@ class DefinitionSelectorTest(TestCase):
 
         assert payload is not None
         self.assertEqual("linked", payload["definition"]["repository"]["linkageMode"])
+
+    def test_active_definition_infers_language_and_compiler_from_project_metadata_when_build_info_is_blank(self) -> None:
+        repository = ProjectRepository.objects.create(
+            project=self.project,
+            repo_slug="sample-app-api",
+            coverity_project="sample-app-api",
+            coverity_stream="sample-app-api-dev",
+            is_representative=True,
+        )
+        ProjectBuild.objects.create(
+            project=self.project,
+            repository=repository,
+            build_plan=self.plan,
+            build_name="Sample API",
+            build_type="maven",
+            runtime_stack="java",
+        )
+        BuildPlanBuildInfo.objects.create(
+            build_plan=self.plan,
+            build_key="api-linux",
+            operating_system="linux",
+            language="",
+            compiler="",
+            build_command="mvn -B clean package",
+            build_sub_path="services/sample-app-api",
+        )
+
+        payload = get_active_definition_by_plan_key("SAMPAPI")
+
+        self.assertIsNotNone(payload)
+        assert payload is not None
+        self.assertEqual("java", payload["definition"]["language"])
+        self.assertEqual("maven", payload["definition"]["compiler"])
+        self.assertEqual(["mvn", "coverity"], payload["definition"]["build"]["runtimeRequirements"]["commands"])
+        self.assertEqual(["JAVA_HOME"], payload["definition"]["build"]["runtimeRequirements"]["envVars"])
+
+    def test_prepare_context_falls_back_to_representative_repository_when_project_build_repository_is_missing(self) -> None:
+        ProjectRepository.objects.create(
+            project=self.project,
+            repo_slug="sample-app-api",
+            coverity_project="sample-app-api",
+            coverity_stream="sample-app-api-dev",
+            is_representative=True,
+        )
+        ProjectRepository.objects.create(
+            project=self.project,
+            repo_slug="sample-app-web",
+            coverity_project="sample-app-web",
+            coverity_stream="sample-app-web-dev",
+            is_representative=False,
+        )
+        ProjectBuild.objects.create(
+            project=self.project,
+            repository=None,
+            build_plan=self.plan,
+            build_name="Sample API",
+            build_type="maven",
+            runtime_stack="java",
+        )
+        BuildPlanBuildInfo.objects.create(
+            build_plan=self.plan,
+            build_key="api-linux",
+            operating_system="linux",
+            language="java",
+            compiler="maven",
+            build_sub_path="services/sample-app-api",
+        )
+
+        payload = get_prepare_context_by_plan_key("SAMPAPI")
+
+        self.assertIsNotNone(payload)
+        assert payload is not None
+        self.assertEqual("sample-app-api", payload["currentRepository"]["repoSlug"])
+        self.assertEqual("sample-app-api", payload["variables"]["BITBUCKET_REPO_SLUG"])
+
+    def test_prepare_context_returns_none_for_missing_plan_and_missing_project_build(self) -> None:
+        self.assertIsNone(get_prepare_context_by_plan_key("MISSING"))
+
+        BuildPlan.objects.create(build_id="orphan", plan_key="ORPHAN")
+        self.assertIsNone(get_prepare_context_by_plan_key("ORPHAN"))
+
+    def test_prepare_context_falls_back_to_first_repository_when_no_representative_exists(self) -> None:
+        first_repository = ProjectRepository.objects.create(
+            project=self.project,
+            repo_slug="sample-app-api",
+            coverity_project="sample-app-api",
+            coverity_stream="sample-app-api-dev",
+            is_representative=False,
+        )
+        ProjectRepository.objects.create(
+            project=self.project,
+            repo_slug="sample-app-web",
+            coverity_project="sample-app-web",
+            coverity_stream="sample-app-web-dev",
+            is_representative=False,
+        )
+        ProjectBuild.objects.create(
+            project=self.project,
+            repository=None,
+            build_plan=self.plan,
+            build_name="Sample API",
+            build_type="maven",
+            runtime_stack="java",
+        )
+
+        payload = get_prepare_context_by_plan_key("SAMPAPI")
+
+        assert payload is not None
+        self.assertEqual(first_repository.repo_slug, payload["currentRepository"]["repoSlug"])
+        self.assertEqual(first_repository.coverity_stream, payload["currentRepository"]["coverityStream"])
 
 
     def test_build_plan_preview_maps_build_infos_to_jobs(self) -> None:
@@ -407,7 +1131,7 @@ class DefinitionSelectorTest(TestCase):
         self.assertIsNotNone(payload)
         assert payload is not None
         self.assertEqual("SAMPAPI", payload["plan"]["planKey"])
-        self.assertEqual(4, len(payload["jobs"]))
+        self.assertEqual(6, len(payload["jobs"]))
         self.assertEqual(
             ["Prepare", "Build", "Analysis", "Post Process"],
             [stage["name"] for stage in payload["stages"]],
@@ -416,10 +1140,23 @@ class DefinitionSelectorTest(TestCase):
         self.assertEqual("api-linux", payload["jobs"][1]["buildKey"])
         self.assertEqual("linux", payload["jobs"][1]["operatingSystem"])
         self.assertEqual("mvn -B verify", payload["jobs"][1]["buildCommand"])
-        self.assertEqual("services/sample-app-api", payload["jobs"][2]["buildSubPath"])
-        self.assertEqual("plan-trigger", payload["jobs"][3]["jobId"])
-        self.assertEqual("Register Build Start", payload["jobs"][0]["taskGroups"][0]["tasks"][0]["name"])
-        self.assertEqual("Publish Report", payload["jobs"][1]["taskGroups"][1]["tasks"][3]["name"])
+        self.assertEqual("plan-trigger", payload["jobs"][5]["jobId"])
+        self.assertEqual("Checkout Source", payload["jobs"][0]["taskGroups"][0]["tasks"][0]["name"])
+        self.assertEqual("Prepare Build Script", payload["jobs"][0]["taskGroups"][0]["tasks"][1]["name"])
+        api_linux_build_job = next(job for job in payload["jobs"] if job["jobId"] == "api-linux-build")
+        api_windows_build_job = next(job for job in payload["jobs"] if job["jobId"] == "api-windows-build")
+        api_windows_analysis_job = next(job for job in payload["jobs"] if job["jobId"] == "api-windows-analysis")
+        api_linux_build_group = next(group for group in api_linux_build_job["taskGroups"] if group["stageId"] == "build")
+        api_windows_analysis_group = next(group for group in api_windows_analysis_job["taskGroups"] if group["stageId"] == "analysis")
+        self.assertEqual("services/sample-app-api", api_windows_build_job["buildSubPath"])
+        self.assertEqual("Run Build Script", api_linux_build_group["tasks"][1]["name"])
+        self.assertEqual("Run Coverity Script", api_windows_analysis_group["tasks"][1]["name"])
+
+    def test_build_plan_preview_returns_none_for_missing_plan_and_missing_project_build(self) -> None:
+        self.assertIsNone(get_build_plan_preview("MISSING"))
+
+        BuildPlan.objects.create(build_id="orphan", plan_key="ORPHAN")
+        self.assertIsNone(get_build_plan_preview("ORPHAN"))
 
     def test_build_plan_export_draft_renders_job_files(self) -> None:
         repository = ProjectRepository.objects.create(
@@ -464,6 +1201,116 @@ class DefinitionSelectorTest(TestCase):
         self.assertTrue(any("mvn -B verify" in file["content"] for file in payload["files"]))
         self.assertTrue(any(file["path"].endswith("run_build.sh") for file in payload["files"]))
 
+    def test_build_plan_export_draft_returns_none_for_missing_plan_and_missing_project_build(self) -> None:
+        self.assertIsNone(get_build_plan_export_draft("MISSING"))
+
+        BuildPlan.objects.create(build_id="orphan", plan_key="ORPHAN")
+        self.assertIsNone(get_build_plan_export_draft("ORPHAN"))
+
+    def test_build_plan_export_draft_reports_zero_jobs_when_no_build_info_exists(self) -> None:
+        repository = ProjectRepository.objects.create(
+            project=self.project,
+            repo_slug="sample-app-api",
+            coverity_project="sample-app-api",
+            coverity_stream="sample-app-api-dev",
+            is_representative=True,
+        )
+        ProjectBuild.objects.create(
+            project=self.project,
+            repository=repository,
+            build_plan=self.plan,
+            build_name="Sample API",
+            build_type="maven",
+            runtime_stack="java",
+        )
+
+        payload = get_build_plan_export_draft("SAMPAPI")
+
+        assert payload is not None
+        self.assertEqual(0, payload["summary"]["jobCount"])
+        self.assertEqual(0, payload["summary"]["fileCount"])
+        self.assertEqual([], payload["files"])
+
+
+class DefinitionSelectorHelperTest(SimpleTestCase):
+    def test_runtime_defaults_and_normalizers_cover_fallbacks(self) -> None:
+        self.assertEqual(["custom-tool analyze {buildCommand}"], _default_custom_tool_commands())
+        self.assertEqual(["coverity"], _default_runtime_commands(language="", compiler=""))
+        self.assertEqual(["PATH"], _default_runtime_env_vars(language="", compiler=""))
+        self.assertEqual("linux", _normalize_operating_system(""))
+        self.assertEqual(".", _normalize_build_sub_path(""))
+        self.assertEqual("pre=- · clean=rm -rf build · build=make", _summarize_build_script(pre_process="", clean_command="rm -rf build", build_command="make"))
+        self.assertEqual("SAMPAPI Build", _build_stage_job_name("", "SAMPAPI"))
+        self.assertEqual("SAMPAPI Analysis", _analysis_stage_job_name("", "SAMPAPI"))
+
+    def test_resolve_language_and_compiler_fallbacks(self) -> None:
+        plan = type("PlanStub", (), {})()
+        plan.project_build = type("ProjectBuildStub", (), {"build_type": "custom", "runtime_stack": "go1.22"})()
+
+        explicit = type("BuildInfoStub", (), {"language": "rust", "compiler": "cargo"})()
+        inferred = type("BuildInfoStub", (), {"language": "", "compiler": ""})()
+        partial = type("BuildInfoStub", (), {"language": "typescript", "compiler": ""})()
+
+        self.assertEqual(("rust", "cargo"), _resolve_language_and_compiler(plan=plan, build_info=explicit))
+        self.assertEqual(("go1.22", "custom"), _resolve_language_and_compiler(plan=plan, build_info=inferred))
+        self.assertEqual(("typescript", "custom"), _resolve_language_and_compiler(plan=plan, build_info=partial))
+
+    def test_repository_linkage_mode_and_primary_build_info_helpers(self) -> None:
+        plan = type(
+            "PlanStub",
+            (),
+            {
+                "repository_linkage_mode_override": "",
+                "build_infos": type(
+                    "BuildInfosStub",
+                    (),
+                    {
+                        "all": lambda self: type(
+                            "QuerySetStub",
+                            (),
+                            {"order_by": lambda self, *_args: ["first", "second"]},
+                        )()
+                    },
+                )(),
+            },
+        )()
+
+        with patch("apps.buildmeta.selectors.definitions.get_repository_linkage_mode", return_value="create_if_missing"):
+            self.assertEqual("linked", _repository_linkage_mode(plan=plan, project=None, repository=None))
+            self.assertEqual("create_if_missing", _repository_linkage_mode(plan=plan, project=None, repository=object()))
+
+        plan.repository_linkage_mode_override = "linked"
+        self.assertEqual("linked", _repository_linkage_mode(plan=plan, project=None, repository=object()))
+        self.assertEqual("first", _resolve_primary_build_info(plan))
+
+    def test_build_definition_payload_from_registration_handles_missing_repository_and_blank_build_info(self) -> None:
+        project = type("ProjectStub", (), {"bitbucket_project_key": "SAMPLE"})()
+        project_build = type("ProjectBuildStub", (), {"project": project, "repository": None, "build_name": "Sample API", "build_type": "custom", "runtime_stack": "go1.22"})()
+        plan = type("PlanStub", (), {"project_build": project_build, "build_id": "sample-api", "plan_key": "SAMPAPI", "repository_linkage_mode_override": ""})()
+        build_info = type(
+            "BuildInfoStub",
+            (),
+            {"operating_system": "", "build_key": "", "build_sub_path": "", "pre_process": "", "build_command": "", "language": "", "compiler": ""},
+        )()
+
+        with patch("apps.buildmeta.selectors.definitions.get_repository_linkage_mode", return_value="linked"):
+            payload = _build_definition_payload_from_registration(plan=plan, build_info=build_info)
+
+        self.assertEqual("", payload["repository"]["repoSlug"])
+        self.assertEqual("", payload["repository"]["cloneUrl"])
+        self.assertEqual("go1.22", payload["language"])
+        self.assertEqual("custom", payload["compiler"])
+        self.assertEqual(".", payload["build"]["subPath"])
+
+class DefinitionSelectorPreviewTest(TestCase):
+    def setUp(self) -> None:
+        self.project = Project.objects.create(
+            jira_project_key="SAMPLE",
+            bitbucket_project_key="SAMPLE",
+            representative_repo_slug="sample-app-api",
+        )
+        self.plan = BuildPlan.objects.create(build_id="sample-app-api", plan_key="SAMPAPI")
+
     def test_build_plan_preview_omits_build_stage_for_python_without_build_commands(self) -> None:
         repository = ProjectRepository.objects.create(
             project=self.project,
@@ -498,12 +1345,106 @@ class DefinitionSelectorTest(TestCase):
         self.assertEqual(1, prepare_stage["jobCount"])
         self.assertEqual(0, build_stage["jobCount"])
         self.assertEqual([], build_stage["jobs"])
-        script_job = next(job for job in payload["jobs"] if job["jobId"] == "script-linux")
+        script_job = next(job for job in payload["jobs"] if job["jobId"] == "script-linux-analysis")
         self.assertFalse(script_job["hasBuildStage"])
 
         export_payload = get_build_plan_export_draft("SAMPAPI")
         assert export_payload is not None
         self.assertFalse(any(file["path"].endswith("run_build.py") for file in export_payload["files"]))
+
+    def test_build_plan_preview_handles_unlinked_repository_and_empty_build_infos(self) -> None:
+        ProjectBuild.objects.create(
+            project=self.project,
+            repository=None,
+            build_plan=self.plan,
+            build_name="Sample API",
+            build_type="maven",
+            runtime_stack="java",
+        )
+
+        payload = get_build_plan_preview("SAMPAPI")
+
+        self.assertIsNotNone(payload)
+        assert payload is not None
+        self.assertEqual("", payload["repository"]["repoSlug"])
+        self.assertEqual("Repository 미연결", payload["jobs"][0]["taskGroups"][0]["tasks"][0]["detail"])
+        self.assertEqual(["Prepare", "Build", "Analysis", "Post Process"], [stage["name"] for stage in payload["stages"]])
+        build_stage = next(stage for stage in payload["stages"] if stage["id"] == "build")
+        analysis_stage = next(stage for stage in payload["stages"] if stage["id"] == "analysis")
+        self.assertEqual(0, build_stage["jobCount"])
+        self.assertEqual(0, analysis_stage["jobCount"])
+        self.assertEqual(["plan-prepare", "plan-trigger"], [job["jobId"] for job in payload["jobs"]])
+
+    def test_build_plan_preview_renders_custom_analysis_command_with_build_command_substitution(self) -> None:
+        repository = ProjectRepository.objects.create(
+            project=self.project,
+            repo_slug="sample-app-api",
+            coverity_project="sample-app-api",
+            coverity_stream="sample-app-api-dev",
+            is_representative=True,
+        )
+        ProjectBuild.objects.create(
+            project=self.project,
+            repository=repository,
+            build_plan=self.plan,
+            build_name="Sample API",
+            build_type="maven",
+            runtime_stack="java",
+        )
+        BuildPlanBuildInfo.objects.create(
+            build_plan=self.plan,
+            build_key="api-linux",
+            operating_system="linux",
+            build_command="mvn -B verify -Pcoverage",
+            language="java",
+            compiler="maven",
+        )
+
+        payload = get_build_plan_preview("SAMPAPI")
+
+        assert payload is not None
+        analysis_job = next(job for job in payload["jobs"] if job["jobId"] == "api-linux-analysis")
+        analysis_group = next(group for group in analysis_job["taskGroups"] if group["stageId"] == "analysis")
+        custom_analysis_task = next(task for task in analysis_group["tasks"] if task["name"] == "Run Custom Analysis Script")
+        self.assertEqual("custom-tool analyze mvn -B verify -Pcoverage", custom_analysis_task["detail"])
+
+    def test_build_plan_export_draft_uses_windows_launchers_and_summary_counts(self) -> None:
+        repository = ProjectRepository.objects.create(
+            project=self.project,
+            repo_slug="sample-app-win",
+            coverity_project="sample-app-win",
+            coverity_stream="sample-app-win-dev",
+            is_representative=True,
+        )
+        ProjectBuild.objects.create(
+            project=self.project,
+            repository=repository,
+            build_plan=self.plan,
+            build_name="Sample Win",
+            build_type="maven",
+            runtime_stack="java",
+        )
+        BuildPlanBuildInfo.objects.create(
+            build_plan=self.plan,
+            build_key="win-build",
+            operating_system="windows",
+            build_command="mvn -B package",
+            clean_command="mvn -B clean",
+            language="java",
+            compiler="maven",
+            coverity_stream="sample-app-win-dev",
+        )
+
+        payload = get_build_plan_export_draft("SAMPAPI")
+
+        self.assertIsNotNone(payload)
+        assert payload is not None
+        self.assertEqual(1, payload["summary"]["jobCount"])
+        self.assertEqual(len(payload["files"]), payload["summary"]["fileCount"])
+        self.assertTrue(any(file["path"].endswith("prepare_build.bat") for file in payload["files"]))
+        self.assertTrue(any(file["path"].endswith("run_build.bat") for file in payload["files"]))
+        self.assertTrue(any(file["path"].endswith("run_coverity.bat") for file in payload["files"]))
+        self.assertFalse(any(file["path"].endswith(".sh") for file in payload["files"]))
 
 
 class SystemSettingServiceTest(TestCase):
@@ -549,6 +1490,17 @@ class SystemSettingServiceTest(TestCase):
         payload = build_git_clone_url(project_key="CCC", repo_slug="cccrepo")
 
         self.assertEqual("https://git.example.com/scm/ccc/cccrepo.git", payload)
+
+    def test_get_repository_linkage_mode_defaults_to_linked_for_unknown_value(self) -> None:
+        set_system_setting(
+            key=SystemSetting.KEY_REPOSITORY_LINKAGE_MODE,
+            value="something-else",
+        )
+
+        self.assertEqual("linked", get_repository_linkage_mode())
+
+    def test_build_git_clone_url_returns_empty_string_without_template(self) -> None:
+        self.assertEqual("", build_git_clone_url(project_key="SAMPLE", repo_slug="sample-app-api"))
 
 
 class SpecsDraftInitializationServiceTest(TestCase):
@@ -683,6 +1635,118 @@ class SpecsDraftInitializationServiceTest(TestCase):
             self.assertEqual("", build_info.clean_command)
             self.assertEqual("", build_info.analysis_excluded_files)
 
+    def test_initialize_specs_draft_for_plan_keeps_existing_values_when_already_normalized(self) -> None:
+        project = Project.objects.create(
+            jira_project_key="OPS",
+            bitbucket_project_key="OPS",
+            representative_repo_slug="ops-api",
+        )
+        repository = ProjectRepository.objects.create(
+            project=project,
+            repo_slug="ops-api",
+            coverity_stream="ops-api-dev",
+            is_representative=True,
+        )
+        plan = BuildPlan.objects.create(build_id="ops-api", plan_key="OPSAPI")
+        ProjectBuild.objects.create(
+            project=project,
+            repository=repository,
+            build_plan=plan,
+            build_name="Ops API",
+            build_type="python",
+            runtime_stack="python3.12",
+        )
+        BuildPlanBuildInfo.objects.create(
+            build_plan=plan,
+            build_key="ops-api-linux",
+            operating_system="linux",
+            language="python",
+            compiler="python",
+            coverity_stream="ops-api-dev",
+            build_sub_path=".",
+        )
+
+        summary = initialize_specs_draft_for_plan(plan_key="OPSAPI", reset_existing=False)
+
+        self.assertEqual(0, summary["initializedCount"])
+        self.assertEqual(0, summary["updatedCount"])
+        self.assertEqual(0, summary["skippedCount"])
+
+    def test_initialize_specs_draft_data_skips_plan_without_project_build(self) -> None:
+        BuildPlan.objects.create(build_id="orphan-plan", plan_key="ORPHAN")
+
+        summary = initialize_specs_draft_data(reset_existing=False)
+
+        self.assertEqual(0, summary["initializedCount"])
+        self.assertEqual(0, summary["updatedCount"])
+        self.assertEqual(1, summary["skippedCount"])
+
+    def test_initialize_specs_draft_for_plan_uses_empty_coverity_stream_when_repository_missing(self) -> None:
+        project = Project.objects.create(
+            jira_project_key="DETACHED",
+            bitbucket_project_key="DETACHED",
+            representative_repo_slug="detached-api",
+        )
+        plan = BuildPlan.objects.create(build_id="detached-api", plan_key="DETACHEDAPI")
+        ProjectBuild.objects.create(
+            project=project,
+            repository=None,
+            build_plan=plan,
+            build_name="Detached API",
+            build_type="gradle",
+            runtime_stack="java17",
+        )
+        BuildPlanBuildInfo.objects.create(
+            build_plan=plan,
+            build_key="main",
+            operating_system="",
+            language="",
+            compiler="",
+            coverity_stream="",
+            build_sub_path="",
+        )
+
+        summary = initialize_specs_draft_for_plan(plan_key="DETACHEDAPI", reset_existing=False)
+
+        self.assertEqual(1, summary["updatedCount"])
+        build_info = BuildPlanBuildInfo.objects.get(build_plan=plan, build_key="main")
+        self.assertEqual("linux", build_info.operating_system)
+        self.assertEqual("java", build_info.language)
+        self.assertEqual("gradle", build_info.compiler)
+        self.assertEqual("", build_info.coverity_stream)
+        self.assertEqual(".", build_info.build_sub_path)
+
+    def test_initialize_specs_draft_data_creates_dotnet_build_info_with_normalized_build_key(self) -> None:
+        project = Project.objects.create(
+            jira_project_key="TOOLS",
+            bitbucket_project_key="TOOLS",
+            representative_repo_slug="Tooling API",
+        )
+        repository = ProjectRepository.objects.create(
+            project=project,
+            repo_slug="Tooling API",
+            coverity_stream="tooling-dev",
+            is_representative=True,
+        )
+        plan = BuildPlan.objects.create(build_id="Tooling API", plan_key="TOOLSAPI")
+        ProjectBuild.objects.create(
+            project=project,
+            repository=repository,
+            build_plan=plan,
+            build_name="Tooling API",
+            build_type="dotnet",
+            runtime_stack=".NET 8",
+        )
+
+        summary = initialize_specs_draft_data(reset_existing=False)
+
+        self.assertEqual(1, summary["initializedCount"])
+        build_info = BuildPlanBuildInfo.objects.get(build_plan=plan)
+        self.assertEqual("tooling-api-linux", build_info.build_key)
+        self.assertEqual("csharp", build_info.language)
+        self.assertEqual("dotnet", build_info.compiler)
+        self.assertEqual("tooling-dev", build_info.coverity_stream)
+
 
 class ValidatorExceptionTest(SimpleTestCase):
     def test_no_build_languages_are_identified(self) -> None:
@@ -756,6 +1820,77 @@ class ValidatorExceptionTest(SimpleTestCase):
 
 
 class ImportBuildDefinitionsCommandTest(TestCase):
+    def test_load_definition_import_records_sorts_files_and_hashes(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            input_root = Path(temp_dir) / "build_info_json"
+            year_root = input_root / "2026"
+            year_root.mkdir(parents=True, exist_ok=True)
+            first_path = year_root / "b-build.json"
+            second_path = year_root / "a-build.json"
+            first_path.write_text(
+                json.dumps(
+                    {
+                        "buildId": "b-build",
+                        "name": "Build B",
+                        "planKey": "BUILDB",
+                        "language": "java",
+                        "compiler": "maven",
+                        "repository": {
+                            "provider": "bitbucket",
+                            "projectKey": "SAMPLE",
+                            "repoSlug": "build-b",
+                            "linkageMode": "linked",
+                            "branches": ["dev", "release", "master"],
+                        },
+                        "requirements": {"os": "linux", "extraCapabilities": []},
+                        "build": {
+                            "subPath": ".",
+                            "prepareCommand": "mvn -B dependency:go-offline",
+                            "buildCommand": "mvn -B clean package",
+                            "staticAnalysis": {"customTool": {"commands": ["custom-tool analyze {buildCommand}"]}},
+                            "runtimeRequirements": {"commands": ["mvn", "coverity"], "envVars": ["JAVA_HOME"]},
+                            "postBuildTrigger": {"type": "plan", "targetPlanKey": "POSTBUILD"},
+                        },
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            second_path.write_text(
+                json.dumps(
+                    {
+                        "buildId": "a-build",
+                        "name": "Build A",
+                        "planKey": "BUILDA",
+                        "language": "java",
+                        "compiler": "maven",
+                        "repository": {
+                            "provider": "bitbucket",
+                            "projectKey": "SAMPLE",
+                            "repoSlug": "build-a",
+                            "linkageMode": "linked",
+                            "branches": ["dev", "release", "master"],
+                        },
+                        "requirements": {"os": "linux", "extraCapabilities": []},
+                        "build": {
+                            "subPath": ".",
+                            "prepareCommand": "mvn -B dependency:go-offline",
+                            "buildCommand": "mvn -B clean package",
+                            "staticAnalysis": {"customTool": {"commands": ["custom-tool analyze {buildCommand}"]}},
+                            "runtimeRequirements": {"commands": ["mvn", "coverity"], "envVars": ["JAVA_HOME"]},
+                            "postBuildTrigger": {"type": "plan", "targetPlanKey": "POSTBUILD"},
+                        },
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+
+            records = load_definition_import_records(input_root)
+
+        self.assertEqual(["a-build.json", "b-build.json"], [record.source_path.name for record in records])
+        self.assertTrue(all(record.definition_hash.startswith("sha256:") for record in records))
+
     def test_import_build_definitions_creates_active_definition_graph(self) -> None:
         with TemporaryDirectory() as temp_dir:
             input_root = Path(temp_dir) / "build_info_json"
@@ -1189,6 +2324,43 @@ class ProjectServiceTest(TestCase):
                 }
             )
 
+    def test_create_project_uses_marked_representative_repository_when_explicit_value_is_blank(self) -> None:
+        payload = create_project(
+            {
+                "jiraProjectKey": "OPS",
+                "bitbucketProjectKey": "OPS",
+                "representativeRepoSlug": "",
+                "repositories": [
+                    {
+                        "repoSlug": "ops-api",
+                        "coverityProject": "ops-api",
+                        "coverityStream": "ops-api-dev",
+                        "isRepresentative": False,
+                    },
+                    {
+                        "repoSlug": "ops-worker",
+                        "coverityProject": "ops-worker",
+                        "coverityStream": "ops-worker-dev",
+                        "isRepresentative": True,
+                    },
+                ],
+                "builds": [
+                    {
+                        "buildName": "Worker",
+                        "buildType": "python",
+                        "runtimeStack": "python3.12",
+                        "buildId": "ops-worker",
+                        "planKey": "OPSWORK",
+                        "repositorySlug": "ops-worker",
+                    }
+                ],
+            }
+        )
+
+        self.assertEqual("ops-worker", payload["representativeRepoSlug"])
+        self.assertEqual("ops-worker", Project.objects.get(jira_project_key="OPS").representative_repo_slug)
+        self.assertTrue(ProjectRepository.objects.get(project__jira_project_key="OPS", repo_slug="ops-worker").is_representative)
+
     def test_update_project_keeps_existing_representative_repo_when_not_explicitly_changed(self) -> None:
         project = Project.objects.create(
             jira_project_key="OPS",
@@ -1221,6 +2393,51 @@ class ProjectServiceTest(TestCase):
         assert payload is not None
         self.assertEqual("OPS-NEW", payload["bitbucketProjectKey"])
         self.assertEqual("ops-api", payload["representativeRepoSlug"])
+
+    def test_update_project_switches_representative_repo_based_on_request_flag_when_explicit_value_is_blank(self) -> None:
+        project = Project.objects.create(
+            jira_project_key="OPS",
+            bitbucket_project_key="OPS",
+            representative_repo_slug="ops-api",
+        )
+        ProjectRepository.objects.create(
+            project=project,
+            repo_slug="ops-api",
+            is_representative=True,
+        )
+        ProjectRepository.objects.create(
+            project=project,
+            repo_slug="ops-worker",
+            is_representative=False,
+        )
+
+        payload = update_project(
+            "OPS",
+            {
+                "bitbucketProjectKey": "OPS",
+                "representativeRepoSlug": "",
+                "repositories": [
+                    {
+                        "repoSlug": "ops-api",
+                        "coverityProject": "",
+                        "coverityStream": "",
+                        "isRepresentative": False,
+                    },
+                    {
+                        "repoSlug": "ops-worker",
+                        "coverityProject": "",
+                        "coverityStream": "",
+                        "isRepresentative": True,
+                    },
+                ],
+                "builds": [],
+            },
+        )
+
+        assert payload is not None
+        self.assertEqual("ops-worker", payload["representativeRepoSlug"])
+        self.assertFalse(ProjectRepository.objects.get(project=project, repo_slug="ops-api").is_representative)
+        self.assertTrue(ProjectRepository.objects.get(project=project, repo_slug="ops-worker").is_representative)
 
     def test_update_project_removes_omitted_repositories_and_builds(self) -> None:
         project = Project.objects.create(
@@ -1402,6 +2619,70 @@ class ProjectServiceTest(TestCase):
         self.assertEqual(1, BuildPlan.objects.count())
         self.assertEqual(1, ProjectBuild.objects.count())
 
+    def test_create_project_rejects_existing_plan_key_with_different_build_id(self) -> None:
+        BuildPlan.objects.create(build_id="ops-api", plan_key="OPSAPI")
+
+        with self.assertRaisesMessage(ValueError, "Build plan 'OPSAPI' already exists with a different buildId."):
+            create_project(
+                {
+                    "jiraProjectKey": "OPS",
+                    "bitbucketProjectKey": "OPS",
+                    "representativeRepoSlug": "ops-api",
+                    "repositories": [
+                        {
+                            "repoSlug": "ops-api",
+                            "coverityProject": "",
+                            "coverityStream": "",
+                            "isRepresentative": True,
+                        }
+                    ],
+                    "builds": [
+                        {
+                            "buildName": "API",
+                            "buildType": "python",
+                            "runtimeStack": "python3.12",
+                            "buildId": "different-id",
+                            "planKey": "OPSAPI",
+                            "repositorySlug": "ops-api",
+                        }
+                    ],
+                }
+            )
+
+    def test_create_project_rejects_build_plan_when_plan_key_and_build_id_point_to_different_existing_plans(self) -> None:
+        BuildPlan.objects.create(build_id="ops-api", plan_key="OPSAPI")
+        BuildPlan.objects.create(build_id="ops-worker", plan_key="OPSWORK")
+
+        with self.assertRaisesMessage(
+            ValueError,
+            "Build plan 'OPSAPI' and buildId 'ops-worker' refer to different existing build plans.",
+        ):
+            create_project(
+                {
+                    "jiraProjectKey": "OPS",
+                    "bitbucketProjectKey": "OPS",
+                    "representativeRepoSlug": "ops-api",
+                    "repositories": [
+                        {
+                            "repoSlug": "ops-api",
+                            "coverityProject": "",
+                            "coverityStream": "",
+                            "isRepresentative": True,
+                        }
+                    ],
+                    "builds": [
+                        {
+                            "buildName": "API",
+                            "buildType": "python",
+                            "runtimeStack": "python3.12",
+                            "buildId": "ops-worker",
+                            "planKey": "OPSAPI",
+                            "repositorySlug": "ops-api",
+                        }
+                    ],
+                }
+            )
+
     def test_create_project_rejects_existing_build_id_with_different_plan_key(self) -> None:
         BuildPlan.objects.create(build_id="ops-api", plan_key="OPSAPI")
 
@@ -1430,4 +2711,62 @@ class ProjectServiceTest(TestCase):
                         }
                     ],
                 }
+            )
+
+    def test_update_project_rejects_build_plan_linked_to_another_project(self) -> None:
+        first_project = Project.objects.create(
+            jira_project_key="OPS",
+            bitbucket_project_key="OPS",
+            representative_repo_slug="ops-api",
+        )
+        first_repository = ProjectRepository.objects.create(
+            project=first_project,
+            repo_slug="ops-api",
+            is_representative=True,
+        )
+        shared_plan = BuildPlan.objects.create(build_id="ops-api", plan_key="OPSAPI")
+        ProjectBuild.objects.create(
+            project=first_project,
+            repository=first_repository,
+            build_plan=shared_plan,
+            build_name="API",
+            build_type="python",
+            runtime_stack="python3.12",
+        )
+        second_project = Project.objects.create(
+            jira_project_key="OPS2",
+            bitbucket_project_key="OPS2",
+            representative_repo_slug="ops2-api",
+        )
+        ProjectRepository.objects.create(
+            project=second_project,
+            repo_slug="ops2-api",
+            is_representative=True,
+        )
+
+        with self.assertRaisesMessage(ValueError, "Build plan 'OPSAPI' is already linked to another project."):
+            update_project(
+                "OPS2",
+                {
+                    "bitbucketProjectKey": "OPS2",
+                    "representativeRepoSlug": "ops2-api",
+                    "repositories": [
+                        {
+                            "repoSlug": "ops2-api",
+                            "coverityProject": "",
+                            "coverityStream": "",
+                            "isRepresentative": True,
+                        }
+                    ],
+                    "builds": [
+                        {
+                            "buildName": "API",
+                            "buildType": "python",
+                            "runtimeStack": "python3.12",
+                            "buildId": "ops-api",
+                            "planKey": "OPSAPI",
+                            "repositorySlug": "ops2-api",
+                        }
+                    ],
+                },
             )
