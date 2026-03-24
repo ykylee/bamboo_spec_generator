@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from django.core.exceptions import ObjectDoesNotExist
-from apps.buildmeta.models import BuildPlan
+from apps.buildmeta.models import BambooPublishExecution, BuildPlan
 
 
 def list_latest_failed_builds(limit: int = 5) -> list[dict]:
@@ -122,6 +122,26 @@ def list_executions_by_plan_key(plan_key: str) -> list[dict] | None:
                 }
                 for result in execution.static_analysis_results.all().order_by("tool_name")
             ],
+        }
+        for execution in executions
+    ]
+
+
+def list_publish_executions_by_plan_key(plan_key: str, limit: int = 5) -> list[dict]:
+    executions = (
+        BambooPublishExecution.objects.filter(build_plan__plan_key=plan_key)
+        .order_by("-created_at")[:limit]
+    )
+    return [
+        {
+            "publishExecutionId": str(execution.id),
+            "status": execution.status,
+            "message": execution.message,
+            "output": execution.output,
+            "returnCode": execution.return_code,
+            "triggerSource": execution.trigger_source,
+            "requestedBy": execution.requested_by,
+            "createdAt": execution.created_at,
         }
         for execution in executions
     ]

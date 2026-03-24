@@ -10,6 +10,7 @@ from django.core.management import CommandError, call_command
 from django.test import SimpleTestCase, TestCase
 
 from apps.buildmeta.models import (
+    BambooPublishExecution,
     BuildDefinitionHistory,
     BuildExecution,
     BuildPlan,
@@ -35,6 +36,7 @@ from apps.buildmeta.services import (
     initialize_specs_draft_data,
     initialize_specs_draft_for_plan,
     load_definition_import_records,
+    publish_bamboo_specs,
     set_system_setting,
     sync_definition_records,
     update_project,
@@ -242,6 +244,99 @@ class ExecutionServiceTest(TestCase):
         self.assertEqual(2, BuildExecution.objects.count())
         self.assertEqual("api-linux", first_payload["buildKey"])
         self.assertEqual("api-windows", second_payload["buildKey"])
+
+
+class BambooPublishServiceTest(TestCase):
+    def setUp(self) -> None:
+        self.project = Project.objects.create(
+            jira_project_key="SAMPLE",
+            bitbucket_project_key="SAMPLE",
+            representative_repo_slug="sample-app-api",
+        )
+        self.repository = ProjectRepository.objects.create(
+            project=self.project,
+            repo_slug="sample-app-api",
+            coverity_project="sample-app-api",
+            coverity_stream="sample-app-api-dev",
+            is_representative=True,
+        )
+        self.plan = BuildPlan.objects.create(build_id="sample-app-api", plan_key="SAMPAPI")
+        ProjectBuild.objects.create(
+            project=self.project,
+            repository=self.repository,
+            build_plan=self.plan,
+            build_name="Sample API",
+            build_type="maven",
+            runtime_stack="java",
+        )
+        BuildPlanBuildInfo.objects.create(
+            build_plan=self.plan,
+            build_key="api-linux",
+            operating_system="linux",
+            pre_process="mvn -B dependency:go-offline",
+            build_command="mvn -B clean package",
+            language="java",
+            compiler="maven",
+            coverity_stream="sample-app-api-dev",
+            build_sub_path="services/sample-app-api",
+        )
+        SystemSetting.objects.create(
+            key=SystemSetting.KEY_BAMBOO_SERVER_URL,
+            value="https://bamboo.example.com",
+        )
+
+    @patch.dict("os.environ", {"BAMBOO_SERVER_TOKEN": "token"}, clear=False)
+    @patch("apps.buildmeta.services.bamboo.subprocess.run")
+    def test_publish_bamboo_specs_records_success_history(self, subprocess_run_mock) -> None:
+        subprocess_run_mock.return_value = Mock(returncode=0, stdout="published", stderr="")
+
+        payload = publish_bamboo_specs("SAMPAPI")
+
+        self.assertTrue(payload["success"])
+        history = BambooPublishExecution.objects.get(build_plan=self.plan)
+        self.assertEqual(BambooPublishExecution.STATUS_SUCCESS, history.status)
+        self.assertEqual(0, history.return_code)
+        self.assertIn("published", history.output)
+
+    @patch.dict("os.environ", {"BAMBOO_SERVER_TOKEN": "token"}, clear=False)
+    @patch("apps.buildmeta.services.bamboo.subprocess.run")
+    def test_publish_bamboo_specs_records_failure_history(self, subprocess_run_mock) -> None:
+        subprocess_run_mock.return_value = Mock(returncode=1, stdout="", stderr="publish failed")
+
+        payload = publish_bamboo_specs("SAMPAPI")
+
+        self.assertFalse(payload["success"])
+        history = BambooPublishExecution.objects.get(build_plan=self.plan)
+        self.assertEqual(BambooPublishExecution.STATUS_FAILED, history.status)
+        self.assertEqual(1, history.return_code)
+        self.assertIn("publish failed", history.output)
+
+    @patch.dict("os.environ", {"BAMBOO_SERVER_TOKEN": "token"}, clear=False)
+    @patch("apps.buildmeta.services.bamboo.request.urlopen")
+    def test_queue_bamboo_plan_with_options_sends_query_parameters(self, urlopen_mock) -> None:
+        response_mock = Mock()
+        response_mock.read.return_value = json.dumps({"buildResultKey": "SAMPLE-SAMPAPI-101"}).encode("utf-8")
+        urlopen_mock.return_value.__enter__.return_value = response_mock
+
+        from apps.buildmeta.services.bamboo import queue_bamboo_plan_with_options
+
+        payload = queue_bamboo_plan_with_options(
+            "SAMPAPI",
+            stage="Build",
+            execute_all_stages=True,
+            custom_revision="release/1.0",
+            variables={"bamboo.variable.release": "true", "custom.flag": "yes"},
+        )
+
+        request_obj = urlopen_mock.call_args.args[0]
+        self.assertIn("/rest/api/latest/queue/SAMPLE-SAMPAPI?", request_obj.full_url)
+        self.assertIn("stage=Build", request_obj.full_url)
+        self.assertIn("executeAllStages=true", request_obj.full_url)
+        self.assertIn("customRevision=release%2F1.0", request_obj.full_url)
+        self.assertIn("bamboo.variable.release=true", request_obj.full_url)
+        self.assertIn("custom.flag=yes", request_obj.full_url)
+        self.assertEqual("Build", payload["stage"])
+        self.assertTrue(payload["executeAllStages"])
 
 
 class DefinitionSelectorTest(TestCase):

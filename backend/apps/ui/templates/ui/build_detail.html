@@ -491,11 +491,54 @@
         <form method="post" action="{% url 'project-build-detail' project.jiraProjectKey build.planKey %}">
           {% csrf_token %}
           <input type="hidden" name="form_kind" value="bamboo_run">
+          <div class="project-form__grid">
+            <label class="project-form__field">
+              <span class="project-form__label">Stage</span>
+              {{ bambooRunForm.stage }}
+            </label>
+            <label class="project-form__field">
+              <span class="project-form__label">Custom Revision</span>
+              {{ bambooRunForm.custom_revision }}
+            </label>
+            <label class="project-form__field">
+              <span class="project-form__label">Execute All Stages</span>
+              {{ bambooRunForm.execute_all_stages }}
+            </label>
+            <label class="project-form__field project-form__field--span-3">
+              <span class="project-form__label">Variables</span>
+              {{ bambooRunForm.variables_text }}
+            </label>
+          </div>
+          <p class="panel__body">`key=value` 형식으로 변수를 입력합니다. Bamboo plan/global 변수는 보통 `bamboo.variable.*` 형식 키를 사용합니다.</p>
           <button class="action-button action-button--ghost" type="submit">Bamboo 수동 실행</button>
         </form>
         <a class="action-button action-button--ghost" href="{% url 'project-bamboo-plan-detail' project.jiraProjectKey build.planKey %}">실제 구성 페이지</a>
       </div>
     </article>
+  </div>
+  <div class="panel panel--signal-list">
+    <div class="panel__header">
+      <h3 class="panel__title">최근 Publish 이력</h3>
+    </div>
+    <ul class="entity-preview-list">
+      {% for publishExecution in bambooPublishExecutions %}
+      <li class="entity-preview-item">
+        <div>
+          <strong>{{ publishExecution.status }}</strong>
+          <p>{{ publishExecution.createdAt }} · rc={{ publishExecution.returnCode|default:"-" }}</p>
+          <p>{{ publishExecution.message|default:"메시지 없음" }}</p>
+        </div>
+        <div class="chip-row">
+          <span class="chip chip--neutral">{{ publishExecution.triggerSource|default:"web_ui" }}</span>
+        </div>
+      </li>
+      {% empty %}
+      <li class="empty-state empty-state--inline">
+        <h3 class="empty-state__title">아직 Publish 이력이 없습니다.</h3>
+        <p class="empty-state__body">웹에서 Bamboo publish를 실행하면 최근 이력이 여기에 기록됩니다.</p>
+      </li>
+      {% endfor %}
+    </ul>
   </div>
 </section>
 

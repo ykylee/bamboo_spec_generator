@@ -251,6 +251,29 @@ class BuildExecution(models.Model):
         ]
 
 
+class BambooPublishExecution(TimestampedModel):
+    STATUS_SUCCESS = "successful"
+    STATUS_FAILED = "failed"
+    STATUS_CHOICES = [
+        (STATUS_SUCCESS, "successful"),
+        (STATUS_FAILED, "failed"),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    build_plan = models.ForeignKey(BuildPlan, on_delete=models.CASCADE, related_name="publish_executions")
+    status = models.CharField(max_length=32, choices=STATUS_CHOICES)
+    message = models.TextField(blank=True)
+    output = models.TextField(blank=True)
+    return_code = models.IntegerField(null=True, blank=True)
+    trigger_source = models.CharField(max_length=64, blank=True)
+    requested_by = models.CharField(max_length=255, blank=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["build_plan", "-created_at"], name="ix_publish_exec_plan_created"),
+        ]
+
+
 class StaticAnalysisResult(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     build_execution = models.ForeignKey(BuildExecution, on_delete=models.CASCADE, related_name="static_analysis_results")

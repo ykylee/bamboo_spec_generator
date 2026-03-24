@@ -9,6 +9,7 @@ from apps.buildmeta.selectors.executions import (
     list_build_plan_summaries,
     list_executions_by_plan_key,
     list_latest_failed_builds,
+    list_publish_executions_by_plan_key,
 )
 from apps.buildmeta.selectors.projects import get_project_detail, list_project_summaries
 from apps.buildmeta.services import (
@@ -21,7 +22,7 @@ from apps.buildmeta.services import (
     initialize_specs_draft_data,
     initialize_specs_draft_for_plan,
     publish_bamboo_specs,
-    queue_bamboo_plan,
+    queue_bamboo_plan_with_options,
     set_system_setting,
     update_build_plan_metadata,
     update_project,
@@ -30,6 +31,7 @@ from apps.buildmeta.services import (
 
 from .forms import (
     BuildMetadataForm,
+    BambooRunForm,
     BuildInfoMetadataForm,
     BuildPlanMetadataForm,
     CoveritySystemSettingsForm,
@@ -175,7 +177,7 @@ def coverity_settings(request):
 
     if request.method == "POST":
         form_kind = request.POST.get("form_kind", "").strip()
-        if form_kind == "coverity_settings":
+        if form_kind == "system_settings":
             form = CoveritySystemSettingsForm(request.POST)
             if form.is_valid():
                 set_system_setting(
@@ -210,7 +212,7 @@ def coverity_settings(request):
                 )
                 message = "운영 설정을 저장했습니다."
             else:
-                error = "Coverity 설정 입력값을 다시 확인해 주세요."
+                error = "시스템 설정 입력값을 다시 확인해 주세요."
         elif form_kind == "init_specs_drafts":
             init_summary = initialize_specs_draft_data(reset_existing=True)
             message = "등록된 샘플의 Specs 초안 데이터를 현재 기준으로 다시 초기화했습니다."
@@ -345,6 +347,7 @@ def project_build_detail(request, jira_project_key: str, plan_key: str):
     draft_refresh_error = ""
     bamboo_message = ""
     bamboo_error = ""
+    bamboo_run_form = BambooRunForm(initial={"execute_all_stages": True})
     metadata_open = request.GET.get("edit", "").lower() in {"1", "true", "open"}
     build_info_open = request.GET.get("add_build_info", "").lower() in {"1", "true", "open"}
 
@@ -397,12 +400,22 @@ def project_build_detail(request, jira_project_key: str, plan_key: str):
                 else:
                     bamboo_error = result["output"] or result["message"]
         elif form_kind == "bamboo_run":
-            try:
-                result = queue_bamboo_plan(plan_key)
-            except BambooOperationError as exc:
-                bamboo_error = str(exc)
+            bamboo_run_form = BambooRunForm(request.POST)
+            if bamboo_run_form.is_valid():
+                try:
+                    result = queue_bamboo_plan_with_options(
+                        plan_key,
+                        stage=bamboo_run_form.cleaned_data["stage"],
+                        execute_all_stages=bamboo_run_form.cleaned_data["execute_all_stages"],
+                        custom_revision=bamboo_run_form.cleaned_data["custom_revision"],
+                        variables=_parse_bamboo_variables_text(bamboo_run_form.cleaned_data["variables_text"]),
+                    )
+                except BambooOperationError as exc:
+                    bamboo_error = str(exc)
+                else:
+                    bamboo_message = f"{result['message']} ({result['fullPlanKey']})"
             else:
-                bamboo_message = f"{result['message']} ({result['fullPlanKey']})"
+                bamboo_error = "Bamboo 실행 입력값을 다시 확인해 주세요."
 
     project = get_project_detail(jira_project_key)
     if project is None:
@@ -435,6 +448,8 @@ def project_build_detail(request, jira_project_key: str, plan_key: str):
         "bambooStatus": bamboo_status,
         "bambooMessage": bamboo_message,
         "bambooError": bamboo_error,
+        "bambooRunForm": bamboo_run_form,
+        "bambooPublishExecutions": list_publish_executions_by_plan_key(plan_key),
         "registrationSuggestions": _build_registration_suggestions(),
         "navProjectSearchItems": _build_nav_project_search_items(list_project_summaries()),
     }
@@ -871,3 +886,14 @@ def _list_execution_groups(plan_key: str) -> list[dict]:
         }
         for bucket in grouped.values()
     ]
+
+
+def _parse_bamboo_variables_text(value: str) -> dict[str, str]:
+    variables: dict[str, str] = {}
+    for raw_line in value.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        key, _sep, remainder = line.partition("=")
+        variables[key.strip()] = remainder.strip()
+    return variables

@@ -4,6 +4,7 @@ from .bamboo import (
     get_bamboo_plan_status,
     publish_bamboo_specs,
     queue_bamboo_plan,
+    queue_bamboo_plan_with_options,
 )
 from .build_info import upsert_build_info
 from .build_plans import update_build_plan_metadata
@@ -35,6 +36,7 @@ __all__ = [
     "load_definition_import_records",
     "publish_bamboo_specs",
     "queue_bamboo_plan",
+    "queue_bamboo_plan_with_options",
     "record_static_analysis_results",
     "set_system_setting",
     "start_execution",

@@ -8,15 +8,16 @@
   <div class="signal-hero__content">
     <p class="signal-hero__eyebrow">System Settings</p>
     <h1 class="hero__title">운영 설정</h1>
-    <p class="signal-hero__body">Coverity 공통값, Git clone URL 템플릿, Bamboo 서버 URL 같은 운영 설정을 관리합니다. Bamboo 토큰은 보안상 서버 환경 변수로만 읽습니다.</p>
+    <p class="signal-hero__body">이 페이지는 시스템 설정 페이지입니다. Coverity 설정은 시스템 설정의 한 부분이며, 저장소 연결과 Bamboo 연동 설정도 함께 관리합니다. Bamboo 토큰은 보안상 서버 환경 변수로만 읽습니다.</p>
   </div>
 </section>
 
 <section class="detail-grid detail-grid--resource">
   <article class="panel panel--signal-list">
     <div class="panel__header">
-      <h2 class="panel__title">공통 설정</h2>
+      <h2 class="panel__title">시스템 설정</h2>
     </div>
+    <p class="panel__body">Coverity, 저장소 연결, Bamboo 연동 설정을 한 화면에서 관리합니다. Coverity 항목은 아래 시스템 설정의 일부입니다.</p>
     {% if message %}
     <div class="form-alert form-alert--success">{{ message }}</div>
     {% endif %}
@@ -25,7 +26,7 @@
     {% endif %}
     <form class="project-form" method="post">
       {% csrf_token %}
-      <input type="hidden" name="form_kind" value="coverity_settings">
+      <input type="hidden" name="form_kind" value="system_settings">
       <div class="project-form__grid">
         <label class="project-form__field project-form__field--span-3">
           <span class="project-form__label">Coverity Connect URL</span>

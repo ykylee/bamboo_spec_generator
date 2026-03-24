@@ -4,6 +4,7 @@ from django.test import TestCase
 from unittest.mock import patch
 
 from apps.buildmeta.models import (
+    BambooPublishExecution,
     BuildExecution,
     BuildPlan,
     BuildPlanBuildInfo,
@@ -225,7 +226,7 @@ class ProjectViewTest(TestCase):
         response = self.client.post(
             "/settings/coverity/",
             {
-                "form_kind": "coverity_settings",
+                "form_kind": "system_settings",
                 "connect_url": "https://coverity.example.com",
                 "on_new_cert": "trust",
                 "commit_enabled": "on",
@@ -858,6 +859,7 @@ class ProjectViewTest(TestCase):
         self.assertContains(response, 'data-preview-stage', html=False)
         self.assertContains(response, 'data-job-select', html=False)
         self.assertContains(response, 'data-job-panel', html=False)
+        self.assertContains(response, "최근 Publish 이력")
 
     @patch("apps.ui.views.get_bamboo_plan_status")
     @patch("apps.ui.views.publish_bamboo_specs")
@@ -884,7 +886,31 @@ class ProjectViewTest(TestCase):
         self.assertContains(response, "Bamboo Specs publish가 완료되었습니다.")
 
     @patch("apps.ui.views.get_bamboo_plan_status")
-    @patch("apps.ui.views.queue_bamboo_plan")
+    def test_project_build_detail_shows_publish_history(self, bamboo_status_mock) -> None:
+        bamboo_status_mock.return_value = {
+            "configured": True,
+            "exists": True,
+            "message": "Bamboo에 등록되어 있습니다.",
+            "fullPlanKey": "SAMPLE-SAMPAPI",
+        }
+        BambooPublishExecution.objects.create(
+            build_plan=BuildPlan.objects.get(plan_key="SAMPAPI"),
+            status="successful",
+            message="Bamboo Specs publish가 완료되었습니다.",
+            output="published",
+            return_code=0,
+            trigger_source="web_ui",
+        )
+
+        response = self.client.get("/projects/SAMPLE/builds/SAMPAPI/")
+
+        self.assertEqual(200, response.status_code)
+        self.assertContains(response, "최근 Publish 이력")
+        self.assertContains(response, "successful")
+        self.assertContains(response, "Bamboo Specs publish가 완료되었습니다.")
+
+    @patch("apps.ui.views.get_bamboo_plan_status")
+    @patch("apps.ui.views.queue_bamboo_plan_with_options")
     def test_project_build_detail_queues_bamboo_plan(self, queue_mock, bamboo_status_mock) -> None:
         queue_mock.return_value = {
             "message": "Bamboo plan 실행을 요청했습니다.",
@@ -899,12 +925,25 @@ class ProjectViewTest(TestCase):
 
         response = self.client.post(
             "/projects/SAMPLE/builds/SAMPAPI/",
-            data={"form_kind": "bamboo_run"},
+            data={
+                "form_kind": "bamboo_run",
+                "stage": "Build",
+                "custom_revision": "release/1.0",
+                "execute_all_stages": "on",
+                "variables_text": "bamboo.variable.release=true\ncustom.flag=yes",
+            },
         )
 
         self.assertEqual(200, response.status_code)
-        queue_mock.assert_called_once_with("SAMPAPI")
+        queue_mock.assert_called_once_with(
+            "SAMPAPI",
+            stage="Build",
+            execute_all_stages=True,
+            custom_revision="release/1.0",
+            variables={"bamboo.variable.release": "true", "custom.flag": "yes"},
+        )
         self.assertContains(response, "Bamboo plan 실행을 요청했습니다.")
+        self.assertContains(response, "Custom Revision")
 
     @patch("apps.ui.views.get_bamboo_plan_details")
     def test_project_bamboo_plan_detail_renders_live_plan(self, plan_details_mock) -> None:

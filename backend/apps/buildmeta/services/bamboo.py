@@ -9,7 +9,7 @@ import sys
 import tempfile
 from urllib import error, parse, request
 
-from apps.buildmeta.models import BuildPlan
+from apps.buildmeta.models import BambooPublishExecution, BuildPlan
 
 from .system_settings import get_bamboo_system_settings
 
@@ -143,9 +143,30 @@ def get_bamboo_plan_details(plan_key: str) -> dict:
 def publish_bamboo_specs(plan_key: str) -> dict:
     from apps.buildmeta.selectors.definitions import get_active_definition_by_plan_key, get_prepare_context_by_plan_key
 
-    config = get_bamboo_client_config()
+    plan = _get_build_plan(plan_key)
+    if plan is None:
+        raise BambooOperationError("Build plan not found.")
+
+    try:
+        config = get_bamboo_client_config()
+    except BambooOperationError as exc:
+        _record_publish_execution(
+            plan=plan,
+            status=BambooPublishExecution.STATUS_FAILED,
+            message=str(exc),
+            output="",
+            return_code=None,
+        )
+        raise
     definition_payload = get_active_definition_by_plan_key(plan_key)
     if definition_payload is None:
+        _record_publish_execution(
+            plan=plan,
+            status=BambooPublishExecution.STATUS_FAILED,
+            message="활성 Bamboo 정의를 찾지 못했습니다.",
+            output="",
+            return_code=None,
+        )
         raise BambooOperationError("활성 Bamboo 정의를 찾지 못했습니다.")
 
     prepare_context = get_prepare_context_by_plan_key(plan_key)
@@ -174,12 +195,26 @@ def publish_bamboo_specs(plan_key: str) -> dict:
                 text=True,
             )
         except OSError as exc:
+            _record_publish_execution(
+                plan=plan,
+                status=BambooPublishExecution.STATUS_FAILED,
+                message=f"Maven publish 실행에 실패했습니다: {exc}",
+                output="",
+                return_code=None,
+            )
             raise BambooOperationError(f"Maven publish 실행에 실패했습니다: {exc}") from exc
         finally:
             if token_path.exists():
                 token_path.unlink()
 
     output = "\n".join(part for part in [result.stdout.strip(), result.stderr.strip()] if part).strip()
+    _record_publish_execution(
+        plan=plan,
+        status=BambooPublishExecution.STATUS_SUCCESS if result.returncode == 0 else BambooPublishExecution.STATUS_FAILED,
+        message="Bamboo Specs publish가 완료되었습니다." if result.returncode == 0 else "Bamboo Specs publish에 실패했습니다.",
+        output=output,
+        return_code=result.returncode,
+    )
     return {
         "success": result.returncode == 0,
         "returnCode": result.returncode,
@@ -189,19 +224,59 @@ def publish_bamboo_specs(plan_key: str) -> dict:
 
 
 def queue_bamboo_plan(plan_key: str) -> dict:
+    return queue_bamboo_plan_with_options(plan_key)
+
+
+def queue_bamboo_plan_with_options(
+    plan_key: str,
+    *,
+    stage: str = "",
+    execute_all_stages: bool = False,
+    custom_revision: str = "",
+    variables: dict[str, str] | None = None,
+) -> dict:
     plan = _get_build_plan(plan_key)
     if plan is None:
         raise BambooOperationError("Build plan not found.")
 
     identity = _build_plan_identity(plan)
     client = _BambooClient(get_bamboo_client_config())
-    payload = client.queue_plan(identity["fullPlanKey"])
+    payload = client.queue_plan(
+        identity["fullPlanKey"],
+        stage=stage,
+        execute_all_stages=execute_all_stages,
+        custom_revision=custom_revision,
+        variables=variables or {},
+    )
     return {
         **identity,
         "queued": True,
         "message": "Bamboo plan 실행을 요청했습니다.",
+        "stage": stage,
+        "executeAllStages": execute_all_stages,
+        "customRevision": custom_revision,
+        "variables": variables or {},
         "raw": payload,
     }
+
+
+def _record_publish_execution(
+    *,
+    plan: BuildPlan,
+    status: str,
+    message: str,
+    output: str,
+    return_code: int | None,
+) -> BambooPublishExecution:
+    return BambooPublishExecution.objects.create(
+        build_plan=plan,
+        status=status,
+        message=message,
+        output=output,
+        return_code=return_code,
+        trigger_source="web_ui",
+        requested_by="",
+    )
 
 
 class _BambooClient:
@@ -218,8 +293,29 @@ class _BambooClient:
         path = f"/rest/api/latest/result/{parse.quote(full_plan_key)}?max-result=1"
         return self._request_json("GET", path, default={})
 
-    def queue_plan(self, full_plan_key: str) -> dict:
-        path = f"/rest/api/latest/queue/{parse.quote(full_plan_key)}"
+    def queue_plan(
+        self,
+        full_plan_key: str,
+        *,
+        stage: str = "",
+        execute_all_stages: bool = False,
+        custom_revision: str = "",
+        variables: dict[str, str] | None = None,
+    ) -> dict:
+        params: list[tuple[str, str]] = []
+        if stage.strip():
+            params.append(("stage", stage.strip()))
+        if execute_all_stages:
+            params.append(("executeAllStages", "true"))
+        if custom_revision.strip():
+            params.append(("customRevision", custom_revision.strip()))
+        for key, value in (variables or {}).items():
+            normalized_key = key.strip()
+            if not normalized_key:
+                continue
+            params.append((normalized_key, value))
+        query = f"?{parse.urlencode(params)}" if params else ""
+        path = f"/rest/api/latest/queue/{parse.quote(full_plan_key)}{query}"
         return self._request_json("POST", path, default={})
 
     def _request_json(self, method: str, path: str, allow_not_found: bool = False, default: dict | None = None) -> dict | None:
