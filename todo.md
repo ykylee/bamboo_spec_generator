@@ -75,6 +75,13 @@
 - 현재는 execution API와 기본 연결만 되어 있다.
 - buildKey별 결과 집계, plan 수준 종합 상태, 정적 분석 요약 화면을 확장한다.
 
+8. 단위테스트 보강과 커버리지 개선
+- 신규
+- 현재 전체 Python 커버리지는 약 `62%` 수준이며, 생성기 코어보다 Django 운영 계층의 미검증 조합 로직이 병목이다.
+- 우선순위는 `backend/apps/buildmeta/selectors/definitions.py`, `backend/apps/ui/views.py`, `backend/apps/buildmeta/services/bamboo.py`, `backend/apps/buildmeta/services/projects.py`, `backend/apps/buildmeta/services/specs_drafts.py` 순으로 둔다.
+- 특히 preview/export draft 조합, view POST 분기와 오류 복원, Bamboo API mocking, 프로젝트 등록/수정 검증 조합, specs draft 보정 로직을 추가 테스트 대상으로 잡는다.
+- 목표는 selector/service/view 계층을 우선 보강해 커버리지를 `70%+`로 끌어올리는 것이다.
+
 ## 남은 이슈
 
 1. publish 결과 저장 범위
@@ -92,6 +99,10 @@
 4. 권한/감사 로그 정책
 - 운영 UI에서 publish와 run 액션을 누구에게 허용할지 아직 미정이다.
 
+5. 커버리지 병목 구간
+- `backend/apps/ui/views.py`, `backend/apps/buildmeta/selectors/definitions.py`, `backend/apps/buildmeta/services/bamboo.py` 쪽 커버리지가 특히 낮다.
+- 기능 구현 부족보다는 테스트 부족이 원인이라, 신규 기능보다 회귀 테스트 확대를 우선하는 편이 효율적이다.
+
 ## 참고 파일
 
 - `backend/apps/buildmeta/services/bamboo.py`
@@ -105,4 +116,9 @@
 - `src/bamboo_spec_generator/parser.py`
 - `backend/apps/ui/tests.py`
 - `backend/apps/buildmeta/tests.py`
+- `tests/test_cli.py`
+- `tests/test_api_client.py`
+- `tests/test_coverity.py`
+- `tests/test_parser_validator.py`
+- `tests/test_script_renderer.py`
 - `tests/test_generator.py`
