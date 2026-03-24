@@ -227,6 +227,20 @@ python3 -m pip install -r requirements-playwright.txt
 python3 -m playwright install firefox
 ```
 
+Docker 기반 개발용 PostgreSQL, Jenkins 준비:
+
+```bash
+cp compose.env.example compose.env
+docker compose --env-file compose.env up -d
+docker compose ps
+```
+
+`compose.yaml`은 다음 서비스를 제공합니다.
+
+- `postgres`: Django 운영 백엔드용 PostgreSQL 16
+- `jenkins`: 로컬 CI 검토용 Jenkins LTS (JDK 17)
+- `gitea`: 로컬 Git 저장소 호스팅용 Gitea
+
 처음 작업하는 로컬 환경 권장 순서:
 
 ```bash
@@ -237,6 +251,8 @@ cp backend/.env.example backend/.env
 set -a
 . backend/.env
 set +a
+cp compose.env.example compose.env
+docker compose --env-file compose.env up -d postgres
 python backend/manage.py migrate
 python backend/manage.py check
 ```
@@ -299,6 +315,17 @@ export BAMBOO_DB_PASSWORD=postgres
 export BAMBOO_DB_NAME=bamboo_meta
 export BAMBOO_DB_SSLMODE=disable
 PYTHONPATH=. python3 -m src.bamboo_spec_generator.cli --db-check
+```
+
+Docker PostgreSQL 접속 정보는 기본적으로 다음과 일치합니다.
+
+```bash
+export BAMBOO_DB_HOST=127.0.0.1
+export BAMBOO_DB_PORT=5432
+export BAMBOO_DB_USER=postgres
+export BAMBOO_DB_PASSWORD=postgres
+export BAMBOO_DB_NAME=bamboo_meta
+export BAMBOO_DB_SSLMODE=disable
 ```
 
 PostgreSQL 스키마 적용:
@@ -367,6 +394,30 @@ export BAMBOO_DB_PASSWORD=replace-me
 export BAMBOO_DB_NAME=bamboo_meta
 export BAMBOO_DB_SSLMODE=disable
 python3 manage.py init_postgres_db --force
+```
+
+Docker 개발 서비스 제어:
+
+```bash
+docker compose --env-file compose.env up -d
+docker compose --env-file compose.env logs -f postgres
+docker compose --env-file compose.env logs -f jenkins
+docker compose --env-file compose.env logs -f gitea
+docker compose --env-file compose.env down
+```
+
+Jenkins 초기 관리자 비밀번호 확인:
+
+```bash
+docker compose --env-file compose.env exec jenkins \
+  cat /var/jenkins_home/secrets/initialAdminPassword
+```
+
+Gitea 접속 정보:
+
+```text
+Web UI: http://127.0.0.1:3000
+SSH: ssh://git@127.0.0.1:2222/<owner>/<repo>.git
 ```
 
 운영 백엔드 테스트 실행:
