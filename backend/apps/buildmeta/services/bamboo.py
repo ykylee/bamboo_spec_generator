@@ -448,31 +448,54 @@ def _plan_browse_url(identity: dict[str, str]) -> str:
 
 
 def _extract_latest_result(payload: dict) -> dict:
+    result: dict = {}
     results = payload.get("results", {}) if isinstance(payload, dict) else {}
     result_items = results.get("result") if isinstance(results, dict) else None
     if isinstance(result_items, list) and result_items:
         result = result_items[0]
     elif isinstance(result_items, dict):
         result = result_items
+    elif isinstance(payload, dict):
+        direct_result_items = payload.get("result")
+        if isinstance(direct_result_items, list) and direct_result_items:
+            result = direct_result_items[0]
+        elif isinstance(direct_result_items, dict):
+            result = direct_result_items
+        elif any(key in payload for key in ("state", "buildState", "number", "buildNumber", "key", "planResultKey")):
+            result = payload
     else:
         result = {}
     link = ""
     link_payload = result.get("link")
     if isinstance(link_payload, dict):
-        href = link_payload.get("href")
+        href = link_payload.get("href") or link_payload.get("url")
         if isinstance(href, str):
             link = href
+    elif isinstance(link_payload, str):
+        link = link_payload
+    plan_result_key = result.get("planResultKey")
+    if isinstance(plan_result_key, dict):
+        normalized_result_key = plan_result_key.get("key", "")
+    elif isinstance(plan_result_key, str):
+        normalized_result_key = plan_result_key
+    else:
+        normalized_result_key = ""
     return {
         "state": result.get("state", "") or result.get("buildState", ""),
         "number": str(result.get("number", "") or result.get("buildNumber", "")),
-        "key": result.get("key", "") or result.get("planResultKey", {}).get("key", ""),
+        "key": result.get("key", "") or normalized_result_key,
         "link": link,
     }
 
 
 def _extract_stages(payload: dict) -> list[dict]:
     container = payload.get("stages")
-    stage_items = container.get("stage") if isinstance(container, dict) else []
+    if isinstance(container, dict):
+        stage_items = container.get("stage")
+        if stage_items is None and any(key in container for key in ("name", "description", "jobs", "plans")):
+            stage_items = [container]
+    else:
+        stage_items = container if isinstance(container, list) else []
     if isinstance(stage_items, dict):
         stage_items = [stage_items]
     stages: list[dict] = []
@@ -500,14 +523,24 @@ def _extract_stage_jobs(stage: dict) -> list[dict]:
         return []
 
     jobs_container = stage.get("jobs", {})
-    jobs = jobs_container.get("job") if isinstance(jobs_container, dict) else []
+    if isinstance(jobs_container, dict):
+        jobs = jobs_container.get("job")
+        if jobs is None and any(key in jobs_container for key in ("key", "name")):
+            jobs = [jobs_container]
+    else:
+        jobs = jobs_container if isinstance(jobs_container, list) else []
     if isinstance(jobs, dict):
         jobs = [jobs]
     if jobs:
         return [job for job in jobs if isinstance(job, dict)]
 
     plans_container = stage.get("plans", {})
-    plans = plans_container.get("plan") if isinstance(plans_container, dict) else []
+    if isinstance(plans_container, dict):
+        plans = plans_container.get("plan")
+        if plans is None and any(key in plans_container for key in ("key", "name")):
+            plans = [plans_container]
+    else:
+        plans = plans_container if isinstance(plans_container, list) else []
     if isinstance(plans, dict):
         plans = [plans]
     if plans is None:
@@ -516,7 +549,14 @@ def _extract_stage_jobs(stage: dict) -> list[dict]:
 
 
 def _extract_named_items(container: dict | None, item_key: str) -> list[dict]:
-    items = container.get(item_key) if isinstance(container, dict) else []
+    if isinstance(container, list):
+        items = container
+    elif isinstance(container, dict):
+        items = container.get(item_key)
+        if items is None and any(key in container for key in ("key", "name", "shortName", "description")):
+            items = [container]
+    else:
+        items = []
     if isinstance(items, dict):
         items = [items]
     return [item for item in items or [] if isinstance(item, dict)]
@@ -525,6 +565,33 @@ def _extract_named_items(container: dict | None, item_key: str) -> list[dict]:
 def _extract_variables(container: dict | None) -> list[dict]:
     if not isinstance(container, dict):
         return []
+
+    variable_items = container.get("variable")
+    if variable_items is None:
+        nested = container.get("variables")
+        if isinstance(nested, dict):
+            variable_items = nested.get("variable")
+        elif isinstance(nested, list):
+            variable_items = nested
+    if isinstance(variable_items, dict):
+        variable_items = [variable_items]
+    if isinstance(variable_items, list):
+        variables = []
+        for item in variable_items:
+            if not isinstance(item, dict):
+                continue
+            key = item.get("key") or item.get("name")
+            if not key:
+                continue
+            value = item.get("value")
+            if value is None and "value" not in item:
+                value = item.get("valueAsString")
+            variables.append({"key": str(key), "value": "" if value is None else str(value)})
+        return sorted(variables, key=lambda item: item["key"])
+
+    if "variable" in container or "variables" in container:
+        return []
+
     variables = []
     for key, value in sorted(container.items()):
         if isinstance(value, (str, int, float, bool)) or value is None:
