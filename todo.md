@@ -1,124 +1,120 @@
 # TODO
 
-## 현재 상태
+## 기준
 
-- 브랜치: `codex/bamboo-integration`
-- 최근 작업으로 웹에서 Bamboo publish, 실제 Bamboo plan 상태 조회, 실제 Bamboo plan 상세 페이지, Bamboo 수동 실행, `buildKey` 포함 실행 피드백 task까지 반영된 상태다.
-- 운영 설정 페이지는 시스템 설정 페이지로 사용되며, Coverity 설정은 그 하위 항목으로 관리한다.
-- 문서 갱신:
-  - `docs/requirements/issues/STORY-28-build-plan-dashboard-and-build-info-management.md`
-  - `docs/designs/detailed_designs/bamboo_publish_and_runtime_feedback.md`
+- 작성일: 2026-03-25
+- 기준 브랜치 상태: `codex/system-extension`
+- 기준 판단:
+  - `BuildUnit` 중심 백엔드 재구성 완료
+  - 백엔드 테스트 `173 tests` 통과
+  - 문서 기준 제품 방향은 Bamboo/Jenkins 공통 CI/CD 관제 시스템
 
-## 이번 스레드에서 정리된 완료 항목
+## 최우선
 
-1. 웹에서 Bamboo publish 실행
-- 완료
-- 빌드 상세에서 Bamboo Specs publish 버튼 제공
-- 서버에서 임시 Specs 프로젝트 생성 후 `mvn -q exec:java`로 publish 수행
+### 1. Jenkins 백엔드 구현
 
-2. publish 후 Bamboo 상태 표시
-- 완료
-- 빌드 상세에서 등록 여부, enabled/building, 최신 결과, 최신 빌드 번호 표시
+- [ ] `backend/apps/buildmeta/services/jenkins.py` 신규 구현
+- [ ] Jenkins 서버 설정 키 추가
+  - 예: `jenkins.server.url`, `jenkins.username`, `jenkins.token`
+- [ ] Jenkins 프로젝트/잡 등록 서비스 구현
+- [ ] Jenkins 잡 상세 selector 구현
+- [ ] Jenkins 실행 이력/큐/노드 상태 selector 구현
+- [ ] Jenkins API router 추가
+  - 프로젝트 등록/수정
+  - 잡 상세/목록
+  - 운영 현황 조회
 
-3. 실제 Bamboo plan 구성 조회 페이지
-- 완료
-- `/projects/{jira}/builds/{planKey}/bamboo/` 페이지 추가
-- stage/job, branch, variable 일부 표시
+### 2. UI 멀티 CI 전환
 
-4. Bamboo 실행 결과 시스템 피드백 task
-- 완료
-- 생성 task script가 실행 시작 시 `buildKey` 포함
-- 실행 종료 및 정적 분석 결과를 기존 execution API로 피드백
+- [ ] 상단 `Bamboo 관리` / `Jenkins 관리` 모드 스위처 구현
+- [ ] URL 기반 provider 모드 전환 반영
+  - 예: `/ui/bamboo/...`, `/ui/jenkins/...` 또는 동등한 구조
+- [ ] 공통 UI 카피를 CI 일반 표현으로 정리
+- [ ] provider별 테마 적용
+  - Bamboo: 밝은 파란색
+  - Jenkins: 밝은 빨간색
+- [ ] Jenkins 화면 추가
+  - 프로젝트 목록/상세
+  - 잡 상세
+  - 시스템 운영 현황
 
-5. 웹에서 Bamboo plan 수동 실행
-- 완료
-- 빌드 상세에서 수동 실행 버튼 제공
-- Bamboo queue API 호출 결과 메시지 표시
+### 3. Jenkins 운영 관제
 
-## 다음 스레드에서 이어갈 작업
+- [ ] `JenkinsNodeSnapshot`, `JenkinsQueueItemSnapshot` 실제 수집 경로 구현
+- [ ] Jenkins 노드/executor/queue 상태 API 구현
+- [ ] UI 운영 현황 패널 구현
+- [ ] Bamboo agent 관제와 Jenkins node 관제를 공통 레이아웃으로 정리
 
-1. Bamboo publish 이력 영속화
-- 1차 완료
-- `BambooPublishExecution` 모델로 publish 성공/실패, 시각, return code, 메시지, output, trigger source를 저장한다.
-- 빌드 상세 화면에서 최근 publish 이력을 조회할 수 있다.
-- 실행자 식별과 감사 로그 연동은 아직 남아 있다.
+## 높음
 
-2. Bamboo 수동 실행 파라미터 확장
-- 1차 완료
-- 수동 실행 폼에서 `stage`, `execute all stages`, `custom revision`, `variables` 입력을 지원한다.
-- 변수는 `key=value` 형식으로 입력해 Bamboo queue query parameter로 전달한다.
-- 별도 branch selector UI와 buildKey 단위 실행 제어는 아직 남아 있다.
+### 4. API 계약 정리
 
-3. Bamboo REST 응답 호환성 보강
-- 신규
-- Bamboo 버전별 plan/result 응답 차이를 더 안전하게 흡수한다.
-- stage/job/branch/action/variable 누락 시 fallback 정책을 정리한다.
+- [ ] 외부 API 네이밍의 provider 중립화 여부 결정
+  - 현재 `/api/v1/build-plans/...` 표현이 여전히 남아 있음
+- [ ] `build-plans` 경로를 유지할지 `build-units`로 전환할지 결정
+- [ ] 응답 필드의 Bamboo 전용 표현 축소
+  - `planKey`, `buildId` 중심 응답과 공통 필드 병행 여부 결정
+- [ ] Jenkins용 요청/응답 schema 추가
 
-4. Bamboo publish/실행 실패 UX 개선
-- 1차 완료
-- publish/run 결과를 요약 메시지와 세부 정보로 분리해 화면에 노출한다.
-- publish 로그와 queue 요청 파라미터를 operator 확인용 detail 영역에서 볼 수 있다.
-- 이후에는 실패 유형별 분류, 하이라이트, 민감정보 마스킹이 더 필요하다.
+### 5. 테스트 구조 정리
 
-5. Bamboo end-to-end 실환경 검증
-- 신규
-- 실제 Bamboo 서버 대상으로 publish, 상태 조회, 수동 실행, execution feedback까지 재검증한다.
-- linked / create_if_missing 두 모드를 모두 확인한다.
+- [ ] `backend/apps/buildmeta/tests_support.py` 제거 계획 수립
+- [ ] 테스트도 최종 `Project/Repository/BuildUnit/...` 모델명을 직접 쓰도록 단계적 치환
+- [ ] UI 테스트 fixture를 provider별 fixture로 분리
+- [ ] Jenkins API/UI 테스트 추가
 
-6. 권한 및 감사 로그
-- 신규
-- publish와 수동 실행을 누가 수행했는지 기록하는 정책이 필요하다.
-- 운영 권한 범위를 어디까지 열지 정리한다.
+### 6. 마이그레이션 재정리
 
-7. buildKey 기반 결과 집계 화면 고도화
-- 신규
-- 현재는 execution API와 기본 연결만 되어 있다.
-- buildKey별 결과 집계, plan 수준 종합 상태, 정적 분석 요약 화면을 확장한다.
+- [ ] 현재 `0012_buildunit_v2_models.py` 이후 정리 migration 추가 여부 결정
+- [ ] 더 이상 쓰지 않는 구 테이블 제거 migration 작성 여부 결정
+- [ ] `db_table` 명에 남아 있는 `_v2` suffix 유지 여부 결정
+- [ ] 개발 DB 초기화 기준 문서 재정리
 
-8. 단위테스트 보강과 커버리지 개선
-- 신규
-- 현재 전체 Python 커버리지는 약 `62%` 수준이며, 생성기 코어보다 Django 운영 계층의 미검증 조합 로직이 병목이다.
-- 우선순위는 `backend/apps/buildmeta/selectors/definitions.py`, `backend/apps/ui/views.py`, `backend/apps/buildmeta/services/bamboo.py`, `backend/apps/buildmeta/services/projects.py`, `backend/apps/buildmeta/services/specs_drafts.py` 순으로 둔다.
-- 특히 preview/export draft 조합, view POST 분기와 오류 복원, Bamboo API mocking, 프로젝트 등록/수정 검증 조합, specs draft 보정 로직을 추가 테스트 대상으로 잡는다.
-- 목표는 selector/service/view 계층을 우선 보강해 커버리지를 `70%+`로 끌어올리는 것이다.
+## 중간
 
-## 남은 이슈
+### 7. 운영 기능 확장
 
-1. publish 결과 저장 범위
-- 현재는 output 전체 문자열을 저장한다.
-- 장기적으로 원문 보존, 길이 제한, 민감정보 마스킹 정책을 정해야 한다.
+- [ ] 사용자/권한 관리 구현
+- [ ] 배포/릴리스 관리 구현
+- [ ] 감사 이력 `AuditEvent` 활용 범위 확대
+  - 프로젝트 수정
+  - 수동 실행
+  - publish
+  - Jenkins 등록/수정
 
-2. Bamboo 수동 실행 입력 범위
-- 현재는 `customRevision`과 임의 변수 override를 지원한다.
-- branch selector를 별도 필드로 분리할지, `customRevision` 입력 하나로 유지할지 결정 필요
+### 8. 실행/버전 모델 고도화
 
-3. Bamboo 실제 응답 스키마 차이
-- 현재 구현은 최신 REST 응답을 가정한 최소 파싱이다.
-- 운영 Bamboo 버전에서 expand 필드가 일부 다를 수 있다.
+- [ ] provider별 실행 번호/외부 실행 키 정책 명확화
+- [ ] Jenkins 실행 이력과 `BuildExecution` 연결 구현
+- [ ] artifact/deployment entity 실제 적재 경로 구현
 
-4. 권한/감사 로그 정책
-- 운영 UI에서 publish와 run 액션을 누구에게 허용할지 아직 미정이다.
+### 9. 문서/README 동기화
 
-5. 커버리지 병목 구간
-- `backend/apps/ui/views.py`, `backend/apps/buildmeta/selectors/definitions.py`, `backend/apps/buildmeta/services/bamboo.py` 쪽 커버리지가 특히 낮다.
-- 기능 구현 부족보다는 테스트 부족이 원인이라, 신규 기능보다 회귀 테스트 확대를 우선하는 편이 효율적이다.
+- [ ] README의 현재 상태를 실제 구현 수준에 맞게 추가 정리
+  - Jenkins는 문서 기준 방향이지 구현 완료 아님을 더 명확히 표기
+- [ ] API 문서에 신규 공통 모델/제약 추가
+- [ ] 상세 설계 문서에 실제 구현 완료/미완료 상태 반영
 
-## 참고 파일
+## 낮음
 
-- `backend/apps/buildmeta/services/bamboo.py`
-- `backend/apps/buildmeta/services/system_settings.py`
-- `backend/apps/ui/templates/ui/build_detail.html`
-- `backend/apps/ui/templates/ui/bamboo_plan_detail.html`
-- `backend/apps/ui/templates/ui/coverity_settings.html`
-- `backend/apps/ui/views.py`
-- `scripts/plan_tasks/fragments/py/execution_support.py`
-- `src/bamboo_spec_generator/script_renderer.py`
-- `src/bamboo_spec_generator/parser.py`
-- `backend/apps/ui/tests.py`
-- `backend/apps/buildmeta/tests.py`
-- `tests/test_cli.py`
-- `tests/test_api_client.py`
-- `tests/test_coverity.py`
-- `tests/test_parser_validator.py`
-- `tests/test_script_renderer.py`
-- `tests/test_generator.py`
+### 10. 레거시 명칭 최종 청소
+
+- [ ] 테스트 코드 내부에 남아 있는 `BuildPlan`, `ProjectBuild` 등 레거시 테스트 shim 명칭 제거
+- [ ] historical migration을 제외한 저장소 전역 레거시 용어 재검색 후 정리
+- [ ] selector/helper 내부의 `legacy` 표현 정리
+  - 예: `_legacy_result_status`, `_serialize_legacy_build`
+
+## 결정 필요
+
+- [ ] 외부 API와 UI URL에서 `build-plan` 용어를 언제까지 유지할지
+- [ ] `db_table`의 `_v2` suffix를 유지할지, 새 migration으로 정리할지
+- [ ] detached placeholder 프로젝트 전략을 테스트 전용으로 유지할지
+- [ ] Jenkins 1차 등록 단위를 `job`만으로 둘지, `folder + job`를 1급 모델로 올릴지
+
+## 추천 다음 순서
+
+1. Jenkins 백엔드 서비스/selector/API 추가
+2. UI 상단 provider 스위치와 테마 분리
+3. Jenkins 운영 현황 화면 구현
+4. 테스트 shim 제거 및 최종 네이밍 정리
+5. migration/db_table 정리 여부 결정
