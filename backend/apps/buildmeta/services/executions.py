@@ -4,24 +4,37 @@ from datetime import datetime
 
 from django.db import transaction
 
-from apps.buildmeta.models import BuildExecution, BuildPlan, BuildPlanBuildInfo, BuildVersion, StaticAnalysisResult
+from apps.buildmeta.models import (
+    BambooBuildInfo,
+    BambooBuildUnit,
+    BuildExecution,
+    BuildVersion,
+    StaticAnalysisResult,
+)
 
+
+BRANCH_KIND_MASTER = "master"
+BRANCH_KIND_RELEASE = "release"
+BRANCH_KIND_DEV = "dev"
 
 INITIAL_VERSION_BY_BRANCH = {
-    BuildVersion.BRANCH_KIND_MASTER: (1, 0, 0),
-    BuildVersion.BRANCH_KIND_RELEASE: (0, 1, 0),
-    BuildVersion.BRANCH_KIND_DEV: (0, 0, 1),
+    BRANCH_KIND_MASTER: (1, 0, 0),
+    BRANCH_KIND_RELEASE: (0, 1, 0),
+    BRANCH_KIND_DEV: (0, 0, 1),
 }
 
 
 def _next_version_numbers(latest_version: BuildVersion | None, branch_kind: str) -> tuple[int, int, int]:
+    normalized = (branch_kind or BRANCH_KIND_DEV).strip().lower()
+    if normalized not in INITIAL_VERSION_BY_BRANCH:
+        normalized = BRANCH_KIND_DEV
     if latest_version is None:
-        return INITIAL_VERSION_BY_BRANCH[branch_kind]
-    if branch_kind == BuildVersion.BRANCH_KIND_MASTER:
-        return latest_version.major + 1, 0, 0
-    if branch_kind == BuildVersion.BRANCH_KIND_RELEASE:
-        return latest_version.major, latest_version.minor + 1, 0
-    return latest_version.major, latest_version.minor, latest_version.patch + 1
+        return INITIAL_VERSION_BY_BRANCH[normalized]
+    if normalized == BRANCH_KIND_MASTER:
+        return latest_version.version_major + 1, 0, 0
+    if normalized == BRANCH_KIND_RELEASE:
+        return latest_version.version_major, latest_version.version_minor + 1, 0
+    return latest_version.version_major, latest_version.version_minor, latest_version.version_patch + 1
 
 
 @transaction.atomic
@@ -34,11 +47,20 @@ def start_execution(
     build_key: str = "",
     started_at: datetime | None = None,
 ) -> dict:
-    plan = BuildPlan.objects.select_for_update().select_related("latest_version").get(plan_key=plan_key)
-    build_info = _resolve_build_info(plan=plan, build_key=build_key)
+    bamboo_unit = (
+        BambooBuildUnit.objects.select_for_update()
+        .select_related("build_unit__latest_version")
+        .get(plan_key=plan_key)
+    )
+    build_unit = bamboo_unit.build_unit
+    build_info = _resolve_build_info(bamboo_unit=bamboo_unit, build_key=build_key)
     existing_execution = (
         BuildExecution.objects.select_related("build_version")
-        .filter(build_plan=plan, build_number=build_number, build_info=build_info)
+        .filter(
+            build_unit=build_unit,
+            execution_number=build_number,
+            external_execution_key=build_info.build_key if build_info is not None else "",
+        )
         .order_by("-created_at")
         .first()
     )
@@ -48,45 +70,49 @@ def start_execution(
                 f"Build number '{build_number}' for plan '{plan_key}' is already associated with a different commit."
             )
         version = existing_execution.build_version
-        version.latest_execution = existing_execution
-        version.save(update_fields=["latest_execution", "updated_at"])
+        if version is not None:
+            version.latest_execution = existing_execution
+            version.save(update_fields=["latest_execution", "updated_at"])
         return {
-            "buildVersionId": str(version.id),
+            "buildVersionId": str(version.id) if version is not None else "",
             "buildExecutionId": str(existing_execution.id),
-            "version": version.version_text,
+            "version": version.version_text if version is not None else "",
             "buildKey": build_info.build_key if build_info is not None else "",
             "reusedExistingVersion": True,
         }
 
-    version = BuildVersion.objects.filter(
-        build_plan=plan,
-        commit_hash=commit_hash,
-    ).order_by("-major", "-minor", "-patch", "-created_at").first()
+    version = (
+        BuildVersion.objects.filter(build_unit=build_unit, commit_hash=commit_hash)
+        .order_by("-version_major", "-version_minor", "-version_patch", "-created_at")
+        .first()
+    )
     reused_existing_version = version is not None
     if version is None:
-        major, minor, patch = _next_version_numbers(plan.latest_version, branch_kind)
-        BuildVersion.objects.filter(build_plan=plan, is_latest=True).update(is_latest=False)
+        major, minor, patch = _next_version_numbers(build_unit.latest_version, branch_kind)
+        BuildVersion.objects.filter(build_unit=build_unit, is_latest=True).update(is_latest=False)
         version = BuildVersion.objects.create(
-            build_plan=plan,
+            build_unit=build_unit,
             version_text=f"v{major}.{minor}.{patch}",
-            major=major,
-            minor=minor,
-            patch=patch,
-            branch_kind=branch_kind,
+            version_major=major,
+            version_minor=minor,
+            version_patch=patch,
+            branch_kind=(branch_kind or BRANCH_KIND_DEV).strip().lower(),
+            branch_name=(branch_kind or "").strip(),
             commit_hash=commit_hash,
             is_latest=True,
         )
-        plan.latest_version = version
-        plan.save(update_fields=["latest_version", "updated_at"])
+        build_unit.latest_version = version
+        build_unit.save(update_fields=["latest_version", "updated_at"])
 
     execution = BuildExecution.objects.create(
-        build_plan=plan,
-        build_info=build_info,
+        build_unit=build_unit,
         build_version=version,
-        build_number=build_number,
+        execution_number=build_number,
+        external_execution_key=build_info.build_key if build_info is not None else "",
+        trigger_type="build",
+        branch_name=(branch_kind or "").strip(),
         commit_hash=commit_hash,
-        success=False,
-        result_status="running",
+        status=BuildExecution.STATUS_RUNNING,
         started_at=started_at,
     )
 
@@ -102,13 +128,13 @@ def start_execution(
     }
 
 
-def _resolve_build_info(*, plan: BuildPlan, build_key: str) -> BuildPlanBuildInfo | None:
+def _resolve_build_info(*, bamboo_unit: BambooBuildUnit, build_key: str) -> BambooBuildInfo | None:
     normalized_key = build_key.strip()
     if not normalized_key:
         return None
-    build_info = BuildPlanBuildInfo.objects.filter(build_plan=plan, build_key=normalized_key).first()
+    build_info = BambooBuildInfo.objects.filter(bamboo_build_unit=bamboo_unit, build_key=normalized_key).first()
     if build_info is None:
-        raise ValueError(f"Build info '{normalized_key}' is not registered for plan '{plan.plan_key}'.")
+        raise ValueError(f"Build info '{normalized_key}' is not registered for plan '{bamboo_unit.plan_key}'.")
     return build_info
 
 
@@ -145,13 +171,13 @@ def finish_execution(
     finished_at: datetime | None = None,
     static_analysis_results: list[dict] | None = None,
 ) -> dict:
-    execution = BuildExecution.objects.select_related("build_version", "build_plan").get(pk=execution_id)
+    execution = BuildExecution.objects.select_related("build_version", "build_unit").get(pk=execution_id)
     _record_static_analysis_results_for_execution(execution, static_analysis_results or [])
 
+    normalized_status = _normalize_execution_status(result_status=result_status, success=success)
     if _should_apply_execution_finish(execution, success):
-        execution.success = success
-        execution.result_status = result_status
-        execution.summary_message = summary_message
+        execution.status = normalized_status
+        execution.summary = summary_message
         execution.stage_name = stage_name
         execution.job_name = job_name
         execution.task_name = task_name
@@ -159,24 +185,27 @@ def finish_execution(
         execution.save()
 
     version = execution.build_version
-    version.latest_execution = execution
-    version.latest_success = execution.success
-    version.save(update_fields=["latest_execution", "latest_success", "updated_at"])
-
-    if version.is_latest:
-        plan = execution.build_plan
-        plan.latest_version = version
-        plan.save(update_fields=["latest_version", "updated_at"])
+    if version is not None:
+        version.latest_execution = execution
+        version.latest_success = success
+        version.save(update_fields=["latest_execution", "latest_success", "updated_at"])
+        if version.is_latest:
+            build_unit = execution.build_unit
+            build_unit.latest_version = version
+            build_unit.save(update_fields=["latest_version", "updated_at"])
 
     return {
         "buildExecutionId": str(execution.id),
-        "buildVersionId": str(version.id),
-        "resultStatus": execution.result_status,
-        "success": execution.success,
+        "buildVersionId": str(version.id) if version is not None else "",
+        "resultStatus": result_status,
+        "success": execution.status == BuildExecution.STATUS_SUCCESS,
     }
 
 
-def _record_static_analysis_results_for_execution(execution: BuildExecution, static_analysis_results: list[dict]) -> None:
+def _record_static_analysis_results_for_execution(
+    execution: BuildExecution,
+    static_analysis_results: list[dict],
+) -> None:
     for result in static_analysis_results:
         StaticAnalysisResult.objects.update_or_create(
             build_execution=execution,
@@ -189,10 +218,23 @@ def _record_static_analysis_results_for_execution(execution: BuildExecution, sta
         )
 
 
+def _normalize_execution_status(*, result_status: str, success: bool) -> str:
+    normalized = (result_status or "").strip().lower()
+    if normalized in {
+        BuildExecution.STATUS_QUEUED,
+        BuildExecution.STATUS_RUNNING,
+        BuildExecution.STATUS_SUCCESS,
+        BuildExecution.STATUS_FAILED,
+        BuildExecution.STATUS_CANCELED,
+    }:
+        return normalized
+    return BuildExecution.STATUS_SUCCESS if success else BuildExecution.STATUS_FAILED
+
+
 def _should_apply_execution_finish(execution: BuildExecution, success: bool) -> bool:
-    is_terminal = execution.finished_at is not None or execution.result_status != "running"
+    is_terminal = execution.finished_at is not None or execution.status != BuildExecution.STATUS_RUNNING
     if not is_terminal:
         return True
-    if execution.success is False and success:
+    if execution.status == BuildExecution.STATUS_FAILED and success:
         return False
     return True

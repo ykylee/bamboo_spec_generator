@@ -2,49 +2,35 @@ from __future__ import annotations
 
 from django.core.exceptions import ObjectDoesNotExist
 
-from apps.buildmeta.models import Project
+from apps.buildmeta.models import BuildUnit, Project
 
 
 def _project_queryset():
     return Project.objects.prefetch_related(
         "repositories",
-        "builds__repository",
-        "builds__build_plan__build_infos",
-        "builds__build_plan__latest_version__latest_execution",
+        "build_units__repository",
+        "build_units__versions__latest_execution",
     )
 
 
-def list_project_summaries() -> list[dict]:
+def list_project_summaries(*, ci_provider: str | None = None) -> list[dict]:
     summaries = []
-    projects = _project_queryset().all().order_by("jira_project_key")
+    projects = _project_queryset().all().order_by("ci_provider", "project_key")
+    if ci_provider:
+        projects = projects.filter(ci_provider=ci_provider)
     for project in projects:
         repositories = list(project.repositories.all())
-        builds = list(project.builds.all())
-        repository_count = len(repositories)
-        build_count = len(builds)
-        representative_repo_slug = project.representative_repo_slug
-        generation_status = _build_generation_status(project, repositories, builds)
+        build_units = list(project.build_units.all())
+        generation_status = _build_generation_status(project, repositories, build_units)
         missing_coverity_count = sum(
-            1
-            for repo in repositories
-            if not repo.coverity_project or not repo.coverity_stream
+            1 for repo in repositories if not repo.coverity_project or not repo.coverity_stream
         )
         failed_build_count = sum(
-            1
-            for build in builds
-            if build.build_plan.latest_version is not None and build.build_plan.latest_version.latest_success is False
+            1 for build_unit in build_units if build_unit.latest_version is not None and build_unit.latest_version.latest_success is False
         )
-
-        warning_tags = []
-        if not representative_repo_slug:
-            warning_tags.append("대표 저장소 없음")
-        if repository_count == 0:
-            warning_tags.append("저장소 없음")
-        if build_count == 0:
-            warning_tags.append("빌드 없음")
-        for issue in generation_status["generationReadinessIssues"]:
-            if issue not in warning_tags:
-                warning_tags.append(issue)
+        representative_repo_slug = project.representative_repository.repo_slug if project.representative_repository_id else ""
+        representative_repo_key = project.representative_repository.repo_key if project.representative_repository_id else ""
+        warning_tags = list(generation_status["generationReadinessIssues"])
         if missing_coverity_count:
             warning_tags.append(f"Coverity 미지정 {missing_coverity_count}")
         if failed_build_count:
@@ -52,113 +38,162 @@ def list_project_summaries() -> list[dict]:
 
         summaries.append(
             {
-                "jiraProjectKey": project.jira_project_key,
-                "bitbucketProjectKey": project.bitbucket_project_key,
+                "projectKey": project.project_key,
+                "name": project.name,
+                "description": project.description,
+                "ownerTeam": project.owner_team,
+                "serviceType": project.service_type,
+                "ciProvider": project.ci_provider,
+                "status": project.status,
                 "representativeRepoSlug": representative_repo_slug,
-                "repositoryCount": repository_count,
+                "repositoryCount": len(repositories),
                 "repositorySlugs": [repo.repo_slug for repo in sorted(repositories, key=lambda item: item.repo_slug)],
-                "buildCount": build_count,
-                "activeDefinitionCount": 0,
-                "readyBuildCount": generation_status["readyBuildCount"],
+                "buildUnitCount": len(build_units),
+                "buildCount": len(build_units),
                 "generationReady": generation_status["generationReady"],
                 "generationReadinessIssues": generation_status["generationReadinessIssues"],
+                "readyBuildCount": generation_status["readyBuildCount"],
+                "activeDefinitionCount": generation_status["activeDefinitionCount"],
                 "missingCoverityCount": missing_coverity_count,
                 "failedBuildCount": failed_build_count,
                 "warningTags": warning_tags,
-                "metadataWarningTags": [
-                    tag
-                    for tag in warning_tags
-                    if not tag.startswith("마지막 빌드 실패")
-                ],
+                "metadataWarningTags": warning_tags,
                 "needsAttention": bool(warning_tags),
+                "jiraProjectKey": project.project_key,
+                "bitbucketProjectKey": representative_repo_key,
             }
         )
     return summaries
 
 
-def get_project_detail(jira_project_key: str) -> dict | None:
+def get_project_detail(project_key: str, *, ci_provider: str | None = None) -> dict | None:
+    queryset = _project_queryset()
+    if ci_provider:
+        queryset = queryset.filter(ci_provider=ci_provider)
     try:
-        project = _project_queryset().get(jira_project_key=jira_project_key)
+        project = queryset.get(project_key=project_key)
     except ObjectDoesNotExist:
         return None
+
     repositories = list(project.repositories.all())
-    builds = list(project.builds.all())
-    generation_status = _build_generation_status(project, repositories, builds)
+    build_units = list(project.build_units.all())
+    generation_status = _build_generation_status(project, repositories, build_units)
+    representative_repo_slug = project.representative_repository.repo_slug if project.representative_repository_id else ""
+    representative_repo_key = project.representative_repository.repo_key if project.representative_repository_id else ""
+
     return {
-        "jiraProjectKey": project.jira_project_key,
-        "bitbucketProjectKey": project.bitbucket_project_key,
-        "representativeRepoSlug": project.representative_repo_slug,
+        "projectKey": project.project_key,
+        "name": project.name,
+        "description": project.description,
+        "ownerTeam": project.owner_team,
+        "serviceType": project.service_type,
+        "ciProvider": project.ci_provider,
+        "status": project.status,
         "updatedAt": project.updated_at,
+        "representativeRepoSlug": representative_repo_slug,
         "generation": generation_status,
         "repositories": [
             {
                 "repoSlug": repo.repo_slug,
+                "repoType": repo.repo_type,
+                "repoKey": repo.repo_key,
+                "cloneUrl": repo.clone_url,
+                "defaultBranch": repo.default_branch,
                 "coverityProject": repo.coverity_project,
                 "coverityStream": repo.coverity_stream,
                 "isRepresentative": repo.is_representative,
             }
-            for repo in project.repositories.all().order_by("repo_slug")
+            for repo in sorted(repositories, key=lambda item: item.repo_slug)
         ],
-        "builds": [
-            {
-                "buildName": build.build_name,
-                "buildType": build.build_type,
-                "runtimeStack": build.runtime_stack,
-                "repositorySlug": build.repository.repo_slug if build.repository_id else "",
-                "planKey": build.build_plan.plan_key,
-                "buildId": build.build_plan.build_id,
-                "generationReady": bool(build.repository_id) and build.build_plan.build_infos.exists(),
-                "activeDefinitionYear": "",
-                "staticAnalysisToolVersion": build.build_plan.static_analysis_tool_version,
-                "coverityProject": build.build_plan.coverity_project,
-                "repositoryLinkageModeOverride": build.build_plan.repository_linkage_mode_override,
-                "buildInfoCount": build.build_plan.build_infos.count(),
-                "latestVersion": (
-                    build.build_plan.latest_version.version_text
-                    if build.build_plan.latest_version is not None
-                    else ""
-                ),
-                "latestSuccess": (
-                    build.build_plan.latest_version.latest_success
-                    if build.build_plan.latest_version is not None
-                    else None
-                ),
-                "buildInfoUrl": f"/projects/{project.jira_project_key}/builds/{build.build_plan.plan_key}/infos/",
-            }
-            for build in sorted(builds, key=lambda item: item.build_name)
-        ],
+        "buildUnits": [_serialize_build_unit(build_unit) for build_unit in sorted(build_units, key=lambda item: item.display_name)],
+        "jiraProjectKey": project.project_key,
+        "bitbucketProjectKey": representative_repo_key,
+        "builds": [_serialize_legacy_build(build_unit) for build_unit in sorted(build_units, key=lambda item: item.display_name)],
     }
 
 
-def _build_generation_status(project: Project, repositories: list, builds: list) -> dict:
+def _serialize_build_unit(build_unit: BuildUnit) -> dict:
+    provider_details: dict = {}
+    if build_unit.ci_provider == Project.PROVIDER_BAMBOO and hasattr(build_unit, "bamboo"):
+        provider_details = {
+            "planKey": build_unit.bamboo.plan_key,
+            "buildId": build_unit.bamboo.build_id,
+            "bambooProjectKey": build_unit.bamboo.bamboo_project_key,
+        }
+    elif build_unit.ci_provider == Project.PROVIDER_JENKINS and hasattr(build_unit, "jenkins"):
+        provider_details = {
+            "jobPath": build_unit.jenkins.job_path,
+            "jobType": build_unit.jenkins.job_type,
+            "folderPath": build_unit.jenkins.folder_path,
+            "pipelineKind": build_unit.jenkins.pipeline_kind,
+        }
+    return {
+        "externalKey": build_unit.external_key,
+        "displayName": build_unit.display_name,
+        "description": build_unit.description,
+        "unitType": build_unit.unit_type,
+        "repositorySlug": build_unit.repository.repo_slug if build_unit.repository_id else "",
+        "language": build_unit.language,
+        "compiler": build_unit.compiler,
+        "runtimeStack": build_unit.runtime_stack,
+        "lifecycleStatus": build_unit.lifecycle_status,
+        "isEnabled": build_unit.is_enabled,
+        "latestVersion": build_unit.latest_version.version_text if build_unit.latest_version_id else "",
+        "latestSuccess": build_unit.latest_version.latest_success if build_unit.latest_version_id else None,
+        "providerDetails": provider_details,
+    }
+
+
+def _serialize_legacy_build(build_unit: BuildUnit) -> dict:
+    provider_details = _serialize_build_unit(build_unit)["providerDetails"]
+    return {
+        "buildName": build_unit.display_name,
+        "buildType": build_unit.compiler,
+        "runtimeStack": build_unit.runtime_stack,
+        "repositorySlug": build_unit.repository.repo_slug if build_unit.repository_id else "",
+        "planKey": provider_details.get("planKey", build_unit.external_key),
+        "buildId": provider_details.get("buildId", build_unit.external_key),
+        "generationReady": True,
+        "activeDefinitionYear": "",
+        "staticAnalysisToolVersion": getattr(getattr(build_unit, "bamboo", None), "static_analysis_tool_version", ""),
+        "coverityProject": getattr(getattr(build_unit, "bamboo", None), "coverity_project", ""),
+        "repositoryLinkageModeOverride": getattr(getattr(build_unit, "bamboo", None), "repository_linkage_mode", ""),
+        "buildInfoCount": getattr(getattr(build_unit, "bamboo", None), "build_infos", []).count() if hasattr(getattr(build_unit, "bamboo", None), "build_infos") else 0,
+        "latestVersion": build_unit.latest_version.version_text if build_unit.latest_version_id else "",
+        "latestSuccess": build_unit.latest_version.latest_success if build_unit.latest_version_id else None,
+        "buildInfoUrl": "",
+    }
+
+
+def _build_generation_status(project: Project, repositories: list, build_units: list) -> dict:
     issues: list[str] = []
     if not repositories:
         issues.append("저장소 없음")
-    if not builds:
-        issues.append("빌드 없음")
-    if not project.representative_repo_slug:
-        issues.append("대표 저장소 없음")
-    elif all(repo.repo_slug != project.representative_repo_slug for repo in repositories):
-        issues.append("대표 저장소 메타데이터 불일치")
+    if not build_units:
+        issues.append("빌드 단위 없음")
+    if not project.representative_repository_id:
+        issues.append("대표 저장소 메타데이터 불일치" if repositories else "대표 저장소 없음")
 
-    unlinked_build_count = 0
-    builds_without_build_info = 0
-    for build in builds:
-        if build.repository_id is None:
-            unlinked_build_count += 1
-            continue
-        if not build.build_plan.build_infos.exists():
-            builds_without_build_info += 1
-
+    unlinked_build_count = sum(1 for build_unit in build_units if build_unit.repository_id is None)
+    if project.ci_provider == Project.PROVIDER_BAMBOO:
+        builds_without_definition = sum(
+            1
+            for build_unit in build_units
+            if not hasattr(build_unit, "bamboo") or not build_unit.bamboo.build_infos.exists()
+        )
+        missing_message = "빌드 정보 없음"
+    else:
+        builds_without_definition = sum(1 for build_unit in build_units if not build_unit.definitions.filter(is_active=True).exists())
+        missing_message = "활성 정의 없음"
     if unlinked_build_count:
-        issues.append(f"저장소 연결 없는 빌드 {unlinked_build_count}")
-    if builds_without_build_info:
-        issues.append(f"빌드 정보 없음 {builds_without_build_info}")
+        issues.append(f"저장소 연결 없는 빌드 단위 {unlinked_build_count}")
+    if builds_without_definition:
+        issues.append(f"{missing_message} {builds_without_definition}")
 
     return {
-        "generationReady": bool(builds) and not issues,
+        "generationReady": bool(build_units) and not issues,
         "generationReadinessIssues": issues,
-        "readyBuildCount": len(builds) - unlinked_build_count - builds_without_build_info,
-        "activeDefinitionCount": 0,
-        "totalBuildCount": len(builds),
+        "readyBuildCount": len(build_units) - unlinked_build_count - builds_without_definition,
+        "activeDefinitionCount": sum(build_unit.definitions.filter(is_active=True).count() for build_unit in build_units),
+        "totalBuildCount": len(build_units),
     }

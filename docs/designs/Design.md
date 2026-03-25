@@ -2,7 +2,7 @@
 
 ## 문서 메타데이터
 
-- 문서 일자: 2026-03-24
+- 문서 일자: 2026-03-25
 - 문서 유형: Design
 - 상태: 초안
 - 관련 SAD: [./SAD.md](./SAD.md)
@@ -10,7 +10,7 @@
 
 ## 요약
 
-이 문서는 제품의 상세 설계를 한 곳에 모은다. 범위는 JSON 입력 스키마, 저장소 연결 및 브랜치 트리거, 작업 하위 경로, MSBuild 보정, 스크립트 자산 렌더링, 빌드 메타데이터 DB 모델, 운영 백엔드/API/조회 UI 설계, 그리고 장기 확장 범위인 배포/릴리스 관리 상세 설계다.
+이 문서는 제품의 상세 설계를 한 곳에 모은다. 범위는 JSON 입력 스키마, 저장소 연결 및 브랜치 트리거, 작업 하위 경로, MSBuild 보정, 스크립트 자산 렌더링, 빌드 메타데이터 DB 모델, 운영 백엔드/API/조회 UI 설계, 다중 CI 도구 공통 모델 확장, 그리고 장기 확장 범위인 배포/릴리스 관리 상세 설계다.
 
 함수 단위 또는 특정 구현 흐름의 상세 설계가 필요할 때는 `detailed_designs/` 아래에 별도 문서를 추가한다.
 
@@ -22,6 +22,15 @@
 - 저장소 연결의 `branches`, `create_if_missing`, `applicationLink`는 현재 Java Specs 생성까지 반영된다. 남은 범위는 운영 환경별 application link 값 공급과 세부 운영 정책 확정이다.
 - 현재 추가된 함수 단위 상세 설계:
   - [프로젝트 등록 및 Specs 생성 준비도](./detailed_designs/project_registration_and_generation_readiness.md)
+- 현재 추가된 제품 상세 설계:
+  - [다중 CI 콘솔 모드 전환 및 공통 도메인 모델](./detailed_designs/multi_ci_console_and_provider_model.md)
+  - [CI/CD 공통 백엔드 모델 일반화 검토](./detailed_designs/backend_model_generalization_review.md)
+  - [BuildUnit 중심 백엔드 모델 초안](./detailed_designs/buildunit_backend_model_draft.md)
+  - [BuildUnit 중심 백엔드 모델 ERD](./detailed_designs/buildunit_backend_model_erd.md)
+- 현재 추가된 결정사항 문서:
+  - [다중 CI 콘솔 결정사항](./detailed_designs/multi_ci_console_decisions.md)
+- Jenkins 등록/모드 전환 상세 설계는 아직 별도 문서가 없으며 후속 상세 설계 범위다.
+- 백엔드 모델 전환은 기존 `BuildPlan` 계열 호환 유지가 아니라 `BuildUnit` 중심 재구축을 기본 전제로 한다.
 
 ## 1. 입력 JSON 설계
 
@@ -190,13 +199,15 @@ scripts/plan_tasks/
 ### 논리 엔터티
 
 - `Project`
-  - Jira/Bitbucket/Coverity 관점의 상위 프로젝트 메타데이터
+  - Jira/Bitbucket/Coverity와 CI 도구 유형 관점의 상위 프로젝트 메타데이터
 - `ProjectRepository`
   - 프로젝트에 속한 개별 저장소 메타데이터
 - `ProjectBuild`
   - 프로젝트에 속한 개별 빌드 항목
+- `CiProvider`
+  - Bamboo, Jenkins 같은 CI 도구 구분값 또는 동등한 표현
 - `BuildPlan`
-  - 플랜 대표 정보와 `latest_version_id`
+  - Bamboo 플랜 또는 Jenkins 잡과 연결 가능한 공통 빌드 단위 대표 정보와 `latest_version_id`
 - `BuildPlanBuildInfo`
   - 플랜 아래 다중 OS/언어/컴파일러/명령 조합을 보관하는 빌드 상세 메타데이터
 - `BuildPlanDefinition`
@@ -213,6 +224,32 @@ scripts/plan_tasks/
   - 정의 변경 이력
 - `SystemSetting`
   - Coverity/Bamboo/Git clone URL/repository linkage mode 같은 운영 공통 설정
+
+### 공통 모델 확장 방향
+
+- 프로젝트, 빌드 단위, 운영 현황 응답은 `ci_provider` 필드를 통해 Bamboo와 Jenkins를 구분한다.
+- UI와 API에서는 가능한 범위에서 `plan`과 `job`을 공통 `빌드 단위`로 추상화하고, 도구별 상세 화면에서만 고유 용어를 드러낸다.
+- Bamboo 전용 필드와 Jenkins 전용 필드는 공통 대표 엔터티에 직접 혼합하기보다 확장 테이블, JSON 필드, 또는 도구별 상세 모델로 분리하는 방향을 우선 검토한다.
+
+## 7. 공통 CI 콘솔 UI 설계 방향
+
+### 모드 전환
+
+- 상단 주요 네비게이션에 `Bamboo 관리`, `Jenkins 관리` 전환 컨트롤을 둔다.
+- 현재 모드는 URL, 세션, 또는 동등한 상태 모델로 일관되게 유지한다.
+- 모드 전환 후에도 메뉴 구조와 화면 배치는 가능한 범위에서 동일하게 유지한다.
+
+### 테마
+
+- Bamboo 모드는 밝은 파란색 계열을 대표 색상으로 사용한다.
+- Jenkins 모드는 밝은 빨간색 계열을 대표 색상으로 사용한다.
+- 상태 배지와 심각도 색상은 도메인 의미를 우선하고, 브랜드 테마 색상은 레이아웃 포인트와 주요 CTA에 우선 적용한다.
+
+### 정보 구조
+
+- 프로젝트 목록, 프로젝트 상세, 빌드 단위 목록, 빌드 단위 상세, 운영 현황 대시보드는 공통 구조를 유지한다.
+- 공통 화면 문구는 일반적인 CI 운영 용어를 우선 사용한다.
+- 도구별 고유 용어는 세부 패널이나 상세 필드 라벨에서만 제한적으로 노출한다.
 
 ### 향후 확장 엔터티
 

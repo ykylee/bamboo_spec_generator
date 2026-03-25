@@ -9,12 +9,12 @@ from pathlib import Path
 from django.db import transaction
 
 from apps.buildmeta.models import (
-    BuildDefinitionHistory,
-    BuildPlan,
-    BuildPlanDefinition,
+    AuditEvent,
+    BambooBuildUnit,
+    BuildUnitDefinition,
+    BuildUnit,
     Project,
-    ProjectBuild,
-    ProjectRepository,
+    Repository,
 )
 
 
@@ -57,32 +57,25 @@ def load_definition_import_records(input_root: Path) -> list[DefinitionImportRec
 
 
 @transaction.atomic
-def import_definition_records(records: list[DefinitionImportRecord], *, source_kind: str = BuildPlanDefinition.SOURCE_KIND_JSON) -> dict:
+def import_definition_records(
+    records: list[DefinitionImportRecord],
+    *,
+    source_kind: str = BuildUnitDefinition.SOURCE_JSON,
+) -> dict:
     imported_count = 0
     activated_count = 0
 
     for record in records:
-        build = record.build_definition
         project = _upsert_project(record)
         repository = _upsert_repository(project, record)
-        plan = _upsert_build_plan(record)
-        _upsert_project_build(project, repository, plan, record)
-        changed_active, definition = _activate_definition(
-            plan=plan,
-            project=project,
+        build_unit, _ = _upsert_build_unit(project, repository, record)
+        changed_active, _definition = _activate_definition(
+            build_unit=build_unit,
             record=record,
             source_kind=source_kind,
         )
-
         if changed_active:
-            BuildDefinitionHistory.objects.create(
-                build_plan=plan,
-                build_plan_definition=definition,
-                change_type="import",
-                change_summary=f"Imported from {_display_source_path(record.source_path)}",
-            )
             activated_count += 1
-
         imported_count += 1
 
     return {
@@ -95,36 +88,26 @@ def import_definition_records(records: list[DefinitionImportRecord], *, source_k
 def sync_definition_records(
     records: list[DefinitionImportRecord],
     *,
-    source_kind: str = BuildPlanDefinition.SOURCE_KIND_JSON,
+    source_kind: str = BuildUnitDefinition.SOURCE_JSON,
     deactivate_missing: bool = False,
 ) -> dict:
     imported_count = 0
     activated_count = 0
     unchanged_count = 0
     deactivated_count = 0
-    synced_plan_keys: set[str] = set()
+    synced_external_keys: set[str] = set()
 
     for record in records:
-        build = record.build_definition
         project = _upsert_project(record)
         repository = _upsert_repository(project, record)
-        plan = _upsert_build_plan(record)
-        _upsert_project_build(project, repository, plan, record)
-        synced_plan_keys.add(plan.plan_key)
-
-        changed_active, definition = _activate_definition(
-            plan=plan,
-            project=project,
+        build_unit, external_key = _upsert_build_unit(project, repository, record)
+        synced_external_keys.add(external_key)
+        changed_active, _definition = _activate_definition(
+            build_unit=build_unit,
             record=record,
             source_kind=source_kind,
         )
         if changed_active:
-            BuildDefinitionHistory.objects.create(
-                build_plan=plan,
-                build_plan_definition=definition,
-                change_type="sync",
-                change_summary=f"Synchronized from {_display_source_path(record.source_path)}",
-            )
             activated_count += 1
         else:
             unchanged_count += 1
@@ -132,18 +115,19 @@ def sync_definition_records(
 
     if deactivate_missing:
         active_definitions = (
-            BuildPlanDefinition.objects.select_related("build_plan")
-            .filter(is_active=True, source_kind=source_kind)
-            .exclude(build_plan__plan_key__in=synced_plan_keys)
+            BuildUnitDefinition.objects.select_related("build_unit")
+            .filter(is_active=True, source_kind=source_kind, build_unit__ci_provider=Project.PROVIDER_BAMBOO)
+            .exclude(build_unit__external_key__in=synced_external_keys)
         )
         for definition in active_definitions:
             definition.is_active = False
-            definition.save(update_fields=["is_active"])
-            BuildDefinitionHistory.objects.create(
-                build_plan=definition.build_plan,
-                build_plan_definition=definition,
-                change_type="deactivate",
-                change_summary="Deactivated because the definition was missing from the latest sync input.",
+            definition.save(update_fields=["is_active", "updated_at"])
+            AuditEvent.objects.create(
+                actor="system",
+                event_type="deactivate",
+                target_type="build_unit_definition",
+                target_id=str(definition.id),
+                payload_json={"buildUnit": definition.build_unit.external_key},
             )
             deactivated_count += 1
 
@@ -157,108 +141,111 @@ def sync_definition_records(
 
 def _upsert_project(record: DefinitionImportRecord) -> Project:
     build = record.build_definition
-    defaults = {
-        "bitbucket_project_key": build.repository.project_key,
-        "representative_repo_slug": build.repository.repo_slug,
-    }
-    project, created = Project.objects.get_or_create(
-        jira_project_key=build.repository.project_key,
-        defaults=defaults,
+    project, _created = Project.objects.get_or_create(
+        project_key=build.repository.project_key,
+        ci_provider=Project.PROVIDER_BAMBOO,
+        defaults={
+            "name": build.repository.project_key,
+            "description": "",
+            "status": Project.STATUS_ACTIVE,
+        },
     )
-    updated_fields: list[str] = []
-    if not created and project.bitbucket_project_key != build.repository.project_key:
-        project.bitbucket_project_key = build.repository.project_key
-        updated_fields.append("bitbucket_project_key")
-    if not project.representative_repo_slug:
-        project.representative_repo_slug = build.repository.repo_slug
-        updated_fields.append("representative_repo_slug")
-    if updated_fields:
-        project.save(update_fields=updated_fields + ["updated_at"])
     return project
 
 
-def _upsert_repository(project: Project, record: DefinitionImportRecord) -> ProjectRepository:
+def _upsert_repository(project: Project, record: DefinitionImportRecord) -> Repository:
     build = record.build_definition
-    repository, created = ProjectRepository.objects.get_or_create(
+    repository, _created = Repository.objects.update_or_create(
         project=project,
         repo_slug=build.repository.repo_slug,
-        defaults={"is_representative": project.representative_repo_slug == build.repository.repo_slug},
+        defaults={
+            "repo_type": Repository.TYPE_BITBUCKET,
+            "repo_key": build.repository.project_key,
+            "clone_url": build.repository.clone_url or "",
+            "default_branch": "dev",
+            "is_representative": project.representative_repository_id is None or (
+                project.representative_repository is not None
+                and project.representative_repository.repo_slug == build.repository.repo_slug
+            ),
+        },
     )
-    if not created and project.representative_repo_slug == build.repository.repo_slug and not repository.is_representative:
-        repository.is_representative = True
-        repository.save(update_fields=["is_representative", "updated_at"])
+    if project.representative_repository_id is None:
+        project.representative_repository = repository
+        project.save(update_fields=["representative_repository", "updated_at"])
     return repository
 
 
-def _upsert_build_plan(record: DefinitionImportRecord) -> BuildPlan:
+def _upsert_build_unit(
+    project: Project,
+    repository: Repository,
+    record: DefinitionImportRecord,
+) -> tuple[BuildUnit, str]:
     build = record.build_definition
-    plan, created = BuildPlan.objects.get_or_create(
-        build_id=build.build_id,
-        defaults={"plan_key": build.plan_key},
-    )
-    if not created and plan.plan_key != build.plan_key:
-        plan.plan_key = build.plan_key
-        plan.save(update_fields=["plan_key", "updated_at"])
-    return plan
-
-
-def _upsert_project_build(project: Project, repository: ProjectRepository, plan: BuildPlan, record: DefinitionImportRecord) -> ProjectBuild:
-    build = record.build_definition
-    project_build, created = ProjectBuild.objects.get_or_create(
-        build_plan=plan,
+    external_key = build.plan_key
+    build_unit, _created = BuildUnit.objects.update_or_create(
+        ci_provider=Project.PROVIDER_BAMBOO,
+        external_key=external_key,
         defaults={
             "project": project,
             "repository": repository,
-            "build_name": build.name,
-            "build_type": build.compiler,
+            "unit_type": BuildUnit.TYPE_BUILD,
+            "display_name": build.name,
+            "description": build.name,
+            "language": build.language,
+            "compiler": build.compiler,
             "runtime_stack": build.language,
+            "lifecycle_status": BuildUnit.STATUS_ACTIVE,
+            "is_enabled": True,
         },
     )
-    if created:
-        return project_build
-
-    project_build.project = project
-    project_build.repository = repository
-    project_build.build_name = build.name
-    project_build.build_type = build.compiler
-    project_build.runtime_stack = build.language
-    project_build.save(update_fields=["project", "repository", "build_name", "build_type", "runtime_stack", "updated_at"])
-    return project_build
+    BambooBuildUnit.objects.update_or_create(
+        build_unit=build_unit,
+        defaults={
+            "bamboo_project_key": build.repository.project_key,
+            "plan_key": build.plan_key,
+            "build_id": build.build_id,
+            "repository_linkage_mode": build.repository.linkage_mode,
+            "application_link": build.repository.application_link or "",
+            "static_analysis_tool_version": "",
+            "coverity_project": repository.coverity_project,
+        },
+    )
+    return build_unit, external_key
 
 
 def _activate_definition(
     *,
-    plan: BuildPlan,
-    project: Project,
+    build_unit: BuildUnit,
     record: DefinitionImportRecord,
     source_kind: str,
-) -> tuple[bool, BuildPlanDefinition]:
+) -> tuple[bool, BuildUnitDefinition]:
     build = record.build_definition
-    active_definition = BuildPlanDefinition.objects.filter(build_plan=plan, is_active=True).first()
-    definition = BuildPlanDefinition.objects.filter(
-        build_plan=plan,
-        definition_hash=record.definition_hash,
-    ).first()
+    active_definition = build_unit.definitions.filter(is_active=True).first()
+    definition = build_unit.definitions.filter(definition_hash=record.definition_hash).first()
 
     if definition is None:
         if active_definition is not None:
             active_definition.is_active = False
-            active_definition.save(update_fields=["is_active"])
-        definition = BuildPlanDefinition.objects.create(
-            build_plan=plan,
-            project=project,
+            active_definition.save(update_fields=["is_active", "updated_at"])
+        definition = BuildUnitDefinition.objects.create(
+            build_unit=build_unit,
+            version=(build_unit.definitions.count() + 1),
             year=build.year,
             source_kind=source_kind,
             definition_json=record.raw_definition,
             definition_hash=record.definition_hash,
             is_active=True,
         )
+        AuditEvent.objects.create(
+            actor="system",
+            event_type="sync",
+            target_type="build_unit_definition",
+            target_id=str(definition.id),
+            payload_json={"buildUnit": build_unit.external_key},
+        )
         return True, definition
 
     updated_fields: list[str] = []
-    if definition.project_id != project.id:
-        definition.project = project
-        updated_fields.append("project")
     if definition.year != build.year:
         definition.year = build.year
         updated_fields.append("year")
@@ -273,13 +260,21 @@ def _activate_definition(
     if changed_active:
         if active_definition is not None and active_definition.pk != definition.pk:
             active_definition.is_active = False
-            active_definition.save(update_fields=["is_active"])
+            active_definition.save(update_fields=["is_active", "updated_at"])
         if not definition.is_active:
             definition.is_active = True
             updated_fields.append("is_active")
 
     if updated_fields:
-        definition.save(update_fields=updated_fields)
+        definition.save(update_fields=updated_fields + ["updated_at"])
+    if changed_active:
+        AuditEvent.objects.create(
+            actor="system",
+            event_type="sync",
+            target_type="build_unit_definition",
+            target_id=str(definition.id),
+            payload_json={"buildUnit": build_unit.external_key},
+        )
 
     return changed_active, definition
 
@@ -287,10 +282,3 @@ def _activate_definition(
 def _definition_hash(year: str, raw_definition: dict) -> str:
     payload = json.dumps({"year": year, "definition": raw_definition}, ensure_ascii=False, sort_keys=True)
     return "sha256:" + hashlib.sha256(payload.encode("utf-8")).hexdigest()
-
-
-def _display_source_path(source_path: Path) -> str:
-    try:
-        return str(source_path.relative_to(REPO_ROOT))
-    except ValueError:
-        return str(source_path)

@@ -1,86 +1,82 @@
 from __future__ import annotations
 
 from django.core.exceptions import ObjectDoesNotExist
-from apps.buildmeta.models import BambooPublishExecution, BuildPlan
+
+from apps.buildmeta.models import BambooBuildUnit, BambooPublishExecution, BuildExecution, BuildUnit
 
 
 def list_latest_failed_builds(limit: int = 5) -> list[dict]:
-    plans = (
-        BuildPlan.objects.select_related(
+    build_units = (
+        BuildUnit.objects.select_related(
+            "project",
+            "repository",
             "latest_version__latest_execution",
-            "project_build__project",
+            "bamboo",
         )
         .filter(latest_version__latest_success=False)
         .order_by("-latest_version__latest_execution__created_at")[:limit]
     )
     return [
         {
-            "projectKey": plan.project_build.project.jira_project_key,
-            "buildName": plan.project_build.build_name,
-            "planKey": plan.plan_key,
-            "version": plan.latest_version.version_text if plan.latest_version else "",
+            "projectKey": build_unit.project.project_key,
+            "buildName": build_unit.display_name,
+            "planKey": _plan_key(build_unit),
+            "version": build_unit.latest_version.version_text if build_unit.latest_version else "",
             "buildNumber": (
-                plan.latest_version.latest_execution.build_number
-                if plan.latest_version and plan.latest_version.latest_execution
+                build_unit.latest_version.latest_execution.execution_number
+                if build_unit.latest_version and build_unit.latest_version.latest_execution
                 else ""
             ),
-            "resultStatus": (
-                plan.latest_version.latest_execution.result_status
-                if plan.latest_version and plan.latest_version.latest_execution
+                "resultStatus": (
+                _legacy_result_status(build_unit.latest_version.latest_execution.status)
+                if build_unit.latest_version and build_unit.latest_version.latest_execution
                 else ""
             ),
             "summaryMessage": (
-                plan.latest_version.latest_execution.summary_message
-                if plan.latest_version and plan.latest_version.latest_execution
+                build_unit.latest_version.latest_execution.summary
+                if build_unit.latest_version and build_unit.latest_version.latest_execution
                 else ""
             ),
         }
-        for plan in plans
+        for build_unit in build_units
     ]
 
 
-def list_build_plan_summaries() -> list[dict]:
-    plans = (
-        BuildPlan.objects.select_related(
+def list_build_plan_summaries(*, ci_provider: str | None = None) -> list[dict]:
+    build_units = (
+        BuildUnit.objects.select_related(
+            "project",
+            "repository",
             "latest_version__latest_execution",
-            "project_build__project",
-            "project_build__repository",
+            "bamboo",
         )
-        .prefetch_related("executions", "build_infos")
-        .order_by("project_build__project__jira_project_key", "project_build__build_name", "plan_key")
+        .prefetch_related("executions", "bamboo__build_infos")
+        .order_by("project__project_key", "display_name", "external_key")
     )
+    if ci_provider:
+        build_units = build_units.filter(ci_provider=ci_provider)
+
     summaries = []
-    for plan in plans:
-        project_build = getattr(plan, "project_build", None)
-        project = project_build.project if project_build is not None else None
-        repository = project_build.repository if project_build is not None else None
-        latest_execution = plan.latest_version.latest_execution if plan.latest_version is not None else None
+    for build_unit in build_units:
+        latest_execution = build_unit.latest_version.latest_execution if build_unit.latest_version is not None else None
         summaries.append(
             {
-                "projectKey": project.jira_project_key if project is not None else "",
-                "buildName": project_build.build_name if project_build is not None else plan.plan_key,
-                "buildType": project_build.build_type if project_build is not None else "",
-                "runtimeStack": project_build.runtime_stack if project_build is not None else "",
-                "planKey": plan.plan_key,
-                "buildId": plan.build_id,
-                "staticAnalysisToolVersion": plan.static_analysis_tool_version,
-                "coverityProject": plan.coverity_project,
-                "repositorySlug": repository.repo_slug if repository is not None else "",
-                "latestVersion": plan.latest_version.version_text if plan.latest_version is not None else "",
-                "latestSuccess": plan.latest_version.latest_success if plan.latest_version is not None else None,
-                "resultStatus": latest_execution.result_status if latest_execution is not None else "",
-                "summaryMessage": latest_execution.summary_message if latest_execution is not None else "",
-                "buildInfoCount": plan.build_infos.count(),
-                "detailUrl": (
-                    f"/projects/{project.jira_project_key}/builds/{plan.plan_key}/"
-                    if project is not None
-                    else ""
-                ),
-                "buildInfoUrl": (
-                    f"/projects/{project.jira_project_key}/builds/{plan.plan_key}/infos/"
-                    if project is not None
-                    else ""
-                ),
+                "projectKey": build_unit.project.project_key,
+                "buildName": build_unit.display_name,
+                "buildType": build_unit.compiler,
+                "runtimeStack": build_unit.runtime_stack,
+                "planKey": _plan_key(build_unit),
+                "buildId": _build_id(build_unit),
+                "staticAnalysisToolVersion": _bamboo_attr(build_unit, "static_analysis_tool_version"),
+                "coverityProject": _bamboo_attr(build_unit, "coverity_project"),
+                "repositorySlug": build_unit.repository.repo_slug if build_unit.repository_id else "",
+                "latestVersion": build_unit.latest_version.version_text if build_unit.latest_version is not None else "",
+                "latestSuccess": build_unit.latest_version.latest_success if build_unit.latest_version is not None else None,
+                "resultStatus": _legacy_result_status(latest_execution.status) if latest_execution is not None else "",
+                "summaryMessage": latest_execution.summary if latest_execution is not None else "",
+                "buildInfoCount": build_unit.bamboo.build_infos.count() if hasattr(build_unit, "bamboo") else 0,
+                "detailUrl": f"/projects/{build_unit.project.project_key}/builds/{_plan_key(build_unit)}/",
+                "buildInfoUrl": f"/projects/{build_unit.project.project_key}/builds/{_plan_key(build_unit)}/infos/",
             }
         )
     return summaries
@@ -88,25 +84,27 @@ def list_build_plan_summaries() -> list[dict]:
 
 def list_executions_by_plan_key(plan_key: str) -> list[dict] | None:
     try:
-        plan = BuildPlan.objects.prefetch_related(
-            "executions__static_analysis_results",
-            "executions__build_version",
-        ).get(plan_key=plan_key)
+        bamboo_unit = BambooBuildUnit.objects.select_related("build_unit").get(plan_key=plan_key)
     except ObjectDoesNotExist:
         return None
 
-    executions = plan.executions.all().order_by("-created_at")
+    executions = (
+        BuildExecution.objects.filter(build_unit=bamboo_unit.build_unit)
+        .select_related("build_version")
+        .prefetch_related("static_analysis_results")
+        .order_by("-created_at")
+    )
     return [
         {
             "buildExecutionId": str(execution.id),
-            "buildVersionId": str(execution.build_version_id),
-            "buildKey": execution.build_info.build_key if execution.build_info_id else "",
-            "version": execution.build_version.version_text,
-            "buildNumber": execution.build_number,
+            "buildVersionId": str(execution.build_version_id or ""),
+            "buildKey": execution.external_execution_key or "",
+            "version": execution.build_version.version_text if execution.build_version else "",
+            "buildNumber": execution.execution_number,
             "commitHash": execution.commit_hash,
-            "success": execution.success,
-            "resultStatus": execution.result_status,
-            "summaryMessage": execution.summary_message,
+            "success": execution.status == BuildExecution.STATUS_SUCCESS,
+            "resultStatus": _legacy_result_status(execution.status),
+            "summaryMessage": execution.summary,
             "stageName": execution.stage_name,
             "jobName": execution.job_name,
             "taskName": execution.task_name,
@@ -129,7 +127,7 @@ def list_executions_by_plan_key(plan_key: str) -> list[dict] | None:
 
 def list_publish_executions_by_plan_key(plan_key: str, limit: int = 5) -> list[dict]:
     executions = (
-        BambooPublishExecution.objects.filter(build_plan__plan_key=plan_key)
+        BambooPublishExecution.objects.filter(build_unit__bamboo__plan_key=plan_key)
         .order_by("-created_at")[:limit]
     )
     return [
@@ -139,9 +137,28 @@ def list_publish_executions_by_plan_key(plan_key: str, limit: int = 5) -> list[d
             "message": execution.message,
             "output": execution.output,
             "returnCode": execution.return_code,
-            "triggerSource": execution.trigger_source,
-            "requestedBy": execution.requested_by,
+            "triggerSource": "web_ui",
+            "requestedBy": "",
             "createdAt": execution.created_at,
         }
         for execution in executions
     ]
+
+
+def _plan_key(build_unit: BuildUnit) -> str:
+    return getattr(getattr(build_unit, "bamboo", None), "plan_key", "") or build_unit.external_key
+
+
+def _build_id(build_unit: BuildUnit) -> str:
+    return getattr(getattr(build_unit, "bamboo", None), "build_id", "") or build_unit.external_key
+
+
+def _bamboo_attr(build_unit: BuildUnit, attr: str) -> str:
+    return getattr(getattr(build_unit, "bamboo", None), attr, "")
+
+
+def _legacy_result_status(status: str) -> str:
+    normalized = (status or "").strip().lower()
+    if normalized == BuildExecution.STATUS_SUCCESS:
+        return "successful"
+    return normalized

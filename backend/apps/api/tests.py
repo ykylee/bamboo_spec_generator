@@ -6,12 +6,12 @@ import os
 from django.test import TestCase
 
 from apps.buildmeta.models import (
-    BuildPlan,
-    BuildPlanBuildInfo,
+    BambooBuildInfo,
+    BambooBuildUnit,
+    BuildUnit,
     BuildVersion,
     Project,
-    ProjectBuild,
-    ProjectRepository,
+    Repository,
     SystemSetting,
 )
 from apps.buildmeta.services.executions import finish_execution, start_execution
@@ -21,28 +21,46 @@ class ApiSmokeTest(TestCase):
     def setUp(self) -> None:
         os.environ["BAMBOO_API_TOKEN"] = "test-token"
         self.project = Project.objects.create(
-            jira_project_key="SAMPLE",
-            bitbucket_project_key="SAMPLE",
-            representative_repo_slug="sample-app-api",
+            project_key="SAMPLE",
+            name="SAMPLE",
+            ci_provider=Project.PROVIDER_BAMBOO,
+            status=Project.STATUS_ACTIVE,
         )
-        repository = ProjectRepository.objects.create(
+        self.repository = Repository.objects.create(
             project=self.project,
+            repo_type=Repository.TYPE_BITBUCKET,
+            repo_key="SAMPLE",
             repo_slug="sample-app-api",
+            default_branch="dev",
+            is_representative=True,
             coverity_project="sample-app",
             coverity_stream="sample-app-dev",
-            is_representative=True,
         )
-        self.plan = BuildPlan.objects.create(build_id="sample-app-api", plan_key="SAMPAPI")
-        ProjectBuild.objects.create(
+        self.project.representative_repository = self.repository
+        self.project.save(update_fields=["representative_repository", "updated_at"])
+        self.build_unit = BuildUnit.objects.create(
             project=self.project,
-            repository=repository,
-            build_plan=self.plan,
-            build_name="backend",
-            build_type="python",
+            repository=self.repository,
+            ci_provider=Project.PROVIDER_BAMBOO,
+            unit_type=BuildUnit.TYPE_BUILD,
+            external_key="SAMPAPI",
+            display_name="backend",
+            language="java",
+            compiler="python",
             runtime_stack="java",
+            lifecycle_status=BuildUnit.STATUS_ACTIVE,
+            is_enabled=True,
         )
-        BuildPlanBuildInfo.objects.create(
-            build_plan=self.plan,
+        self.bamboo_unit = BambooBuildUnit.objects.create(
+            build_unit=self.build_unit,
+            bamboo_project_key="SAMPLE",
+            plan_key="SAMPAPI",
+            build_id="sample-app-api",
+            application_link="BITBUCKET_SERVER",
+            repository_linkage_mode="",
+        )
+        BambooBuildInfo.objects.create(
+            bamboo_build_unit=self.bamboo_unit,
             build_key="api-linux",
             operating_system="linux",
             pre_process="mvn -B dependency:go-offline",
@@ -112,7 +130,7 @@ class ApiSmokeTest(TestCase):
             "/api/v1/build-plans/SAMPAPI/executions/start",
             data=json.dumps(
                 {
-                    "branchKind": BuildVersion.BRANCH_KIND_DEV,
+                    "branchKind": "dev",
                     "commitHash": "abcdef123456",
                     "buildNumber": "101",
                     "startedAt": "2026-03-19T00:00:00Z",
@@ -160,7 +178,7 @@ class ApiSmokeTest(TestCase):
     def test_execution_list_endpoint(self) -> None:
         start_payload = start_execution(
             plan_key="SAMPAPI",
-            branch_kind=BuildVersion.BRANCH_KIND_DEV,
+            branch_kind="dev",
             commit_hash="abcdef123456",
             build_number="101",
         )
@@ -191,7 +209,7 @@ class ApiSmokeTest(TestCase):
     def test_static_analysis_results_upsert_endpoint(self) -> None:
         start_payload = start_execution(
             plan_key="SAMPAPI",
-            branch_kind=BuildVersion.BRANCH_KIND_DEV,
+            branch_kind="dev",
             commit_hash="abcdef123456",
             build_number="101",
         )
@@ -313,13 +331,13 @@ class ApiSmokeTest(TestCase):
         payload = response.json()
         self.assertEqual(0, payload["initializedCount"])
         self.assertEqual(1, payload["updatedCount"])
-        build_info = BuildPlanBuildInfo.objects.get(build_plan=self.plan)
+        build_info = BambooBuildInfo.objects.get(bamboo_build_unit=self.bamboo_unit, build_key="api-linux")
         self.assertEqual("linux", build_info.operating_system)
         self.assertEqual("services/sample-app-api", build_info.build_sub_path)
 
     def test_specs_draft_initialize_endpoint_preserves_multiple_build_infos(self) -> None:
-        BuildPlanBuildInfo.objects.create(
-            build_plan=self.plan,
+        BambooBuildInfo.objects.create(
+            bamboo_build_unit=self.bamboo_unit,
             build_key="api-windows",
             operating_system="windows",
             pre_process="setup.bat",
@@ -341,13 +359,16 @@ class ApiSmokeTest(TestCase):
         self.assertEqual(200, response.status_code)
         payload = response.json()
         self.assertEqual(2, payload["updatedCount"])
-        self.assertEqual(2, BuildPlanBuildInfo.objects.filter(build_plan=self.plan).count())
-        self.assertEqual({"api-linux", "api-windows"}, set(self.plan.build_infos.values_list("build_key", flat=True)))
+        self.assertEqual(2, BambooBuildInfo.objects.filter(bamboo_build_unit=self.bamboo_unit).count())
+        self.assertEqual(
+            {"api-linux", "api-windows"},
+            set(self.bamboo_unit.build_infos.values_list("build_key", flat=True)),
+        )
 
     def test_specs_draft_initialize_plan_endpoint_refreshes_existing_build_info(self) -> None:
-        self.plan.definitions.all().delete()
-        BuildPlanBuildInfo.objects.create(
-            build_plan=self.plan,
+        self.build_unit.definitions.all().delete()
+        BambooBuildInfo.objects.create(
+            bamboo_build_unit=self.bamboo_unit,
             build_key="main",
             operating_system="",
             language="",
@@ -357,7 +378,7 @@ class ApiSmokeTest(TestCase):
         )
 
         response = self.client.post(
-            f"/api/v1/system-settings/specs-drafts/initialize/{self.plan.plan_key}",
+            f"/api/v1/system-settings/specs-drafts/initialize/{self.bamboo_unit.plan_key}",
             content_type="application/json",
             **self.auth_headers,
         )
@@ -365,7 +386,7 @@ class ApiSmokeTest(TestCase):
         self.assertEqual(200, response.status_code)
         payload = response.json()
         self.assertEqual(2, payload["updatedCount"])
-        build_info = BuildPlanBuildInfo.objects.get(build_plan=self.plan, build_key="main")
+        build_info = BambooBuildInfo.objects.get(bamboo_build_unit=self.bamboo_unit, build_key="main")
         self.assertEqual(".", build_info.build_sub_path)
         self.assertEqual("sample-app-dev", build_info.coverity_stream)
 
@@ -406,3 +427,10 @@ class ApiSmokeTest(TestCase):
         self.assertEqual("backend-api", payload["builds"][0]["buildName"])
         self.assertEqual("sample-app-release", payload["repositories"][0]["coverityStream"])
         self.assertEqual("sample-app-api", payload["builds"][0]["repositorySlug"])
+        self.build_unit.refresh_from_db()
+        self.assertEqual("backend-api", self.build_unit.display_name)
+        self.assertEqual("java", self.build_unit.compiler)
+        self.assertEqual("java17", self.build_unit.runtime_stack)
+        self.repository.refresh_from_db()
+        self.assertEqual("SAMPLE2", self.repository.repo_key)
+        self.assertEqual("sample-app-release", self.repository.coverity_stream)

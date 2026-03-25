@@ -41,8 +41,11 @@ def get_coverity_system_settings() -> dict[str, str | bool]:
 
 
 def get_bamboo_system_settings() -> dict[str, str | bool]:
+    env_declared = "BAMBOO_SERVER_TOKEN" in os.environ
     env_token = os.environ.get("BAMBOO_SERVER_TOKEN", "").strip()
-    file_token = DEFAULT_BAMBOO_TOKEN_PATH.read_text(encoding="utf-8").strip() if DEFAULT_BAMBOO_TOKEN_PATH.is_file() else ""
+    file_token = ""
+    if not env_declared and DEFAULT_BAMBOO_TOKEN_PATH.is_file():
+        file_token = DEFAULT_BAMBOO_TOKEN_PATH.read_text(encoding="utf-8").strip()
     return {
         "serverUrl": get_system_setting(SystemSetting.KEY_BAMBOO_SERVER_URL).strip(),
         "tokenConfigured": bool(env_token or file_token),

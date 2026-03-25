@@ -13,18 +13,21 @@ from django.test import SimpleTestCase, TestCase
 from django.utils import timezone
 
 from apps.buildmeta.models import (
+    AuditEvent,
+    BuildExecution,
+    BuildVersion,
+    StaticAnalysisResult,
+    SystemSetting,
+)
+from apps.buildmeta.tests_support import (
     BambooPublishExecution,
     BuildDefinitionHistory,
-    BuildExecution,
     BuildPlan,
     BuildPlanBuildInfo,
     BuildPlanDefinition,
-    BuildVersion,
     Project,
     ProjectBuild,
     ProjectRepository,
-    StaticAnalysisResult,
-    SystemSetting,
 )
 from apps.buildmeta.selectors.definitions import (
     _analysis_stage_job_name,

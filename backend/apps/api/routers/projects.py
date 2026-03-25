@@ -12,8 +12,8 @@ router = Router(tags=["projects"])
 
 
 @router.get("/")
-def get_projects(request) -> list[dict]:
-    return list_project_summaries()
+def get_projects(request, ci_provider: str | None = None) -> list[dict]:
+    return list_project_summaries(ci_provider=ci_provider)
 
 
 @router.post("/")
@@ -24,20 +24,20 @@ def post_project(request, payload: ProjectCreateIn) -> dict:
         raise HttpError(400, str(exc)) from exc
 
 
-@router.get("/{jira_project_key}")
-def get_project(request, jira_project_key: str) -> dict:
-    payload = get_project_detail(jira_project_key)
+@router.get("/{project_key}")
+def get_project(request, project_key: str, ci_provider: str | None = None) -> dict:
+    payload = get_project_detail(project_key, ci_provider=ci_provider)
     if payload is None:
-        raise HttpError(404, f"Project '{jira_project_key}' was not found.")
+        raise HttpError(404, f"Project '{project_key}' was not found.")
     return payload
 
 
-@router.put("/{jira_project_key}")
-def put_project(request, jira_project_key: str, payload: ProjectUpdateIn) -> dict:
+@router.put("/{project_key}")
+def put_project(request, project_key: str, payload: ProjectUpdateIn, ci_provider: str | None = None) -> dict:
     try:
-        result = update_project(jira_project_key, payload)
+        result = update_project(project_key, payload, ci_provider=ci_provider)
     except ValueError as exc:
         raise HttpError(400, str(exc)) from exc
     if result is None:
-        raise HttpError(404, f"Project '{jira_project_key}' was not found.")
+        raise HttpError(404, f"Project '{project_key}' was not found.")
     return result
