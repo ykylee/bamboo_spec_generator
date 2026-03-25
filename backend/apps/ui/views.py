@@ -174,6 +174,81 @@ def build_plan_list(request):
     return render(request, "ui/build_plan_list.html", context)
 
 
+def settings(request):
+    """統合設定ページ - CIサーバー、静的分析、 저장소 設定を管理"""
+    coverity_payload = get_coverity_system_settings()
+    bamboo_settings = get_bamboo_system_settings()
+    jenkins_payload = get_jenkins_system_settings()
+
+    # フォーム初期化
+    coverity_form = CoveritySystemSettingsForm(
+        initial={
+            "connect_url": coverity_payload["connectUrl"],
+            "on_new_cert": coverity_payload["onNewCert"],
+            "commit_enabled": coverity_payload["commitEnabled"],
+            "repository_linkage_mode": coverity_payload["repositoryLinkageMode"],
+            "git_clone_url_template": coverity_payload["gitCloneUrlTemplate"],
+            "bamboo_server_url": bamboo_settings["serverUrl"],
+        }
+    )
+
+    message = ""
+    error = ""
+    jenkins_error = ""
+    init_summary = None
+
+    if request.method == "POST":
+        form_kind = request.POST.get("form_kind", "").strip()
+
+        if form_kind == "system_settings":
+            coverity_form = CoveritySystemSettingsForm(request.POST)
+            if coverity_form.is_valid():
+                set_system_setting(key="coverity.connect.url", value=coverity_form.cleaned_data["connect_url"].strip(), description="Coverity Connect URL")
+                set_system_setting(key="coverity.connect.on_new_cert", value=coverity_form.cleaned_data["on_new_cert"].strip() or "trust", description="Coverity on-new-cert policy")
+                set_system_setting(key="coverity.commit.enabled", value="true" if coverity_form.cleaned_data["commit_enabled"] else "false", description="Coverity commit enabled flag")
+                set_system_setting(key="repository.git.clone_url_template", value=coverity_form.cleaned_data["git_clone_url_template"].strip(), description="Git clone URL template")
+                set_system_setting(key="repository.linkage_mode", value=coverity_form.cleaned_data["repository_linkage_mode"].strip() or "linked", description="Repository linkage mode")
+                set_system_setting(key="bamboo.server.url", value=coverity_form.cleaned_data["bamboo_server_url"].strip(), description="Bamboo server URL")
+                message = "설정을 저장했습니다."
+            else:
+                error = "설정 입력값을 다시 확인해 주세요."
+
+        elif form_kind == "jenkins_settings":
+            jenkins_server_url = request.POST.get("jenkins_server_url", "").strip()
+            set_system_setting(key="jenkins.server.url", value=jenkins_server_url, description="Jenkins server URL")
+            jenkins_payload = get_jenkins_system_settings()
+            message = "Jenkins 설정을 저장했습니다."
+
+        elif form_kind == "init_specs_drafts":
+            init_summary = initialize_specs_draft_data(reset_existing=True)
+            message = "샘플 Draft 데이터를 재초기화했습니다."
+
+    # Jenkins ノード状態取得
+    nodes = []
+    queue = []
+    try:
+        status = collect_jenkins_system_status()
+        nodes = status.get("nodes", [])
+        queue = status.get("queue", [])
+    except JenkinsOperationError as exc:
+        jenkins_error = str(exc)
+
+    context = {
+        "coverityForm": coverity_form,
+        "bambooSettings": bamboo_settings,
+        "jenkinsSettings": jenkins_payload,
+        "message": message,
+        "error": error,
+        "jenkinsError": jenkins_error,
+        "jenkinsNodes": nodes,
+        "jenkinsQueue": queue,
+        "initSummary": init_summary,
+        "navProjectSearchItems": _build_nav_project_search_items(list_project_summaries()),
+    }
+    return render(request, "ui/settings.html", context)
+
+
+
 def coverity_settings(request):
     settings_payload = get_coverity_system_settings()
     bamboo_settings = get_bamboo_system_settings()

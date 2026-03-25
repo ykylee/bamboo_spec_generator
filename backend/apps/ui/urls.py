@@ -15,12 +15,14 @@ from .views import (
     project_jenkins_build_info_detail,
     project_list,
     project_repository_detail,
+    settings,
 )
 
 
 urlpatterns = [
     path("", project_list, name="project-list"),
     path("build-plans/", build_plan_list, name="build-plan-list"),
+    path("settings/", settings, name="settings"),
     path("settings/coverity/", coverity_settings, name="coverity-settings"),
     path("settings/jenkins/", jenkins_settings, name="jenkins-settings"),
     path("projects/<str:jira_project_key>/", project_detail, name="project-detail"),
