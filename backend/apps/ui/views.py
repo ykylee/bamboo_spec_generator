@@ -22,6 +22,7 @@ from apps.buildmeta.selectors.projects import get_project_detail, list_project_s
 from apps.buildmeta.services import (
     BambooOperationError,
     JenkinsOperationError,
+    collect_jenkins_system_status,
     create_project,
     get_bamboo_plan_details,
     get_bamboo_plan_status,
@@ -1209,9 +1210,15 @@ def _build_project_payload_from_detail(project: dict) -> dict:
                 "buildName": build["buildName"],
                 "buildType": build["buildType"],
                 "runtimeStack": build["runtimeStack"],
-                "buildId": build["buildId"],
-                "planKey": build["planKey"],
+                "externalKey": build.get("externalKey", ""),
                 "repositorySlug": build["repositorySlug"],
+                "providerDetails": {
+                    "planKey": build.get("planKey", ""),
+                    "buildId": build.get("buildId", ""),
+                    "staticAnalysisToolVersion": build.get("staticAnalysisToolVersion", ""),
+                    "coverityProject": build.get("coverityProject", ""),
+                    "repositoryLinkageMode": build.get("repositoryLinkageModeOverride", ""),
+                },
             }
             for build in project["builds"]
         ],

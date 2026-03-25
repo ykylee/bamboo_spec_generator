@@ -9,6 +9,8 @@ def _project_queryset():
     return Project.objects.prefetch_related(
         "repositories",
         "build_units__repository",
+        "build_units__bamboo",
+        "build_units__jenkins",
         "build_units__versions__latest_execution",
     )
 
@@ -153,6 +155,7 @@ def _serialize_legacy_build(build_unit: BuildUnit) -> dict:
         "repositorySlug": build_unit.repository.repo_slug if build_unit.repository_id else "",
         "planKey": provider_details.get("planKey", build_unit.external_key),
         "buildId": provider_details.get("buildId", build_unit.external_key),
+        "externalKey": build_unit.external_key,
         "generationReady": True,
         "activeDefinitionYear": "",
         "staticAnalysisToolVersion": getattr(getattr(build_unit, "bamboo", None), "static_analysis_tool_version", ""),

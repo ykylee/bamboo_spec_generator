@@ -111,9 +111,12 @@ def _build_units(data: dict) -> list[dict]:
     legacy = data.get("builds") or []
     units = []
     for build in legacy:
+        provider_details = build.get("providerDetails") or {}
+        plan_key = provider_details.get("planKey") or build.get("planKey", "")
+        build_id = provider_details.get("buildId") or build.get("buildId", "")
         units.append(
             {
-                "externalKey": build.get("planKey", ""),
+                "externalKey": build.get("externalKey", "") or plan_key,
                 "displayName": build.get("buildName", ""),
                 "unitType": "build",
                 "repositorySlug": build.get("repositorySlug", ""),
@@ -121,8 +124,8 @@ def _build_units(data: dict) -> list[dict]:
                 "compiler": build.get("buildType", ""),
                 "runtimeStack": build.get("runtimeStack", ""),
                 "providerDetails": {
-                    "planKey": build.get("planKey", ""),
-                    "buildId": build.get("buildId", ""),
+                    "planKey": plan_key,
+                    "buildId": build_id,
                 },
             }
         )
