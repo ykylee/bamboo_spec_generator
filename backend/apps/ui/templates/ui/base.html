@@ -11,7 +11,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;600;700&family=Noto+Serif+KR:wght@600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="{% static 'ui/app.css' %}">
   </head>
-  <body class="{% block body_class %}{% endblock %}">
+  <body class="{% block body_class %}{% endblock %}" data-provider="{{ current_provider|default:'bamboo' }}">
     <header class="app-header">
       <div class="app-header__inner">
         <div class="app-header__brand-group">
@@ -36,10 +36,17 @@
               <img src="{% static 'ui/favicon.svg' %}" alt="">
             </span>
             <span class="app-header__brand-copy">
-              <strong class="app-header__brand-title">Bamboo Ops Console</strong>
-              <span class="app-header__brand-sub">Spec Generator Dashboard</span>
+              <strong class="app-header__brand-title">CI Ops Console</strong>
+              <span class="app-header__brand-sub">Build Management Dashboard</span>
             </span>
           </a>
+          <div class="provider-switcher">
+            <label class="provider-switcher__label" for="provider-select">Provider:</label>
+            <select class="provider-switcher__select" id="provider-select" data-provider-select>
+              <option value="bamboo" {% if current_provider == "bamboo" %}selected{% endif %}>Bamboo</option>
+              <option value="jenkins" {% if current_provider == "jenkins" %}selected{% endif %}>Jenkins</option>
+            </select>
+          </div>
         </div>
         <nav class="app-header__nav" aria-label="서비스 이동">
           <a class="app-header__nav-link{% if request.resolver_match.url_name == 'project-list' or request.resolver_match.url_name == 'project-detail' or request.resolver_match.url_name == 'project-repository-detail' %} app-header__nav-link--active{% endif %}" href="{% url 'project-list' %}">프로젝트</a>
@@ -361,6 +368,16 @@
 
         window.BambooUiEnhanceSuggestionInputs = enhanceSuggestionInputs;
         enhanceSuggestionInputs(document);
+
+        const providerSelect = document.querySelector("[data-provider-select]");
+        if (providerSelect) {
+          providerSelect.addEventListener("change", function (e) {
+            const provider = e.target.value;
+            const url = new URL(window.location.href);
+            url.searchParams.set("provider", provider);
+            window.location.href = url.toString();
+          });
+        }
       }());
     </script>
     {% block extra_scripts %}{% endblock %}

@@ -10,6 +10,16 @@ from .build_info import upsert_build_info
 from .build_plans import update_build_plan_metadata
 from .definitions import import_definition_records, load_definition_import_records, sync_definition_records
 from .executions import finish_execution, record_static_analysis_results, start_execution
+from .jenkins import (
+    JenkinsOperationError,
+    collect_jenkins_system_status,
+    get_jenkins_build_details,
+    get_jenkins_client_config,
+    get_jenkins_job_details,
+    get_jenkins_job_status,
+    get_jenkins_system_settings,
+    trigger_jenkins_job,
+)
 from .projects import create_project, update_project
 from .specs_drafts import initialize_specs_draft_data, initialize_specs_draft_for_plan
 from .system_settings import (
@@ -22,17 +32,23 @@ from .system_settings import (
 
 __all__ = [
     "BambooOperationError",
+    "collect_jenkins_system_status",
+    "create_project",
+    "finish_execution",
     "get_bamboo_plan_details",
     "get_bamboo_plan_status",
     "get_bamboo_system_settings",
-    "build_git_clone_url",
-    "create_project",
-    "finish_execution",
     "get_coverity_system_settings",
+    "get_jenkins_build_details",
+    "get_jenkins_client_config",
+    "get_jenkins_job_details",
+    "get_jenkins_job_status",
+    "get_jenkins_system_settings",
     "get_system_setting",
     "import_definition_records",
     "initialize_specs_draft_data",
     "initialize_specs_draft_for_plan",
+    "JenkinsOperationError",
     "load_definition_import_records",
     "publish_bamboo_specs",
     "queue_bamboo_plan",
@@ -41,6 +57,7 @@ __all__ = [
     "set_system_setting",
     "start_execution",
     "sync_definition_records",
+    "trigger_jenkins_job",
     "upsert_build_info",
     "update_build_plan_metadata",
     "update_project",

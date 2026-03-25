@@ -1,0 +1,166 @@
+{% extends "ui/base.html" %}
+
+{% block title %}{% if build %}{{ build.buildName }} | Jenkins Jobs{% else %}빌드 없음 | Jenkins Jobs{% endif %}{% endblock %}
+{% block body_class %}page-resource-detail{% endblock %}
+{% block page_heading %}{% if build %}{{ build.buildName }} 상세{% else %}빌드 상세{% endif %}{% endblock %}
+
+{% block content %}
+{% if project and build %}
+<section class="signal-hero signal-hero--workspace">
+  <div class="signal-hero__content">
+    <p class="signal-hero__eyebrow">Jenkins Job Workspace</p>
+    <h1 class="hero__title">{{ build.buildName }}</h1>
+    <p class="signal-hero__body">Jenkins Job 상세에서는 빌드 실행 이력과 Jenkins 상태를 확인할 수 있습니다.</p>
+    <div class="hero__actions">
+      <a class="action-button" href="{{ jenkinsStatus.jobUrl }}" target="_blank" rel="noopener">Jenkins에서 보기</a>
+      <button class="action-button action-button--ghost" type="button" data-toggle-build-plan-metadata aria-expanded="false" aria-controls="build-plan-metadata-panel">
+        메타데이터 수정
+      </button>
+    </div>
+    <div class="chip-row">
+      <span class="chip">{{ build.jobPath }}</span>
+      <span class="chip chip--neutral">{{ build.jobType|default:"freestyle" }}</span>
+      <span class="chip chip--neutral">{{ build.pipelineKind|default:"-" }}</span>
+      {% if jenkinsStatus.inQueue %}
+      <span class="chip chip--warning">대기 중</span>
+      {% endif %}
+      {% if jenkinsStatus.building %}
+      <span class="chip chip--info">빌드 중</span>
+      {% endif %}
+    </div>
+  </div>
+  <div class="signal-hero__board" aria-label="빌드 상세 보드">
+    <article class="signal-metric signal-metric--primary">
+      <span class="signal-metric__label">Job Path</span>
+      <strong class="signal-metric__value signal-metric__value--compact">{{ build.jobPath }}</strong>
+      <p class="signal-metric__meta">Jenkins job 경로</p>
+    </article>
+    <article class="signal-metric">
+      <span class="signal-metric__label">Latest Build</span>
+      <strong class="signal-metric__value">{{ jenkinsStatus.latestBuildNumber|default:"-" }}</strong>
+      <p class="signal-metric__meta">마지막 빌드 번호</p>
+    </article>
+    <article class="signal-metric">
+      <span class="signal-metric__label">Last Result</span>
+      <strong class="signal-metric__value signal-metric__value--compact">
+        {% if jenkinsStatus.lastBuildResult == "SUCCESS" %}
+        <span class="text-success">Success</span>
+        {% elif jenkinsStatus.lastBuildResult == "FAILURE" %}
+        <span class="text-failure">Failure</span>
+        {% elif jenkinsStatus.lastBuildResult == "UNSTABLE" %}
+        <span class="text-warning">Unstable</span>
+        {% elif jenkinsStatus.lastBuildResult == "BUILDING" %}
+        <span class="text-info">Building</span>
+        {% else %}
+        -
+        {% endif %}
+      </strong>
+      <p class="signal-metric__meta">마지막 빌드 결과</p>
+    </article>
+    <article class="signal-metric signal-metric--list">
+      <div class="signal-metric__header">
+        <span class="signal-metric__label">Job Status</span>
+        <span class="badge">Jenkins</span>
+      </div>
+      <ul class="signal-queue">
+        <li class="signal-queue__item"><strong>설정됨</strong><span>{{ jenkinsStatus.configured|yesno:"예,아니오" }}</span></li>
+        <li class="signal-queue__item"><strong>존재함</strong><span>{{ jenkinsStatus.exists|yesno:"예,아니오" }}</span></li>
+        <li class="signal-queue__item"><strong>대기 중</strong><span>{{ jenkinsStatus.inQueue|yesno:"예,아니오" }}</span></li>
+        <li class="signal-queue__item"><strong>빌드 중</strong><span>{{ jenkinsStatus.building|yesno:"예,아니오" }}</span></li>
+      </ul>
+    </article>
+  </div>
+</section>
+
+{% if jenkinsError %}
+<div class="form-alert form-alert--error">{{ jenkinsError }}</div>
+{% endif %}
+
+<section class="section">
+  <div class="section__header">
+    <h2 class="section__title">실행 이력</h2>
+  </div>
+  {% if executions %}
+  <div class="table-wrapper">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Build #</th>
+          <th>Version</th>
+          <th>Status</th>
+          <th>Started</th>
+          <th>Finished</th>
+          <th>Summary</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for execution in executions %}
+        <tr>
+          <td><a href="{% url 'project-jenkins-build-detail' project.jiraProjectKey build.jobPath execution.buildNumber %}">{{ execution.buildNumber }}</a></td>
+          <td>{{ execution.version|default:"-" }}</td>
+          <td>
+            {% if execution.success %}
+            <span class="badge badge--success">Success</span>
+            {% else %}
+            <span class="badge badge--{{ execution.resultStatus }}">{{ execution.resultStatus }}</span>
+            {% endif %}
+          </td>
+          <td>{{ execution.startedAt|default:"-" }}</td>
+          <td>{{ execution.finishedAt|default:"-" }}</td>
+          <td>{{ execution.summaryMessage|default:"-" }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="empty-state">
+    <p>실행 이력이 없습니다.</p>
+  </div>
+  {% endif %}
+</section>
+
+{% if jenkinsJob %}
+<section class="section">
+  <div class="section__header">
+    <h2 class="section__title">최근 빌드</h2>
+  </div>
+  {% if jenkinsJob.lastBuild %}
+  <div class="panel">
+    <div class="panel__body">
+      <dl class="detail-grid">
+        <div class="detail-grid__item">
+          <dt>Build Number</dt>
+          <dd>{{ jenkinsJob.lastBuild.number|default:"-" }}</dd>
+        </div>
+        <div class="detail-grid__item">
+          <dt>Result</dt>
+          <dd>{{ jenkinsJob.summary.result|default:"Building" }}</dd>
+        </div>
+        <div class="detail-grid__item">
+          <dt>Duration</dt>
+          <dd>{{ jenkinsJob.summary.duration|default:0 }} ms</dd>
+        </div>
+        <div class="detail-grid__item">
+          <dt>Estimated Duration</dt>
+          <dd>{{ jenkinsJob.summary.estimatedDuration|default:0 }} ms</dd>
+        </div>
+      </dl>
+    </div>
+  </div>
+  {% else %}
+  <div class="empty-state">
+    <p>빌드 정보가 없습니다.</p>
+  </div>
+  {% endif %}
+</section>
+{% endif %}
+
+{% else %}
+<div class="empty-state">
+  <h2>프로젝트 또는 빌드를 찾을 수 없습니다.</h2>
+  <p>Jenkins Job이 아직 등록되지 않았거나 존재하지 않습니다.</p>
+  <a class="action-button" href="{% url 'project-list' %}">프로젝트 목록으로</a>
+</div>
+{% endif %}
+{% endblock %}

@@ -21,6 +21,7 @@ class SystemSetting(TimestampedModel):
     KEY_GIT_CLONE_URL_TEMPLATE = "repository.git.clone_url_template"
     KEY_REPOSITORY_LINKAGE_MODE = "repository.linkage_mode"
     KEY_BAMBOO_SERVER_URL = "bamboo.server.url"
+    KEY_JENKINS_SERVER_URL = "jenkins.server.url"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     key = models.CharField(max_length=128, unique=True)

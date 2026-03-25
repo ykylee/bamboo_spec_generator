@@ -1,0 +1,121 @@
+{% extends "ui/base.html" %}
+
+{% block title %}Jenkins 설정 | CI Ops Console{% endblock %}
+{% block page_heading %}Jenkins 설정{% endblock %}
+
+{% block content %}
+<section class="signal-hero signal-hero--workspace">
+  <div class="signal-hero__content">
+    <p class="signal-hero__eyebrow">System Settings</p>
+    <h1 class="hero__title">Jenkins 설정</h1>
+    <p class="signal-hero__body">Jenkins 서버 URL과 토큰을 설정합니다. Jenkins 토큰은 보안상 서버 환경 변수로만 읽습니다.</p>
+  </div>
+</section>
+
+<section class="detail-grid detail-grid--resource">
+  <article class="panel panel--signal-list">
+    <div class="panel__header">
+      <h2 class="panel__title">Jenkins 연결 설정</h2>
+    </div>
+    {% if message %}
+    <div class="form-alert form-alert--success">{{ message }}</div>
+    {% endif %}
+    {% if error %}
+    <div class="form-alert form-alert--error">{{ error }}</div>
+    {% endif %}
+    <form class="project-form" method="post">
+      {% csrf_token %}
+      <input type="hidden" name="form_kind" value="jenkins_settings">
+      <div class="project-form__grid">
+        <label class="project-form__field project-form__field--span-3">
+          <span class="project-form__label">Jenkins Server URL</span>
+          <input class="project-form__input" type="url" name="jenkins_server_url" value="{{ jenkinsSettings.serverUrl }}" placeholder="https://jenkins.example.com">
+        </label>
+      </div>
+      <div class="project-form__actions">
+        <button class="action-button" type="submit">설정 저장</button>
+      </div>
+    </form>
+    <ul class="meta-list">
+      <li><strong>Jenkins Token</strong>{% if jenkinsSettings.tokenConfigured %}{% if jenkinsSettings.tokenSource == "env" %}서버 환경 변수 설정됨{% elif jenkinsSettings.tokenSource == "file" %}관리 폴더 파일 설정됨{% else %}설정됨{% endif %}{% else %}미설정{% endif %}</li>
+      <li><strong>Token File Path</strong>{{ jenkinsSettings.tokenFilePath }}</li>
+    </ul>
+  </article>
+
+  <article class="panel panel--signal-list">
+    <div class="panel__header">
+      <h2 class="panel__title">Jenkins 노드 상태</h2>
+    </div>
+    <p class="panel__body">Jenkins 마스터와 에이전트 노드의 현재 상태를 확인할 수 있습니다.</p>
+    {% if nodeError %}
+    <div class="form-alert form-alert--error">{{ nodeError }}</div>
+    {% else %}
+    <div class="table-wrapper">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Node Name</th>
+            <th>Labels</th>
+            <th>Executors</th>
+            <th>Busy</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for node in nodes %}
+          <tr>
+            <td>{{ node.resourceName }}</td>
+            <td>{{ node.labels|join:", "|default:"-" }}</td>
+            <td>{{ node.executorCount }}</td>
+            <td>{{ node.busyExecutors }}</td>
+            <td>
+              {% if node.offline %}
+              <span class="badge badge--error">Offline</span>
+              {% else %}
+              <span class="badge badge--success">Online</span>
+              {% endif %}
+            </td>
+          </tr>
+          {% empty %}
+          <tr>
+            <td colspan="5">노드 정보가 없습니다.</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+  </article>
+
+  <article class="panel panel--signal-list">
+    <div class="panel__header">
+      <h2 class="panel__title">Jenkins 대기열</h2>
+    </div>
+    <p class="panel__body">현재 Jenkins 빌드 대기열에 있는 작업입니다.</p>
+    <div class="table-wrapper">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Queue ID</th>
+            <th>Job Path</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for item in queue %}
+          <tr>
+            <td>{{ item.queueItemKey }}</td>
+            <td>{{ item.jobPath }}</td>
+            <td>{{ item.status }}</td>
+          </tr>
+          {% empty %}
+          <tr>
+            <td colspan="3">대기열에 작업이 없습니다.</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </article>
+</section>
+{% endblock %}

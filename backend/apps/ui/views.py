@@ -17,19 +17,26 @@ from apps.buildmeta.selectors.executions import (
     list_latest_failed_builds,
     list_publish_executions_by_plan_key,
 )
+from apps.buildmeta.selectors.jenkins import list_executions_by_job_path, list_jenkins_job_summaries
 from apps.buildmeta.selectors.projects import get_project_detail, list_project_summaries
 from apps.buildmeta.services import (
     BambooOperationError,
+    JenkinsOperationError,
     create_project,
     get_bamboo_plan_details,
     get_bamboo_plan_status,
     get_bamboo_system_settings,
     get_coverity_system_settings,
+    get_jenkins_build_details,
+    get_jenkins_job_details,
+    get_jenkins_job_status,
+    get_jenkins_system_settings,
     initialize_specs_draft_data,
     initialize_specs_draft_for_plan,
     publish_bamboo_specs,
     queue_bamboo_plan_with_options,
     set_system_setting,
+    trigger_jenkins_job,
     update_build_plan_metadata,
     update_project,
     upsert_build_info,
@@ -234,6 +241,45 @@ def coverity_settings(request):
         "navProjectSearchItems": _build_nav_project_search_items(list_project_summaries()),
     }
     return render(request, "ui/coverity_settings.html", context)
+
+
+def jenkins_settings(request):
+    jenkins_settings_payload = get_jenkins_system_settings()
+    message = ""
+    error = ""
+    nodes = []
+    queue = []
+    node_error = ""
+
+    if request.method == "POST":
+        form_kind = request.POST.get("form_kind", "").strip()
+        if form_kind == "jenkins_settings":
+            jenkins_server_url = request.POST.get("jenkins_server_url", "").strip()
+            set_system_setting(
+                key="jenkins.server.url",
+                value=jenkins_server_url,
+                description="Jenkins server URL",
+            )
+            jenkins_settings_payload = get_jenkins_system_settings()
+            message = "Jenkins 설정을 저장했습니다."
+
+    try:
+        status = collect_jenkins_system_status()
+        nodes = status.get("nodes", [])
+        queue = status.get("queue", [])
+    except JenkinsOperationError as exc:
+        node_error = str(exc)
+
+    context = {
+        "jenkinsSettings": jenkins_settings_payload,
+        "message": message,
+        "error": error,
+        "nodes": nodes,
+        "queue": queue,
+        "nodeError": node_error,
+        "navProjectSearchItems": _build_nav_project_search_items(list_project_summaries()),
+    }
+    return render(request, "ui/jenkins_settings.html", context)
 
 
 def project_detail(request, jira_project_key: str):
@@ -514,6 +560,67 @@ def project_bamboo_plan_detail(request, jira_project_key: str, plan_key: str):
         "navProjectSearchItems": _build_nav_project_search_items(list_project_summaries()),
     }
     return render(request, "ui/bamboo_plan_detail.html", context)
+
+
+def project_jenkins_build_detail(request, jira_project_key: str, job_path: str):
+    project = get_project_detail(jira_project_key, ci_provider=Project.PROVIDER_JENKINS)
+    if project is None:
+        return render(request, "ui/jenkins_build_detail.html", {"project": None, "build": None, "jenkinsStatus": None})
+
+    build = next((item for item in project["builds"] if item["jobPath"] == job_path), None)
+    if build is None:
+        return render(request, "ui/jenkins_build_detail.html", {"project": project, "build": None, "jenkinsStatus": None})
+
+    jenkins_status = get_jenkins_job_status(job_path)
+    jenkins_error = ""
+    jenkins_job = None
+
+    try:
+        jenkins_job = get_jenkins_job_details(job_path)
+    except JenkinsOperationError as exc:
+        jenkins_error = str(exc)
+
+    executions = list_executions_by_job_path(job_path) or []
+
+    context = {
+        "project": project,
+        "build": build,
+        "jenkinsStatus": jenkins_status,
+        "jenkinsJob": jenkins_job,
+        "jenkinsError": jenkins_error,
+        "executions": executions,
+        "navProjectSearchItems": _build_nav_project_search_items(list_project_summaries()),
+    }
+    return render(request, "ui/jenkins_build_detail.html", context)
+
+
+def project_jenkins_build_info_detail(request, jira_project_key: str, job_path: str, build_number: str):
+    project = get_project_detail(jira_project_key, ci_provider=Project.PROVIDER_JENKINS)
+    if project is None:
+        return render(request, "ui/jenkins_build_detail.html", {"project": None, "build": None})
+
+    build = next((item for item in project["builds"] if item["jobPath"] == job_path), None)
+    if build is None:
+        return render(request, "ui/jenkins_build_detail.html", {"project": project, "build": None})
+
+    jenkins_status = get_jenkins_job_status(job_path)
+    jenkins_error = ""
+    build_details = None
+
+    try:
+        build_details = get_jenkins_build_details(job_path, build_number)
+    except JenkinsOperationError as exc:
+        jenkins_error = str(exc)
+
+    context = {
+        "project": project,
+        "build": build,
+        "jenkinsStatus": jenkins_status,
+        "buildDetails": build_details,
+        "jenkinsError": jenkins_error,
+        "navProjectSearchItems": _build_nav_project_search_items(list_project_summaries()),
+    }
+    return render(request, "ui/jenkins_build_detail.html", context)
 
 
 def project_build_info_list(request, jira_project_key: str, plan_key: str):
