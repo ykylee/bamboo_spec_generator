@@ -52,13 +52,13 @@ class UiPlaywrightE2ETest(unittest.TestCase):
         from django.core.management import call_command
 
         cls._call_command = staticmethod(call_command)
-        from apps.buildmeta.models import BuildPlan, BuildPlanDefinition, Project, ProjectBuild, ProjectRepository
+        from apps.buildmeta.models import BambooBuildUnit, BuildUnit, BuildUnitDefinition, Project, Repository
 
-        cls.BuildPlan = BuildPlan
-        cls.BuildPlanDefinition = BuildPlanDefinition
         cls.Project = Project
-        cls.ProjectBuild = ProjectBuild
-        cls.ProjectRepository = ProjectRepository
+        cls.Repository = Repository
+        cls.BuildUnit = BuildUnit
+        cls.BambooBuildUnit = BambooBuildUnit
+        cls.BuildUnitDefinition = BuildUnitDefinition
 
         cls.server_process = subprocess.Popen(
             ["python3", "backend/manage.py", "runserver", f"127.0.0.1:{cls.port}", "--noreload"],
@@ -142,37 +142,41 @@ class UiPlaywrightE2ETest(unittest.TestCase):
         definition_year: str = "2026",
     ) -> None:
         project = self.Project.objects.create(
-            jira_project_key=jira_project_key,
-            bitbucket_project_key=bitbucket_project_key,
-            representative_repo_slug=repo_slug,
+            project_key=jira_project_key,
+            name=jira_project_key,
+            ci_provider="bamboo",
         )
-        repository = self.ProjectRepository.objects.create(
+        repository = self.Repository.objects.create(
             project=project,
+            repo_key=bitbucket_project_key,
             repo_slug=repo_slug,
             coverity_project=coverity_project,
             coverity_stream=coverity_stream,
             is_representative=True,
         )
-        build_plan = self.BuildPlan.objects.create(
-            build_id=build_id,
-            plan_key=plan_key,
-            static_analysis_tool_version=static_analysis_tool_version,
-            coverity_project=build_plan_coverity_project,
-        )
-        self.ProjectBuild.objects.create(
+        project.representative_repository = repository
+        project.save()
+        build_unit = self.BuildUnit.objects.create(
             project=project,
             repository=repository,
-            build_plan=build_plan,
-            build_name=build_name,
-            build_type=build_type,
+            ci_provider="bamboo",
+            external_key=build_id,
+            display_name=build_name,
+            compiler=build_type,
             runtime_stack=runtime_stack,
         )
+        self.BambooBuildUnit.objects.create(
+            build_unit=build_unit,
+            plan_key=plan_key,
+            build_id=build_id,
+            coverity_project=build_plan_coverity_project,
+            static_analysis_tool_version=static_analysis_tool_version,
+        )
         if with_active_definition:
-            self.BuildPlanDefinition.objects.create(
-                build_plan=build_plan,
-                project=project,
+            self.BuildUnitDefinition.objects.create(
+                build_unit=build_unit,
                 year=definition_year,
-                source_kind=self.BuildPlanDefinition.SOURCE_KIND_JSON,
+                source_kind="json",
                 definition_json={
                     "buildId": build_id,
                     "name": build_name,
@@ -341,7 +345,7 @@ class UiPlaywrightE2ETest(unittest.TestCase):
         self.page.wait_for_url(f"{self.base_url}/projects/OPS/")
 
         self.assertEqual(f"{self.base_url}/projects/OPS/", self.page.url)
-        self.assertTrue(self.Project.objects.filter(jira_project_key="OPS").exists())
+        self.assertTrue(self.Project.objects.filter(project_key="OPS", ci_provider="bamboo").exists())
         self.assertEqual("OPS", self.page.locator(".hero__title").inner_text())
         self.assertTrue(self.page.get_by_text("연결 점검 필요").is_visible())
         self.assertTrue(self.page.locator("#project-repository-add-panel").count() == 1)
