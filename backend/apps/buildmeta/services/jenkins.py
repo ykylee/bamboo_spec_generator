@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 from urllib import error, parse, request
 
+from django.utils import timezone
 from apps.buildmeta.models import JenkinsBuildUnit, JenkinsNodeSnapshot, JenkinsQueueItemSnapshot, BuildUnit
 
 from .system_settings import DEFAULT_JENKINS_TOKEN_PATH, get_jenkins_system_settings
@@ -192,7 +193,7 @@ def collect_jenkins_system_status() -> dict:
             executor_count=len(executors),
             busy_executors=busy_count,
             offline_reason=node.get("offlineCauseReason", ""),
-            captured_at=node.get("idle", True),
+            captured_at=timezone.now(),
         )
         node_snapshots.append({
             "resourceName": snapshot.resource_name,

@@ -42,9 +42,9 @@ class Project(TimestampedModel):
     )
 
     class Meta:
-        db_table = "buildmeta_project_v2"
+        db_table = "buildmeta_project"
         constraints = [
-            models.UniqueConstraint(fields=["ci_provider", "project_key"], name="uq_project_v2_provider_key"),
+            models.UniqueConstraint(fields=["ci_provider", "project_key"], name="uq_project_provider_key"),
         ]
 
     def __str__(self) -> str:
@@ -86,13 +86,13 @@ class Repository(TimestampedModel):
     coverity_stream = models.CharField(max_length=255, blank=True)
 
     class Meta:
-        db_table = "buildmeta_repository_v2"
+        db_table = "buildmeta_repository"
         constraints = [
-            models.UniqueConstraint(fields=["project", "repo_slug"], name="uq_repository_v2_project_slug"),
+            models.UniqueConstraint(fields=["project", "repo_slug"], name="uq_repository_project_slug"),
             models.UniqueConstraint(
                 fields=["project"],
                 condition=Q(is_representative=True),
-                name="uq_repository_v2_representative",
+                name="uq_repository_representative",
             ),
         ]
 
@@ -156,9 +156,9 @@ class BuildUnit(TimestampedModel):
     )
 
     class Meta:
-        db_table = "buildmeta_build_unit_v2"
+        db_table = "buildmeta_build_unit"
         constraints = [
-            models.UniqueConstraint(fields=["ci_provider", "external_key"], name="uq_build_unit_v2_provider_key"),
+            models.UniqueConstraint(fields=["ci_provider", "external_key"], name="uq_build_unit_provider_key"),
         ]
 
     def __str__(self) -> str:
@@ -250,16 +250,16 @@ class BuildUnitDefinition(TimestampedModel):
     is_active = models.BooleanField(default=False)
 
     class Meta:
-        db_table = "buildmeta_build_unit_definition_v2"
+        db_table = "buildmeta_build_unit_definition"
         constraints = [
             models.UniqueConstraint(
                 fields=["build_unit", "definition_hash"],
-                name="uq_build_unit_definition_v2_hash",
+                name="uq_build_unit_definition_hash",
             ),
             models.UniqueConstraint(
                 fields=["build_unit"],
                 condition=Q(is_active=True),
-                name="uq_build_unit_definition_v2_active",
+                name="uq_build_unit_definition_active",
             ),
         ]
 
@@ -296,13 +296,13 @@ class BuildVersion(TimestampedModel):
     latest_success = models.BooleanField(null=True, blank=True)
 
     class Meta:
-        db_table = "buildmeta_build_version_v2"
+        db_table = "buildmeta_build_version"
         constraints = [
-            models.UniqueConstraint(fields=["build_unit", "version_text"], name="uq_build_version_v2_text"),
+            models.UniqueConstraint(fields=["build_unit", "version_text"], name="uq_build_version_text"),
             models.UniqueConstraint(
                 fields=["build_unit"],
                 condition=Q(is_latest=True),
-                name="uq_build_version_v2_latest",
+                name="uq_build_version_latest",
             ),
         ]
 
@@ -359,11 +359,11 @@ class BuildExecution(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
-        db_table = "buildmeta_build_execution_v2"
+        db_table = "buildmeta_build_execution"
         constraints = [
             models.UniqueConstraint(
                 fields=["build_unit", "external_execution_key", "execution_number"],
-                name="uq_build_execution_v2_number",
+                name="uq_build_execution_number",
             ),
         ]
 
@@ -398,7 +398,7 @@ class ExecutionArtifact(TimestampedModel):
     checksum = models.CharField(max_length=128, blank=True)
 
     class Meta:
-        db_table = "buildmeta_execution_artifact_v2"
+        db_table = "buildmeta_execution_artifact"
 
 
 class StaticAnalysisResult(TimestampedModel):
@@ -414,11 +414,11 @@ class StaticAnalysisResult(TimestampedModel):
     metrics_json = models.JSONField(null=True, blank=True)
 
     class Meta:
-        db_table = "buildmeta_static_analysis_result_v2"
+        db_table = "buildmeta_static_analysis_result"
         constraints = [
             models.UniqueConstraint(
                 fields=["build_execution", "tool_name"],
-                name="uq_static_analysis_result_v2_tool",
+                name="uq_static_analysis_result_tool",
             ),
         ]
 
@@ -431,7 +431,7 @@ class DeploymentTarget(TimestampedModel):
     approval_required = models.BooleanField(default=False)
 
     class Meta:
-        db_table = "buildmeta_deployment_target_v2"
+        db_table = "buildmeta_deployment_target"
 
 
 class DeploymentExecution(TimestampedModel):
@@ -456,7 +456,7 @@ class DeploymentExecution(TimestampedModel):
     finished_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
-        db_table = "buildmeta_deployment_execution_v2"
+        db_table = "buildmeta_deployment_execution"
 
 
 class SystemStatusSnapshot(models.Model):
@@ -473,7 +473,7 @@ class SystemStatusSnapshot(models.Model):
     captured_at = models.DateTimeField()
 
     class Meta:
-        db_table = "buildmeta_system_status_snapshot_v2"
+        db_table = "buildmeta_system_status_snapshot"
 
 
 class AuditEvent(models.Model):
@@ -486,7 +486,7 @@ class AuditEvent(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
-        db_table = "buildmeta_audit_event_v2"
+        db_table = "buildmeta_audit_event"
 
 
 class BambooBuildUnit(TimestampedModel):
@@ -505,7 +505,7 @@ class BambooBuildUnit(TimestampedModel):
     coverity_project = models.CharField(max_length=255, blank=True)
 
     class Meta:
-        db_table = "buildmeta_bamboo_build_unit_v2"
+        db_table = "buildmeta_bamboo_build_unit"
 
 
 class BambooBuildInfo(TimestampedModel):
@@ -527,11 +527,11 @@ class BambooBuildInfo(TimestampedModel):
     build_sub_path = models.CharField(max_length=255, blank=True)
 
     class Meta:
-        db_table = "buildmeta_bamboo_build_info_v2"
+        db_table = "buildmeta_bamboo_build_info"
         constraints = [
             models.UniqueConstraint(
                 fields=["bamboo_build_unit", "build_key"],
-                name="uq_bamboo_build_info_v2_key",
+                name="uq_bamboo_build_info_key",
             ),
         ]
 
@@ -557,7 +557,7 @@ class BambooPublishExecution(TimestampedModel):
     return_code = models.IntegerField(null=True, blank=True)
 
     class Meta:
-        db_table = "buildmeta_bamboo_publish_execution_v2"
+        db_table = "buildmeta_bamboo_publish_execution"
 
     @property
     def build_plan(self) -> BuildUnit:
@@ -577,7 +577,7 @@ class JenkinsBuildUnit(TimestampedModel):
     pipeline_kind = models.CharField(max_length=64, blank=True)
 
     class Meta:
-        db_table = "buildmeta_jenkins_build_unit_v2"
+        db_table = "buildmeta_jenkins_build_unit"
 
 
 class JenkinsNodeSnapshot(TimestampedModel):
@@ -590,7 +590,7 @@ class JenkinsNodeSnapshot(TimestampedModel):
     captured_at = models.DateTimeField()
 
     class Meta:
-        db_table = "buildmeta_jenkins_node_snapshot_v2"
+        db_table = "buildmeta_jenkins_node_snapshot"
 
 
 class JenkinsQueueItemSnapshot(TimestampedModel):
@@ -603,4 +603,4 @@ class JenkinsQueueItemSnapshot(TimestampedModel):
     captured_at = models.DateTimeField()
 
     class Meta:
-        db_table = "buildmeta_jenkins_queue_item_snapshot_v2"
+        db_table = "buildmeta_jenkins_queue_item_snapshot"

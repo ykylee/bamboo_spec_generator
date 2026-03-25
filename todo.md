@@ -3,7 +3,7 @@
 ## 기준
 
 - 작성일: 2026-03-25
-- 기준 브랜치 상태: `codex/system-extension`
+- 기준 브랜치 상태: `codex/opencode_test`
 - 기준 판단:
   - `BuildUnit` 중심 백엔드 재구성 완료
   - 백엔드 테스트 `173 tests` 통과
