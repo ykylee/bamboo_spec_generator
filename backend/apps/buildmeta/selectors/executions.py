@@ -159,7 +159,8 @@ def _bamboo_attr(build_unit: BuildUnit, attr: str) -> str:
 
 def _detail_url(build_unit: BuildUnit) -> str:
     if build_unit.ci_provider == BuildUnit.PROVIDER_JENKINS:
-        return f"/projects/{build_unit.project.project_key}/jenkins-jobs/{build_unit.external_key}/?provider=jenkins"
+        job_path = getattr(getattr(build_unit, "jenkins", None), "job_path", "") or build_unit.external_key
+        return f"/projects/{build_unit.project.project_key}/jenkins-jobs/{job_path}/?provider=jenkins"
     return f"/projects/{build_unit.project.project_key}/builds/{_plan_key(build_unit)}/"
 
 
