@@ -52,12 +52,12 @@ urlpatterns = [
         name="project-build-info-detail",
     ),
     path(
-        "projects/<str:jira_project_key>/jenkins-jobs/<str:job_path>/",
+        "projects/<str:jira_project_key>/jenkins-jobs/<path:job_path>/",
         project_jenkins_build_detail,
         name="project-jenkins-build-detail",
     ),
     path(
-        "projects/<str:jira_project_key>/jenkins-jobs/<str:job_path>/builds/<str:build_number>/",
+        "projects/<str:jira_project_key>/jenkins-jobs/<path:job_path>/builds/<str:build_number>/",
         project_jenkins_build_info_detail,
         name="project-jenkins-build-info-detail",
     ),

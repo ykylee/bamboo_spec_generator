@@ -75,8 +75,8 @@ def list_build_plan_summaries(*, ci_provider: str | None = None) -> list[dict]:
                 "resultStatus": _legacy_result_status(latest_execution.status) if latest_execution is not None else "",
                 "summaryMessage": latest_execution.summary if latest_execution is not None else "",
                 "buildInfoCount": build_unit.bamboo.build_infos.count() if hasattr(build_unit, "bamboo") else 0,
-                "detailUrl": f"/projects/{build_unit.project.project_key}/builds/{_plan_key(build_unit)}/",
-                "buildInfoUrl": f"/projects/{build_unit.project.project_key}/builds/{_plan_key(build_unit)}/infos/",
+                "detailUrl": _detail_url(build_unit),
+                "buildInfoUrl": _build_info_url(build_unit),
             }
         )
     return summaries
@@ -155,6 +155,18 @@ def _build_id(build_unit: BuildUnit) -> str:
 
 def _bamboo_attr(build_unit: BuildUnit, attr: str) -> str:
     return getattr(getattr(build_unit, "bamboo", None), attr, "")
+
+
+def _detail_url(build_unit: BuildUnit) -> str:
+    if build_unit.ci_provider == BuildUnit.PROVIDER_JENKINS:
+        return f"/projects/{build_unit.project.project_key}/jenkins-jobs/{build_unit.external_key}/?provider=jenkins"
+    return f"/projects/{build_unit.project.project_key}/builds/{_plan_key(build_unit)}/"
+
+
+def _build_info_url(build_unit: BuildUnit) -> str:
+    if build_unit.ci_provider == BuildUnit.PROVIDER_JENKINS:
+        return ""
+    return f"/projects/{build_unit.project.project_key}/builds/{_plan_key(build_unit)}/infos/"
 
 
 def _legacy_result_status(status: str) -> str:

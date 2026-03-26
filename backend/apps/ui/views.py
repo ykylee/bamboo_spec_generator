@@ -75,7 +75,10 @@ def project_list(request):
             except ValueError as exc:
                 registration_error = str(exc)
             else:
-                return redirect("project-detail", jira_project_key=payload["jiraProjectKey"])
+                return _redirect_with_provider(
+                    redirect("project-detail", jira_project_key=payload["jiraProjectKey"]),
+                    _current_ci_provider(request),
+                )
 
     current_provider = _current_ci_provider(request)
     all_projects = list_project_summaries(ci_provider=current_provider)
@@ -387,7 +390,10 @@ def project_detail(request, jira_project_key: str):
                 else:
                     if project is None:
                         return render(request, "ui/project_detail.html", {"project": None})
-                    return redirect("project-detail", jira_project_key=project["jiraProjectKey"])
+                    return _redirect_with_provider(
+                        redirect("project-detail", jira_project_key=project["jiraProjectKey"]),
+                        _current_ci_provider(request),
+                    )
         elif form_kind == "repository":
             repository_add_form = RepositoryMetadataForm(request.POST)
             repository_add_open = True
@@ -398,10 +404,13 @@ def project_detail(request, jira_project_key: str):
                 except ValueError as exc:
                     repository_add_error = str(exc)
                 else:
-                    return redirect(
-                        "project-repository-detail",
-                        jira_project_key=jira_project_key,
-                        repo_slug=repository_add_form.cleaned_data["repo_slug"].strip(),
+                    return _redirect_with_provider(
+                        redirect(
+                            "project-repository-detail",
+                            jira_project_key=jira_project_key,
+                            repo_slug=repository_add_form.cleaned_data["repo_slug"].strip(),
+                        ),
+                        _current_ci_provider(request),
                     )
         elif form_kind == "build":
             build_add_form = BuildMetadataForm(request.POST)
@@ -413,10 +422,13 @@ def project_detail(request, jira_project_key: str):
                 except ValueError as exc:
                     build_add_error = str(exc)
                 else:
-                    return redirect(
-                        "project-build-detail",
-                        jira_project_key=jira_project_key,
-                        plan_key=build_add_form.cleaned_data["plan_key"].strip(),
+                    return _redirect_with_provider(
+                        redirect(
+                            "project-build-detail",
+                            jira_project_key=jira_project_key,
+                            plan_key=build_add_form.cleaned_data["plan_key"].strip(),
+                        ),
+                        _current_ci_provider(request),
                     )
 
     context = {
@@ -771,6 +783,14 @@ def _build_pagination_base_query(request) -> str:
 def _current_ci_provider(request) -> str:
     value = (request.GET.get("provider") or request.POST.get("ci_provider") or "").strip().lower()
     return value or Project.PROVIDER_BAMBOO
+
+
+def _redirect_with_provider(response, provider: str):
+    if provider == Project.PROVIDER_BAMBOO:
+        return response
+    separator = "&" if "?" in response.url else "?"
+    response["Location"] = f"{response.url}{separator}provider={provider}"
+    return response
 
 
 def _is_partial_project_list_request(request) -> bool:

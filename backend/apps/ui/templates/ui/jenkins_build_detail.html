@@ -96,7 +96,7 @@
       <tbody>
         {% for execution in executions %}
         <tr>
-          <td><a href="{% url 'project-jenkins-build-detail' project.jiraProjectKey build.jobPath execution.buildNumber %}">{{ execution.buildNumber }}</a></td>
+          <td><a href="{% url 'project-jenkins-build-info-detail' project.jiraProjectKey build.jobPath execution.buildNumber %}?provider=jenkins">{{ execution.buildNumber }}</a></td>
           <td>{{ execution.version|default:"-" }}</td>
           <td>
             {% if execution.success %}
@@ -135,15 +135,15 @@
         </div>
         <div class="detail-grid__item">
           <dt>Result</dt>
-          <dd>{{ jenkinsJob.summary.result|default:"Building" }}</dd>
+          <dd>{{ jenkinsJob.lastBuild.result|default:"Building" }}</dd>
         </div>
         <div class="detail-grid__item">
-          <dt>Duration</dt>
-          <dd>{{ jenkinsJob.summary.duration|default:0 }} ms</dd>
+          <dt>Job Name</dt>
+          <dd>{{ jenkinsJob.summary.displayName|default:build.jobPath }}</dd>
         </div>
         <div class="detail-grid__item">
-          <dt>Estimated Duration</dt>
-          <dd>{{ jenkinsJob.summary.estimatedDuration|default:0 }} ms</dd>
+          <dt>Jenkins</dt>
+          <dd><a href="{{ jenkinsJob.lastBuild.url|default:jenkinsStatus.jobUrl }}" target="_blank" rel="noopener">상세 보기</a></dd>
         </div>
       </dl>
     </div>
@@ -160,7 +160,7 @@
 <div class="empty-state">
   <h2>프로젝트 또는 빌드를 찾을 수 없습니다.</h2>
   <p>Jenkins Job이 아직 등록되지 않았거나 존재하지 않습니다.</p>
-  <a class="action-button" href="{% url 'project-list' %}">프로젝트 목록으로</a>
+  <a class="action-button" href="{% url 'project-list' %}?provider=jenkins">프로젝트 목록으로</a>
 </div>
 {% endif %}
 {% endblock %}

@@ -236,8 +236,10 @@ def _job_browse_url(identity: dict[str, str]) -> str:
     base_url = str(settings_payload["serverUrl"]).rstrip("/")
     if not base_url:
         return ""
-    encoded_path = "/".join(parse.quote(part, safe="") for part in identity["jobPath"].split("/"))
-    return f"{base_url}/job/{encoded_path}"
+    encoded_parts = [parse.quote(part, safe="") for part in identity["jobPath"].split("/") if part]
+    if not encoded_parts:
+        return base_url
+    return f"{base_url}/{'/'.join(f'job/{part}' for part in encoded_parts)}"
 
 
 def _build_result_from_number(build_info: dict) -> str:

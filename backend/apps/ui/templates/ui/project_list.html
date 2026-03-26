@@ -5,6 +5,7 @@
 {% block page_heading %}프로젝트 대시보드{% endblock %}
 {% block topbar_controls %}
 <form class="global-filter-bar global-filter-bar--status" method="get" action="{% url 'project-list' %}">
+  <input type="hidden" name="provider" value="{{ current_provider }}">
   <label class="filter-field">
     <span class="filter-field__label">상태</span>
     <select class="filter-field__input" name="status">
@@ -156,6 +157,7 @@
 
     <form class="project-form" method="post" action="{% url 'project-list' %}">
       {% csrf_token %}
+      <input type="hidden" name="ci_provider" value="{{ current_provider }}">
       <div class="project-form__grid">
         <label class="project-form__field">
           <span class="project-form__label">Jira Project Key</span>

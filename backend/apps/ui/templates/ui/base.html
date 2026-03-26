@@ -31,7 +31,7 @@
             </span>
             <span class="sidebar__toggle-label">사이드바 접기</span>
           </button>
-          <a class="app-header__brand" href="{% url 'project-list' %}">
+          <a class="app-header__brand" href="{% url 'project-list' %}{{ provider_query }}">
             <span class="app-header__brand-mark" aria-hidden="true">
               <img src="{% static 'ui/favicon.svg' %}" alt="">
             </span>
@@ -49,10 +49,10 @@
           </div>
         </div>
         <nav class="app-header__nav" aria-label="서비스 이동">
-          <a class="app-header__nav-link{% if request.resolver_match.url_name == 'project-list' or request.resolver_match.url_name == 'project-detail' or request.resolver_match.url_name == 'project-repository-detail' %} app-header__nav-link--active{% endif %}" href="{% url 'project-list' %}">프로젝트</a>
-          <a class="app-header__nav-link{% if request.resolver_match.url_name == 'build-plan-list' or request.resolver_match.url_name == 'project-build-detail' or request.resolver_match.url_name == 'project-build-info-list' or request.resolver_match.url_name == 'project-build-info-detail' %} app-header__nav-link--active{% endif %}" href="{% url 'build-plan-list' %}">빌드 플랜</a>
+          <a class="app-header__nav-link{% if request.resolver_match.url_name == 'project-list' or request.resolver_match.url_name == 'project-detail' or request.resolver_match.url_name == 'project-repository-detail' %} app-header__nav-link--active{% endif %}" href="{% url 'project-list' %}{{ provider_query }}">프로젝트</a>
+          <a class="app-header__nav-link{% if request.resolver_match.url_name == 'build-plan-list' or request.resolver_match.url_name == 'project-build-detail' or request.resolver_match.url_name == 'project-build-info-list' or request.resolver_match.url_name == 'project-build-info-detail' or request.resolver_match.url_name == 'project-jenkins-build-detail' or request.resolver_match.url_name == 'project-jenkins-build-info-detail' %} app-header__nav-link--active{% endif %}" href="{% url 'build-plan-list' %}{{ provider_query }}">빌드 플랜</a>
           <span class="app-header__nav-link app-header__nav-link--muted">실행 이력</span>
-          <a class="app-header__nav-link{% if request.resolver_match.url_name == 'coverity-settings' %} app-header__nav-link--active{% endif %}" href="{% url 'coverity-settings' %}">운영 설정</a>
+          <a class="app-header__nav-link{% if request.resolver_match.url_name == 'settings' or request.resolver_match.url_name == 'coverity-settings' or request.resolver_match.url_name == 'jenkins-settings' %} app-header__nav-link--active{% endif %}" href="{% url 'settings' %}{{ provider_query }}">운영 설정</a>
         </nav>
         <div class="app-header__search" data-project-search>
           <label class="app-header__search-label" for="project-nav-search">프로젝트 검색</label>
@@ -68,7 +68,7 @@
             {% for item in navProjectSearchItems %}
             <a
               class="app-header__search-result"
-              href="{% url 'project-detail' item.jiraProjectKey %}"
+              href="{% url 'project-detail' item.jiraProjectKey %}{{ provider_query }}"
               data-project-search-item
               data-search-text="{{ item.searchText }}"
             >
@@ -106,7 +106,7 @@
         </div>
 
         <nav class="sidebar__nav">
-          <a class="sidebar__nav-item{% if request.resolver_match.url_name == 'project-list' or request.resolver_match.url_name == 'project-detail' or request.resolver_match.url_name == 'project-repository-detail' %} sidebar__nav-item--active{% else %} sidebar__nav-item--muted{% endif %}" href="{% url 'project-list' %}">
+          <a class="sidebar__nav-item{% if request.resolver_match.url_name == 'project-list' or request.resolver_match.url_name == 'project-detail' or request.resolver_match.url_name == 'project-repository-detail' %} sidebar__nav-item--active{% else %} sidebar__nav-item--muted{% endif %}" href="{% url 'project-list' %}{{ provider_query }}">
             <span class="sidebar__nav-icon" aria-hidden="true">
               <svg viewBox="0 0 20 20" focusable="false">
                 <path d="M3 5.5A2.5 2.5 0 0 1 5.5 3h9A2.5 2.5 0 0 1 17 5.5v9a2.5 2.5 0 0 1-2.5 2.5h-9A2.5 2.5 0 0 1 3 14.5z"/>
@@ -115,7 +115,7 @@
             </span>
             <span class="sidebar__nav-text">프로젝트</span>
           </a>
-          <a class="sidebar__nav-item{% if request.resolver_match.url_name == 'build-plan-list' or request.resolver_match.url_name == 'project-build-detail' or request.resolver_match.url_name == 'project-build-info-list' or request.resolver_match.url_name == 'project-build-info-detail' %} sidebar__nav-item--active{% else %} sidebar__nav-item--muted{% endif %}" href="{% url 'build-plan-list' %}">
+          <a class="sidebar__nav-item{% if request.resolver_match.url_name == 'build-plan-list' or request.resolver_match.url_name == 'project-build-detail' or request.resolver_match.url_name == 'project-build-info-list' or request.resolver_match.url_name == 'project-build-info-detail' or request.resolver_match.url_name == 'project-jenkins-build-detail' or request.resolver_match.url_name == 'project-jenkins-build-info-detail' %} sidebar__nav-item--active{% else %} sidebar__nav-item--muted{% endif %}" href="{% url 'build-plan-list' %}{{ provider_query }}">
             <span class="sidebar__nav-icon" aria-hidden="true">
               <svg viewBox="0 0 20 20" focusable="false">
                 <path d="M4 4.5h5l1.2 1.5H16A1.5 1.5 0 0 1 17.5 7.5v8A1.5 1.5 0 0 1 16 17H4A1.5 1.5 0 0 1 2.5 15.5v-9A2 2 0 0 1 4.5 4.5z"/>
@@ -133,7 +133,7 @@
             </span>
             <span class="sidebar__nav-text">실행 이력</span>
           </span>
-          <a class="sidebar__nav-item{% if request.resolver_match.url_name == 'coverity-settings' %} sidebar__nav-item--active{% else %} sidebar__nav-item--muted{% endif %}" href="{% url 'coverity-settings' %}">
+          <a class="sidebar__nav-item{% if request.resolver_match.url_name == 'settings' or request.resolver_match.url_name == 'coverity-settings' or request.resolver_match.url_name == 'jenkins-settings' %} sidebar__nav-item--active{% else %} sidebar__nav-item--muted{% endif %}" href="{% url 'settings' %}{{ provider_query }}">
             <span class="sidebar__nav-icon" aria-hidden="true">
               <svg viewBox="0 0 20 20" focusable="false">
                 <path d="M10 3 12 6.5 16 7l-3 3 1 4-4-2.5L6 14l1-4-3-3 4-.5z"/>

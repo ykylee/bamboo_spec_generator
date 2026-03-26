@@ -22,7 +22,7 @@ def list_jenkins_jobs(request) -> list[dict]:
     return list_jenkins_job_summaries(ci_provider="jenkins")
 
 
-@router.get("/{job_path}/status")
+@router.get("/{path:job_path}/status")
 def get_jenkins_job_status_endpoint(request, job_path: str) -> dict:
     try:
         return get_jenkins_job_status(job_path)
@@ -30,7 +30,7 @@ def get_jenkins_job_status_endpoint(request, job_path: str) -> dict:
         raise HttpError(400, exc.summary)
 
 
-@router.get("/{job_path}/details")
+@router.get("/{path:job_path}/details")
 def get_jenkins_job_details_endpoint(request, job_path: str) -> dict:
     try:
         return get_jenkins_job_details(job_path)
@@ -38,7 +38,7 @@ def get_jenkins_job_details_endpoint(request, job_path: str) -> dict:
         raise HttpError(404, exc.summary)
 
 
-@router.get("/{job_path}/executions")
+@router.get("/{path:job_path}/executions")
 def get_jenkins_executions(request, job_path: str) -> list[dict]:
     payload = list_executions_by_job_path(job_path)
     if payload is None:
@@ -46,7 +46,7 @@ def get_jenkins_executions(request, job_path: str) -> list[dict]:
     return payload
 
 
-@router.post("/{job_path}/trigger")
+@router.post("/{path:job_path}/trigger")
 def trigger_jenkins_job_endpoint(request, job_path: str, parameters: dict | None = None) -> dict:
     try:
         return trigger_jenkins_job(job_path, parameters)
@@ -54,7 +54,7 @@ def trigger_jenkins_job_endpoint(request, job_path: str, parameters: dict | None
         raise HttpError(400, exc.summary)
 
 
-@router.get("/{job_path}/builds/{build_number}")
+@router.get("/{path:job_path}/builds/{build_number}")
 def get_jenkins_build_endpoint(request, job_path: str, build_number: str) -> dict:
     try:
         return get_jenkins_build_details(job_path, build_number)
