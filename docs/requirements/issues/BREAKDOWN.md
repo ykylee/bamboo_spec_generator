@@ -2,7 +2,7 @@
 
 ## 개요
 
-현재 통합 요구사항을 Jira 등록 가능한 단위로 분해한 초안이다. 현재는 생성기 본체 범위의 Epic 1건, 빌드 메타데이터 DB 확장 범위의 Epic 1건, 운영 관리 기능 확장 범위의 Epic 1건으로 나뉜다.
+현재 통합 요구사항을 Jira 등록 가능한 단위로 분해한 초안이다. 현재는 생성기 본체 범위의 Epic 1건, 빌드 메타데이터 DB 확장 범위의 Epic 1건, 운영 관리 기능 확장 범위의 Epic 1건, 다중 CI 콘솔 확장 범위의 Epic 1건으로 나뉜다.
 
 ## 전체 구현 상태
 
@@ -31,6 +31,12 @@
 16. STORY-25 Bamboo 시스템 운영 현황 조회 기능 도입
 17. STORY-26 운영 관리 API 표준화
 18. STORY-27 빌드 등록 구조 및 지원 옵션 정의
+19. STORY-29 다중 CI 도구 모드 전환 및 공통 상단 네비게이션 도입
+20. STORY-32 CI 도구 공통 도메인/API 모델 확장
+21. STORY-29 다중 CI 도구 모드 전환 및 공통 상단 네비게이션 도입
+22. STORY-31 Jenkins 프로젝트 및 빌드 잡 등록 기능 도입
+23. STORY-33 Jenkins 시스템 운영 현황 조회 기능 도입
+24. STORY-30 CI 도구별 테마 컬러와 공통 UI 문구 정비
 
 ## EPIC-01 생성기 본체
 
@@ -174,3 +180,40 @@
 - [STORY-25 Bamboo 시스템 운영 현황 조회 기능 도입](./STORY-25-bamboo-system-operations-visibility.md)
 - [STORY-26 운영 관리 API 표준화](./STORY-26-operations-api-standardization.md)
 - [STORY-27 빌드 등록 구조 및 지원 언어/컴파일러 선택 방식 정의](./STORY-27-build-registration-structure-and-supported-options.md)
+
+## EPIC-04 다중 CI 콘솔 및 Jenkins 운영 확장
+
+### 개요
+
+Bamboo 중심 운영 콘솔을 Bamboo와 Jenkins를 함께 다루는 공통 CI 콘솔로 확장하기 위한 Jira 초안이다. 상단 모드 전환, 공통 UI 구조 유지, 도구별 테마 컬러, Jenkins 프로젝트/빌드 잡 등록, 공통 도메인/API 확장을 포함한다.
+
+### 구현 상태
+
+- 현재 요구사항 신규 등록:
+  - STORY-29
+  - STORY-30
+  - STORY-31
+  - STORY-32
+  - STORY-33
+
+### 우선순위
+
+- `높음`: STORY-29, STORY-31, STORY-32, STORY-33
+- `중간`: STORY-30
+
+### 추천 구현 순서
+
+1. STORY-32 CI 도구 공통 도메인/API 모델 확장
+2. STORY-29 다중 CI 도구 모드 전환 및 공통 상단 네비게이션 도입
+3. STORY-31 Jenkins 프로젝트 및 빌드 잡 등록 기능 도입
+4. STORY-33 Jenkins 시스템 운영 현황 조회 기능 도입
+5. STORY-30 CI 도구별 테마 컬러와 공통 UI 문구 정비
+
+### 이슈 목록
+
+- [EPIC-04 다중 CI 콘솔 및 Jenkins 운영 확장](./EPIC-04-multi-ci-console-expansion.md)
+- [STORY-29 다중 CI 도구 모드 전환 및 공통 상단 네비게이션 도입](./STORY-29-multi-ci-mode-switching.md)
+- [STORY-30 CI 도구별 테마 컬러와 공통 UI 문구 정비](./STORY-30-ci-theme-and-copy-guidelines.md)
+- [STORY-31 Jenkins 프로젝트 및 빌드 잡 등록 기능 도입](./STORY-31-jenkins-project-and-job-registration.md)
+- [STORY-32 CI 도구 공통 도메인/API 모델 확장](./STORY-32-ci-provider-domain-model.md)
+- [STORY-33 Jenkins 시스템 운영 현황 조회 기능 도입](./STORY-33-jenkins-system-operations-visibility.md)

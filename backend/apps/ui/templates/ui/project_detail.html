@@ -36,7 +36,7 @@
       {% else %}
       <span class="chip chip--warning">연결 점검 필요</span>
       {% endif %}
-      <a class="chip chip--neutral" href="{% url 'project-list' %}{% if request.GET.urlencode %}?{{ request.GET.urlencode }}{% endif %}">목록으로</a>
+      <a class="chip chip--neutral" href="{% url 'project-list' %}{{ provider_query }}">목록으로</a>
     </div>
   </div>
   <div class="signal-hero__board" aria-label="프로젝트 상태 보드">
@@ -96,6 +96,7 @@
 
     <form class="project-form" method="post" action="{% url 'project-detail' project.jiraProjectKey %}">
       {% csrf_token %}
+      <input type="hidden" name="ci_provider" value="{{ current_provider }}">
       <input type="hidden" name="form_kind" value="project">
       <div class="project-form__grid">
         <label class="project-form__field">
@@ -170,6 +171,7 @@
 
     <form class="project-form" method="post" action="{% url 'project-detail' project.jiraProjectKey %}">
       {% csrf_token %}
+      <input type="hidden" name="ci_provider" value="{{ current_provider }}">
       <input type="hidden" name="form_kind" value="repository">
       <div class="project-form__grid">
         <label class="project-form__field">
@@ -224,6 +226,7 @@
 
     <form class="project-form" method="post" action="{% url 'project-detail' project.jiraProjectKey %}">
       {% csrf_token %}
+      <input type="hidden" name="ci_provider" value="{{ current_provider }}">
       <input type="hidden" name="form_kind" value="build">
       <div class="project-form__grid project-form__grid--build">
         <label class="project-form__field">
@@ -468,7 +471,7 @@
   <h1 class="empty-state__title">프로젝트를 찾을 수 없습니다.</h1>
   <p class="empty-state__body">요청한 Jira Project Key에 해당하는 메타데이터가 없습니다.</p>
   <p class="empty-state__body stack-top">
-    <a class="chip chip--neutral" href="{% url 'project-list' %}">프로젝트 목록으로 돌아가기</a>
+    <a class="chip chip--neutral" href="{% url 'project-list' %}{{ provider_query }}">프로젝트 목록으로 돌아가기</a>
   </p>
 </section>
 {% endif %}

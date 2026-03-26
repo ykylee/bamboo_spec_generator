@@ -12,7 +12,7 @@
     <h1 class="hero__title">{{ repository.repoSlug }}</h1>
     <p class="signal-hero__body">저장소 메타데이터와 연결된 빌드 플랜을 메인 대시보드와 같은 시그널 패턴으로 풀었습니다.</p>
   <div class="hero__actions">
-    <a class="action-button" href="{% url 'project-detail' project.jiraProjectKey %}">프로젝트 상세</a>
+    <a class="action-button" href="{% url 'project-detail' project.jiraProjectKey %}{{ provider_query }}">프로젝트 상세</a>
   </div>
     <div class="chip-row">
       <span class="chip">{{ project.jiraProjectKey }}</span>
@@ -76,7 +76,7 @@
           {% else %}
           <span class="chip chip--success">연결됨</span>
           {% endif %}
-          <a class="chip chip--neutral" href="{% url 'project-build-detail' project.jiraProjectKey build.planKey %}">빌드 상세</a>
+          <a class="chip chip--neutral" href="{% url 'project-build-detail' project.jiraProjectKey build.planKey %}{{ provider_query }}">빌드 상세</a>
         </div>
       </li>
       {% endfor %}

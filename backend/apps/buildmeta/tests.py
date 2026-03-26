@@ -13,18 +13,25 @@ from django.test import SimpleTestCase, TestCase
 from django.utils import timezone
 
 from apps.buildmeta.models import (
+    AuditEvent,
+    BuildExecution,
+    BuildUnit,
+    BuildVersion,
+    JenkinsBuildUnit,
+    Project as ProjectModel,
+    Repository as RepositoryModel,
+    StaticAnalysisResult,
+    SystemSetting,
+)
+from apps.buildmeta.tests_support import (
     BambooPublishExecution,
     BuildDefinitionHistory,
-    BuildExecution,
     BuildPlan,
     BuildPlanBuildInfo,
     BuildPlanDefinition,
-    BuildVersion,
     Project,
     ProjectBuild,
     ProjectRepository,
-    StaticAnalysisResult,
-    SystemSetting,
 )
 from apps.buildmeta.selectors.definitions import (
     _analysis_stage_job_name,
@@ -45,6 +52,7 @@ from apps.buildmeta.selectors.definitions import (
     get_build_plan_preview,
     get_prepare_context_by_plan_key,
 )
+from apps.buildmeta.selectors.executions import list_build_plan_summaries
 from apps.buildmeta.services import (
     build_git_clone_url,
     create_project,
@@ -282,6 +290,50 @@ class ExecutionServiceTest(TestCase):
         self.assertEqual(2, BuildExecution.objects.count())
         self.assertEqual("api-linux", first_payload["buildKey"])
         self.assertEqual("api-windows", second_payload["buildKey"])
+
+
+class BuildPlanSummarySelectorTest(TestCase):
+    def test_list_build_plan_summaries_uses_jenkins_job_path_in_detail_url(self) -> None:
+        project = ProjectModel.objects.create(
+            project_key="JENKINS",
+            name="JENKINS",
+            ci_provider=ProjectModel.PROVIDER_JENKINS,
+            status=ProjectModel.STATUS_ACTIVE,
+        )
+        repository = RepositoryModel.objects.create(
+            project=project,
+            repo_type=RepositoryModel.TYPE_GIT,
+            repo_key="JENKINS",
+            repo_slug="jenkins-app",
+            is_representative=True,
+        )
+        project.representative_repository = repository
+        project.save(update_fields=["representative_repository", "updated_at"])
+
+        build_unit = BuildUnit.objects.create(
+            project=project,
+            repository=repository,
+            ci_provider=BuildUnit.PROVIDER_JENKINS,
+            external_key="jenkins-app-key",
+            display_name="Jenkins App",
+            compiler="pipeline",
+            runtime_stack="java17",
+        )
+        JenkinsBuildUnit.objects.create(
+            build_unit=build_unit,
+            job_path="folder/jenkins-app",
+            job_type="pipeline",
+            folder_path="folder",
+            pipeline_kind="multibranch",
+        )
+
+        summaries = list_build_plan_summaries(ci_provider=BuildUnit.PROVIDER_JENKINS)
+
+        self.assertEqual(1, len(summaries))
+        self.assertEqual(
+            "/projects/JENKINS/jenkins-jobs/folder/jenkins-app/?provider=jenkins",
+            summaries[0]["detailUrl"],
+        )
 
 
 class BambooPublishServiceTest(TestCase):

@@ -11,7 +11,7 @@ from urllib import error, parse, request
 
 from django.utils import timezone
 
-from apps.buildmeta.models import BambooPublishExecution, BuildPlan
+from apps.buildmeta.models import BambooBuildUnit, BambooPublishExecution, BuildUnit
 
 from .system_settings import DEFAULT_BAMBOO_TOKEN_PATH, get_bamboo_system_settings
 
@@ -42,9 +42,15 @@ class BambooClientConfig:
 def get_bamboo_client_config() -> BambooClientConfig:
     settings_payload = get_bamboo_system_settings()
     server_url = str(settings_payload["serverUrl"]).rstrip("/")
+    env_declared = "BAMBOO_SERVER_TOKEN" in os.environ
     env_token = os.environ.get("BAMBOO_SERVER_TOKEN", "").strip()
-    file_token = DEFAULT_BAMBOO_TOKEN_PATH.read_text(encoding="utf-8").strip() if DEFAULT_BAMBOO_TOKEN_PATH.is_file() else ""
-    token = _normalize_bamboo_token(env_token or file_token)
+    file_token = ""
+    api_token = ""
+    if not env_declared and DEFAULT_BAMBOO_TOKEN_PATH.is_file():
+        file_token = DEFAULT_BAMBOO_TOKEN_PATH.read_text(encoding="utf-8").strip()
+    if not env_declared and not file_token:
+        api_token = os.environ.get("BAMBOO_API_TOKEN", "").strip()
+    token = _normalize_bamboo_token(env_token or file_token or api_token)
     if not server_url:
         raise BambooOperationError("Bamboo 서버 URL이 설정되지 않았습니다.")
     if not token:
@@ -60,51 +66,28 @@ def get_bamboo_client_config() -> BambooClientConfig:
 
 
 def get_bamboo_plan_status(plan_key: str) -> dict:
-    plan = _get_build_plan(plan_key)
-    if plan is None:
+    bamboo_unit = _get_bamboo_build_unit(plan_key)
+    if bamboo_unit is None:
         return {"configured": False, "exists": False, "error": "Build plan not found."}
 
-    identity = _build_plan_identity(plan)
+    identity = _build_plan_identity(bamboo_unit)
     settings_payload = get_bamboo_system_settings()
     if not settings_payload["serverUrl"]:
-        return {
-            **identity,
-            "configured": False,
-            "exists": False,
-            "message": "Bamboo 서버 URL이 아직 설정되지 않았습니다.",
-        }
+        return {**identity, "configured": False, "exists": False, "message": "Bamboo 서버 URL이 아직 설정되지 않았습니다."}
     if not settings_payload["tokenConfigured"]:
-        return {
-            **identity,
-            "configured": False,
-            "exists": False,
-            "message": "Bamboo 서버 토큰이 아직 설정되지 않았습니다.",
-        }
+        return {**identity, "configured": False, "exists": False, "message": "Bamboo 서버 토큰이 아직 설정되지 않았습니다."}
 
     try:
         client = _BambooClient(get_bamboo_client_config())
         plan_payload = client.get_plan(identity["projectKey"], identity["planKey"])
     except BambooOperationError as exc:
-        return {
-            **identity,
-            "configured": True,
-            "exists": False,
-            "message": exc.summary,
-            "detail": exc.detail,
-        }
+        return {**identity, "configured": True, "exists": False, "message": exc.summary, "detail": exc.detail}
 
     if plan_payload is None:
-        return {
-            **identity,
-            "configured": True,
-            "exists": False,
-            "message": "Bamboo에 아직 등록되지 않았습니다.",
-            "planUrl": _plan_browse_url(identity),
-        }
+        return {**identity, "configured": True, "exists": False, "message": "Bamboo에 아직 등록되지 않았습니다.", "planUrl": _plan_browse_url(identity)}
 
     result_payload = client.get_latest_result(identity["fullPlanKey"])
     latest_result = _extract_latest_result(result_payload)
-
     return {
         **identity,
         "configured": True,
@@ -124,11 +107,11 @@ def get_bamboo_plan_status(plan_key: str) -> dict:
 
 
 def get_bamboo_plan_details(plan_key: str) -> dict:
-    plan = _get_build_plan(plan_key)
-    if plan is None:
+    bamboo_unit = _get_bamboo_build_unit(plan_key)
+    if bamboo_unit is None:
         raise BambooOperationError("Build plan을 찾지 못했습니다.")
 
-    identity = _build_plan_identity(plan)
+    identity = _build_plan_identity(bamboo_unit)
     client = _BambooClient(get_bamboo_client_config())
     plan_payload = client.get_plan(
         identity["projectKey"],
@@ -164,38 +147,24 @@ def publish_bamboo_specs(plan_key: str) -> dict:
         get_prepare_context_by_plan_key,
     )
 
-    plan = _get_build_plan(plan_key)
-    if plan is None:
+    bamboo_unit = _get_bamboo_build_unit(plan_key)
+    if bamboo_unit is None:
         raise BambooOperationError("Build plan을 찾지 못했습니다.")
 
     try:
         config = get_bamboo_client_config()
     except BambooOperationError as exc:
-        _record_publish_execution(
-            plan=plan,
-            status=BambooPublishExecution.STATUS_FAILED,
-            message=exc.summary,
-            output=exc.detail,
-            return_code=None,
-        )
+        _record_publish_execution(build_unit=bamboo_unit, status="failed", message=exc.summary, output=exc.detail, return_code=None)
         raise
+
     definition_payloads = get_active_definitions_by_plan_key(plan_key)
     if not definition_payloads:
-        _record_publish_execution(
-            plan=plan,
-            status=BambooPublishExecution.STATUS_FAILED,
-            message="활성 Bamboo 정의를 찾지 못했습니다.",
-            output="",
-            return_code=None,
-        )
+        _record_publish_execution(build_unit=bamboo_unit, status="failed", message="활성 Bamboo 정의를 찾지 못했습니다.", output="", return_code=None)
         raise BambooOperationError("활성 Bamboo 정의를 찾지 못했습니다.")
 
     prepare_context = get_prepare_context_by_plan_key(plan_key)
     builds = [
-        parse_build_definition_payload(
-            definition_payload["definition"],
-            year=str(definition_payload["year"]),
-        )
+        parse_build_definition_payload(definition_payload["definition"], year=str(definition_payload["year"]))
         for definition_payload in definition_payloads
     ]
     preview_snapshot = get_build_plan_preview(plan_key)
@@ -213,7 +182,6 @@ def publish_bamboo_specs(plan_key: str) -> dict:
                 token_file.write(config.token)
                 token_path = Path(token_file.name)
                 created_temp_token = True
-
         try:
             env = os.environ.copy()
             env["BAMBOO_URL"] = config.server_url
@@ -227,32 +195,27 @@ def publish_bamboo_specs(plan_key: str) -> dict:
                 text=True,
             )
         except OSError as exc:
-            _record_publish_execution(
-                plan=plan,
-                status=BambooPublishExecution.STATUS_FAILED,
-                message="Maven publish 실행에 실패했습니다.",
-                output=str(exc),
-                return_code=None,
-            )
+            _record_publish_execution(build_unit=bamboo_unit, status="failed", message="Maven publish 실행에 실패했습니다.", output=str(exc), return_code=None)
             raise BambooOperationError("Maven publish 실행에 실패했습니다.", str(exc)) from exc
         finally:
             if created_temp_token and token_path is not None and token_path.exists():
                 token_path.unlink()
 
     output = "\n".join(part for part in [result.stdout.strip(), result.stderr.strip()] if part).strip()
+    success = result.returncode == 0
     _record_publish_execution(
-        plan=plan,
-        status=BambooPublishExecution.STATUS_SUCCESS if result.returncode == 0 else BambooPublishExecution.STATUS_FAILED,
-        message="Bamboo Specs publish가 완료되었습니다." if result.returncode == 0 else "Bamboo Specs publish에 실패했습니다.",
+        build_unit=bamboo_unit,
+        status="successful" if success else "failed",
+        message="Bamboo Specs publish가 완료되었습니다." if success else "Bamboo Specs publish에 실패했습니다.",
         output=output,
-        snapshot_preview_json=preview_snapshot if result.returncode == 0 else None,
-        snapshot_export_draft_json=export_draft_snapshot if result.returncode == 0 else None,
+        snapshot_preview_json=preview_snapshot if success else None,
+        snapshot_export_draft_json=export_draft_snapshot if success else None,
         return_code=result.returncode,
     )
     return {
-        "success": result.returncode == 0,
+        "success": success,
         "returnCode": result.returncode,
-        "message": "Bamboo Specs publish가 완료되었습니다." if result.returncode == 0 else "Bamboo Specs publish에 실패했습니다.",
+        "message": "Bamboo Specs publish가 완료되었습니다." if success else "Bamboo Specs publish에 실패했습니다.",
         "output": output,
         "detail": output,
     }
@@ -270,11 +233,11 @@ def queue_bamboo_plan_with_options(
     custom_revision: str = "",
     variables: dict[str, str] | None = None,
 ) -> dict:
-    plan = _get_build_plan(plan_key)
-    if plan is None:
+    bamboo_unit = _get_bamboo_build_unit(plan_key)
+    if bamboo_unit is None:
         raise BambooOperationError("Build plan을 찾지 못했습니다.")
 
-    identity = _build_plan_identity(plan)
+    identity = _build_plan_identity(bamboo_unit)
     client = _BambooClient(get_bamboo_client_config())
     payload = client.queue_plan(
         identity["fullPlanKey"],
@@ -291,19 +254,14 @@ def queue_bamboo_plan_with_options(
         "executeAllStages": execute_all_stages,
         "customRevision": custom_revision,
         "variables": variables or {},
-        "detail": _format_queue_detail(
-            stage=stage,
-            execute_all_stages=execute_all_stages,
-            custom_revision=custom_revision,
-            variables=variables or {},
-        ),
+        "detail": _format_queue_detail(stage=stage, execute_all_stages=execute_all_stages, custom_revision=custom_revision, variables=variables or {}),
         "raw": payload,
     }
 
 
 def _record_publish_execution(
     *,
-    plan: BuildPlan,
+    build_unit: BambooBuildUnit,
     status: str,
     message: str,
     output: str,
@@ -311,31 +269,56 @@ def _record_publish_execution(
     snapshot_preview_json: dict | None = None,
     snapshot_export_draft_json: dict | None = None,
 ) -> BambooPublishExecution:
-    return BambooPublishExecution.objects.create(
-        build_plan=plan,
+    execution = BambooPublishExecution.objects.create(
+        build_unit=build_unit.build_unit,
         status=status,
         message=message,
         output=output,
         snapshot_preview_json=snapshot_preview_json,
         snapshot_export_draft_json=snapshot_export_draft_json,
         return_code=return_code,
-        trigger_source="web_ui",
-        requested_by="",
     )
+    return execution
 
 
-def _format_queue_detail(
-    *,
-    stage: str,
-    execute_all_stages: bool,
-    custom_revision: str,
-    variables: dict[str, str],
-) -> str:
-    lines = [
-        f"stage={stage or '-'}",
-        f"executeAllStages={'true' if execute_all_stages else 'false'}",
-        f"customRevision={custom_revision or '-'}",
-    ]
+def _get_bamboo_build_unit(plan_key: str) -> BambooBuildUnit | None:
+    return BambooBuildUnit.objects.select_related("build_unit__project").filter(plan_key=plan_key).first()
+
+
+def _build_plan_identity(bamboo_unit: BambooBuildUnit | BuildUnit) -> dict[str, str]:
+    if isinstance(bamboo_unit, BuildUnit):
+        bamboo_unit = bamboo_unit.bamboo
+    project_key = _resolve_bamboo_project_key(bamboo_unit)
+    full_plan_key = f"{project_key}-{bamboo_unit.plan_key}" if project_key else bamboo_unit.plan_key
+    return {"projectKey": project_key, "planKey": bamboo_unit.plan_key, "fullPlanKey": full_plan_key}
+
+
+def _resolve_bamboo_project_key(bamboo_unit: BambooBuildUnit | BuildUnit) -> str:
+    if isinstance(bamboo_unit, BuildUnit):
+        bamboo_unit = bamboo_unit.bamboo
+    active_definition = bamboo_unit.build_unit.definitions.filter(is_active=True).order_by("-created_at").first()
+    if active_definition is not None and active_definition.year.strip():
+        return f"Y{active_definition.year.strip()}"
+    return f"Y{timezone.now().year}"
+
+
+def _normalize_bamboo_token(value: str) -> str:
+    normalized = (value or "").strip()
+    if normalized.startswith("token="):
+        return normalized.split("=", 1)[1].strip()
+    return normalized
+
+
+def _plan_browse_url(identity: dict[str, str]) -> str:
+    settings_payload = get_bamboo_system_settings()
+    base_url = str(settings_payload["serverUrl"]).rstrip("/")
+    if not base_url:
+        return ""
+    return f"{base_url}/browse/{identity['fullPlanKey']}"
+
+
+def _format_queue_detail(*, stage: str, execute_all_stages: bool, custom_revision: str, variables: dict[str, str]) -> str:
+    lines = [f"stage={stage or '-'}", f"executeAllStages={'true' if execute_all_stages else 'false'}", f"customRevision={custom_revision or '-'}"]
     if variables:
         lines.append("variables=")
         for key, value in sorted(variables.items()):
@@ -357,15 +340,7 @@ class _BambooClient:
         path = f"/rest/api/latest/result/{parse.quote(full_plan_key)}?max-result=1"
         return self._request_json("GET", path, default={})
 
-    def queue_plan(
-        self,
-        full_plan_key: str,
-        *,
-        stage: str = "",
-        execute_all_stages: bool = False,
-        custom_revision: str = "",
-        variables: dict[str, str] | None = None,
-    ) -> dict:
+    def queue_plan(self, full_plan_key: str, *, stage: str = "", execute_all_stages: bool = False, custom_revision: str = "", variables: dict[str, str] | None = None) -> dict:
         params: list[tuple[str, str]] = []
         if stage.strip():
             params.append(("stage", stage.strip()))
@@ -386,10 +361,7 @@ class _BambooClient:
         req = request.Request(
             f"{self._config.server_url}{path}",
             data=None,
-            headers={
-                "Accept": "application/json",
-                "Authorization": f"Bearer {self._config.token}",
-            },
+            headers={"Accept": "application/json", "Authorization": f"Bearer {self._config.token}"},
             method=method,
         )
         try:
@@ -405,46 +377,6 @@ class _BambooClient:
             raise BambooOperationError("Bamboo API 요청이 실패했습니다.", f"{exc.code} {payload}".strip()) from exc
         except error.URLError as exc:
             raise BambooOperationError("Bamboo API 연결에 실패했습니다.", str(exc.reason)) from exc
-
-
-def _get_build_plan(plan_key: str) -> BuildPlan | None:
-    return (
-        BuildPlan.objects.select_related("project_build__project")
-        .filter(plan_key=plan_key)
-        .first()
-    )
-
-
-def _build_plan_identity(plan: BuildPlan) -> dict[str, str]:
-    project_key = _resolve_bamboo_project_key(plan)
-    full_plan_key = f"{project_key}-{plan.plan_key}" if project_key else plan.plan_key
-    return {
-        "projectKey": project_key,
-        "planKey": plan.plan_key,
-        "fullPlanKey": full_plan_key,
-    }
-
-
-def _resolve_bamboo_project_key(plan: BuildPlan) -> str:
-    active_definition = plan.definitions.filter(is_active=True).order_by("-created_at").first()
-    if active_definition is not None and active_definition.year.strip():
-        return f"Y{active_definition.year.strip()}"
-    return f"Y{timezone.now().year}"
-
-
-def _normalize_bamboo_token(value: str) -> str:
-    normalized = (value or "").strip()
-    if normalized.startswith("token="):
-        return normalized.split("=", 1)[1].strip()
-    return normalized
-
-
-def _plan_browse_url(identity: dict[str, str]) -> str:
-    settings_payload = get_bamboo_system_settings()
-    base_url = str(settings_payload["serverUrl"]).rstrip("/")
-    if not base_url:
-        return ""
-    return f"{base_url}/browse/{identity['fullPlanKey']}"
 
 
 def _extract_latest_result(payload: dict) -> dict:
@@ -463,8 +395,6 @@ def _extract_latest_result(payload: dict) -> dict:
             result = direct_result_items
         elif any(key in payload for key in ("state", "buildState", "number", "buildNumber", "key", "planResultKey")):
             result = payload
-    else:
-        result = {}
     link = ""
     link_payload = result.get("link")
     if isinstance(link_payload, dict):
@@ -474,18 +404,8 @@ def _extract_latest_result(payload: dict) -> dict:
     elif isinstance(link_payload, str):
         link = link_payload
     plan_result_key = result.get("planResultKey")
-    if isinstance(plan_result_key, dict):
-        normalized_result_key = plan_result_key.get("key", "")
-    elif isinstance(plan_result_key, str):
-        normalized_result_key = plan_result_key
-    else:
-        normalized_result_key = ""
-    return {
-        "state": result.get("state", "") or result.get("buildState", ""),
-        "number": str(result.get("number", "") or result.get("buildNumber", "")),
-        "key": result.get("key", "") or normalized_result_key,
-        "link": link,
-    }
+    normalized_result_key = plan_result_key.get("key", "") if isinstance(plan_result_key, dict) else plan_result_key or ""
+    return {"state": result.get("state", "") or result.get("buildState", ""), "number": str(result.get("number", "") or result.get("buildNumber", "")), "key": result.get("key", "") or normalized_result_key, "link": link}
 
 
 def _extract_stages(payload: dict) -> list[dict]:
@@ -500,100 +420,87 @@ def _extract_stages(payload: dict) -> list[dict]:
         stage_items = [stage_items]
     stages: list[dict] = []
     for stage in stage_items or []:
+        if not isinstance(stage, dict):
+            continue
         jobs = _extract_stage_jobs(stage)
-        stages.append(
-            {
-                "name": stage.get("name", ""),
-                "description": stage.get("description", ""),
-                "jobs": [
-                    {
-                        "key": job.get("key", ""),
-                        "name": job.get("name", ""),
-                    }
-                    for job in jobs or []
-                    if isinstance(job, dict)
-                ],
-            }
-        )
+        stages.append({"name": stage.get("name", ""), "description": stage.get("description", ""), "jobs": [{"key": job.get("key", ""), "name": job.get("name", "")} for job in jobs or [] if isinstance(job, dict)]})
     return stages
 
 
 def _extract_stage_jobs(stage: dict) -> list[dict]:
     if not isinstance(stage, dict):
         return []
-
-    jobs_container = stage.get("jobs", {})
+    jobs_container = stage.get("jobs")
+    if isinstance(jobs_container, list):
+        return [item for item in jobs_container if isinstance(item, dict)]
     if isinstance(jobs_container, dict):
-        jobs = jobs_container.get("job")
-        if jobs is None and any(key in jobs_container for key in ("key", "name")):
-            jobs = [jobs_container]
-    else:
-        jobs = jobs_container if isinstance(jobs_container, list) else []
-    if isinstance(jobs, dict):
-        jobs = [jobs]
-    if jobs:
-        return [job for job in jobs if isinstance(job, dict)]
-
-    plans_container = stage.get("plans", {})
+        job_items = jobs_container.get("job")
+        if isinstance(job_items, dict):
+            return [job_items]
+        if isinstance(job_items, list):
+            return job_items
+    plans_container = stage.get("plans")
     if isinstance(plans_container, dict):
-        plans = plans_container.get("plan")
-        if plans is None and any(key in plans_container for key in ("key", "name")):
-            plans = [plans_container]
-    else:
-        plans = plans_container if isinstance(plans_container, list) else []
-    if isinstance(plans, dict):
-        plans = [plans]
-    if plans is None:
-        plans = []
-    return [plan for plan in plans if isinstance(plan, dict)]
+        plan_items = plans_container.get("plan", plans_container)
+        if isinstance(plan_items, dict):
+            return [plan_items]
+        if isinstance(plan_items, list):
+            return [item for item in plan_items if isinstance(item, dict)]
+    return []
 
 
 def _extract_named_items(container: dict | None, item_key: str) -> list[dict]:
     if isinstance(container, list):
         items = container
     elif isinstance(container, dict):
-        items = container.get(item_key)
-        if items is None and any(key in container for key in ("key", "name", "shortName", "description")):
-            items = [container]
+        items = container.get(item_key, container)
     else:
-        items = []
+        return []
     if isinstance(items, dict):
         items = [items]
-    return [item for item in items or [] if isinstance(item, dict)]
+    if not isinstance(items, list):
+        return []
+    normalized = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        payload = {"name": item.get("name", "")}
+        if "key" in item:
+            payload["key"] = item.get("key", "")
+        normalized.append(payload)
+    return normalized
 
 
 def _extract_variables(container: dict | None) -> list[dict]:
     if not isinstance(container, dict):
         return []
-
-    variable_items = container.get("variable")
-    if variable_items is None:
-        nested = container.get("variables")
-        if isinstance(nested, dict):
-            variable_items = nested.get("variable")
-        elif isinstance(nested, list):
-            variable_items = nested
-    if isinstance(variable_items, dict):
-        variable_items = [variable_items]
-    if isinstance(variable_items, list):
-        variables = []
-        for item in variable_items:
-            if not isinstance(item, dict):
+    variables = container.get("variable")
+    if variables is None and "variables" in container:
+        nested_variables = container.get("variables")
+        if isinstance(nested_variables, dict):
+            variables = nested_variables.get("variable", nested_variables)
+        elif isinstance(nested_variables, list):
+            variables = nested_variables
+        else:
+            return []
+    if variables is None:
+        items = []
+        for key, value in container.items():
+            if isinstance(value, dict):
                 continue
-            key = item.get("key") or item.get("name")
-            if not key:
-                continue
-            value = item.get("value")
-            if value is None and "value" not in item:
-                value = item.get("valueAsString")
-            variables.append({"key": str(key), "value": "" if value is None else str(value)})
-        return sorted(variables, key=lambda item: item["key"])
-
-    if "variable" in container or "variables" in container:
+            items.append({"key": key, "value": "" if value is None else str(value)})
+        return sorted(items, key=lambda item: item["key"])
+    if isinstance(variables, dict):
+        variables = [variables]
+    if not isinstance(variables, list):
         return []
-
-    variables = []
-    for key, value in sorted(container.items()):
-        if isinstance(value, (str, int, float, bool)) or value is None:
-            variables.append({"key": key, "value": "" if value is None else str(value)})
-    return variables
+    items = []
+    for item in variables:
+        if not isinstance(item, dict):
+            continue
+        key = item.get("key") or item.get("name") or ""
+        value = item.get("value")
+        if value is None:
+            value = item.get("valueAsString")
+        items.append({"key": str(key), "value": "" if value is None else str(value)})
+    return sorted(items, key=lambda item: item["key"])

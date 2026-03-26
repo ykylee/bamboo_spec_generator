@@ -2,7 +2,7 @@
 
 ## 문서 메타데이터
 
-- 문서 일자: 2026-03-24
+- 문서 일자: 2026-03-25
 - 문서 유형: Design
 - 상태: 초안
 - 관련 SAD: [./SAD.md](./SAD.md)
@@ -10,7 +10,7 @@
 
 ## 요약
 
-이 문서는 제품의 상세 설계를 한 곳에 모은다. 범위는 JSON 입력 스키마, 저장소 연결 및 브랜치 트리거, 작업 하위 경로, MSBuild 보정, 스크립트 자산 렌더링, 빌드 메타데이터 DB 모델, 운영 백엔드/API/조회 UI 설계, 그리고 장기 확장 범위인 배포/릴리스 관리 상세 설계다.
+이 문서는 제품의 상세 설계를 한 곳에 모은다. 범위는 JSON 입력 스키마, 저장소 연결 및 브랜치 트리거, 작업 하위 경로, MSBuild 보정, 스크립트 자산 렌더링, 빌드 메타데이터 DB 모델, 운영 백엔드/API/조회 UI 설계, 다중 CI 도구 공통 모델 확장, 그리고 장기 확장 범위인 배포/릴리스 관리 상세 설계다.
 
 함수 단위 또는 특정 구현 흐름의 상세 설계가 필요할 때는 `detailed_designs/` 아래에 별도 문서를 추가한다.
 
@@ -22,6 +22,15 @@
 - 저장소 연결의 `branches`, `create_if_missing`, `applicationLink`는 현재 Java Specs 생성까지 반영된다. 남은 범위는 운영 환경별 application link 값 공급과 세부 운영 정책 확정이다.
 - 현재 추가된 함수 단위 상세 설계:
   - [프로젝트 등록 및 Specs 생성 준비도](./detailed_designs/project_registration_and_generation_readiness.md)
+- 현재 추가된 제품 상세 설계:
+  - [다중 CI 콘솔 모드 전환 및 공통 도메인 모델](./detailed_designs/multi_ci_console_and_provider_model.md)
+  - [CI/CD 공통 백엔드 모델 일반화 검토](./detailed_designs/backend_model_generalization_review.md)
+  - [BuildUnit 중심 백엔드 모델 초안](./detailed_designs/buildunit_backend_model_draft.md)
+  - [BuildUnit 중심 백엔드 모델 ERD](./detailed_designs/buildunit_backend_model_erd.md)
+- 현재 추가된 결정사항 문서:
+  - [다중 CI 콘솔 결정사항](./detailed_designs/multi_ci_console_decisions.md)
+- Jenkins 등록/모드 전환 상세 설계는 아직 별도 문서가 없으며 후속 상세 설계 범위다.
+- 백엔드 모델 전환은 기존 `BuildUnit` 계열 호환 유지가 아니라 `BuildUnit` 중심 재구축을 기본 전제로 한다.
 
 ## 1. 입력 JSON 설계
 
@@ -29,7 +38,7 @@
 
 - 입력 파일은 `build_info_json/<year>/<buildId>.json` 구조를 권장한다.
 - 연도는 JSON 내부 필드가 아니라 디렉터리명에서 해석한다.
-- DB 기반 활성 정의에서는 디렉터리 정보가 없으므로, 연도를 `BuildPlanDefinition.year` 같은 별도 컬럼으로 저장한다.
+- DB 기반 활성 정의에서는 디렉터리 정보가 없으므로, 연도를 `BuildUnitDefinition.year` 같은 별도 컬럼으로 저장한다.
 
 ### 최상위 구조
 
@@ -190,16 +199,18 @@ scripts/plan_tasks/
 ### 논리 엔터티
 
 - `Project`
-  - Jira/Bitbucket/Coverity 관점의 상위 프로젝트 메타데이터
+  - Jira/Bitbucket/Coverity와 CI 도구 유형 관점의 상위 프로젝트 메타데이터
 - `ProjectRepository`
   - 프로젝트에 속한 개별 저장소 메타데이터
-- `ProjectBuild`
+- `BuildUnit` (프로젝트 빌드)
   - 프로젝트에 속한 개별 빌드 항목
-- `BuildPlan`
-  - 플랜 대표 정보와 `latest_version_id`
-- `BuildPlanBuildInfo`
+- `CiProvider`
+  - Bamboo, Jenkins 같은 CI 도구 구분값 또는 동등한 표현
+- `BuildUnit`
+  - Bamboo 플랜 또는 Jenkins 잡과 연결 가능한 공통 빌드 단위 대표 정보와 `latest_version_id`
+- `BambooBuildInfo`
   - 플랜 아래 다중 OS/언어/컴파일러/명령 조합을 보관하는 빌드 상세 메타데이터
-- `BuildPlanDefinition`
+- `BuildUnitDefinition`
   - 생성기 입력 정의 스냅샷
 - `BuildVersion`
   - 버전 대표 상태와 최신 요약
@@ -213,6 +224,32 @@ scripts/plan_tasks/
   - 정의 변경 이력
 - `SystemSetting`
   - Coverity/Bamboo/Git clone URL/repository linkage mode 같은 운영 공통 설정
+
+### 공통 모델 확장 방향
+
+- 프로젝트, 빌드 단위, 운영 현황 응답은 `ci_provider` 필드를 통해 Bamboo와 Jenkins를 구분한다.
+- UI와 API에서는 가능한 범위에서 `plan`과 `job`을 공통 `빌드 단위`로 추상화하고, 도구별 상세 화면에서만 고유 용어를 드러낸다.
+- Bamboo 전용 필드와 Jenkins 전용 필드는 공통 대표 엔터티에 직접 혼합하기보다 확장 테이블, JSON 필드, 또는 도구별 상세 모델로 분리하는 방향을 우선 검토한다.
+
+## 7. 공통 CI 콘솔 UI 설계 방향
+
+### 모드 전환
+
+- 상단 주요 네비게이션에 `Bamboo 관리`, `Jenkins 관리` 전환 컨트롤을 둔다.
+- 현재 모드는 URL, 세션, 또는 동등한 상태 모델로 일관되게 유지한다.
+- 모드 전환 후에도 메뉴 구조와 화면 배치는 가능한 범위에서 동일하게 유지한다.
+
+### 테마
+
+- Bamboo 모드는 밝은 파란색 계열을 대표 색상으로 사용한다.
+- Jenkins 모드는 밝은 빨간색 계열을 대표 색상으로 사용한다.
+- 상태 배지와 심각도 색상은 도메인 의미를 우선하고, 브랜드 테마 색상은 레이아웃 포인트와 주요 CTA에 우선 적용한다.
+
+### 정보 구조
+
+- 프로젝트 목록, 프로젝트 상세, 빌드 단위 목록, 빌드 단위 상세, 운영 현황 대시보드는 공통 구조를 유지한다.
+- 공통 화면 문구는 일반적인 CI 운영 용어를 우선 사용한다.
+- 도구별 고유 용어는 세부 패널이나 상세 필드 라벨에서만 제한적으로 노출한다.
 
 ### 향후 확장 엔터티
 
@@ -231,11 +268,11 @@ scripts/plan_tasks/
   - `jira_project_key`, `bitbucket_project_key`, `representative_repo_slug`
 - `ProjectRepository`
   - `repo_slug`, `coverity_project`, `coverity_stream`, `is_representative`
-- `ProjectBuild`
-  - `project_id`, `build_plan_id`, `build_name`, `build_type`
-- `BuildPlan`
+- `BuildUnit` (프로젝트 빌드)
+  - `project_id`, `build_unit_id`, `build_name`, `build_type`
+- `BuildUnit`
   - `build_id`, `plan_key`, `static_analysis_tool_version`, `coverity_project`, `repository_linkage_mode_override`, `latest_version_id`
-- `BuildPlanBuildInfo`
+- `BambooBuildInfo`
   - `build_key`, `operating_system`, `language`, `compiler`, `pre_process`, `build_command`, `clean_command`, `coverity_stream`, `build_sub_path`
 - `BuildVersion`
   - `version_text`, `major`, `minor`, `patch`, `branch_kind`, `commit_hash`, `is_latest`
@@ -249,17 +286,17 @@ scripts/plan_tasks/
 ### 프로젝트/저장소/빌드 관계
 
 - 하나의 `Project`는 여러 `ProjectRepository`를 가질 수 있다.
-- 하나의 `Project`는 여러 `ProjectBuild`를 가질 수 있다.
-- 하나의 `ProjectBuild`는 하나의 `BuildPlan`과 연결된다.
-- 하나의 `BuildPlan`은 여러 `BuildPlanBuildInfo`를 가질 수 있다.
-- 결과 취합 시에는 `BuildPlan` 단위 조회뿐 아니라 상위 `Project`에 연결된 모든 `ProjectRepository`를 함께 조회할 수 있어야 한다.
+- 하나의 `Project`는 여러 `BuildUnit` (프로젝트 빌드)를 가질 수 있다.
+- 하나의 `BuildUnit` (프로젝트 빌드)는 하나의 `BuildUnit`과 연결된다.
+- 하나의 `BuildUnit`은 여러 `BambooBuildInfo`를 가질 수 있다.
+- 결과 취합 시에는 `BuildUnit` 단위 조회뿐 아니라 상위 `Project`에 연결된 모든 `ProjectRepository`를 함께 조회할 수 있어야 한다.
 - 장기적으로는 `BuildVersion -> Release -> DeploymentExecution -> DeploymentEnvironment` 흐름으로 CD 상태를 이어서 추적할 수 있어야 한다.
 
 ### 현재 구현된 운영 흐름
 
-- 등록 메타데이터와 `BuildPlanBuildInfo`를 조합해 활성 정의와 prepare context를 합성한다.
+- 등록 메타데이터와 `BambooBuildInfo`를 조합해 활성 정의와 prepare context를 합성한다.
 - 플랜 단위 preview/export draft를 생성해 UI와 publish 기록에서 재사용한다.
-- Specs draft 초기화 서비스가 등록된 메타데이터를 기준으로 `BuildPlanBuildInfo`를 보정하거나 생성한다.
+- Specs draft 초기화 서비스가 등록된 메타데이터를 기준으로 `BambooBuildInfo`를 보정하거나 생성한다.
 - Bamboo 연동 서비스가 plan status/detail 조회, Specs publish, plan queue 실행, publish 이력 저장을 수행한다.
 
 ### ERD 초안
@@ -269,19 +306,21 @@ scripts/plan_tasks/
 - [SVG](./assets/build-metadata-erd.svg)
 - [PNG](./assets/build-metadata-erd.png)
 
-```mermaid
-erDiagram
-    Project ||--o{ ProjectRepository : has
-    Project ||--o{ ProjectBuild : has
-    Project ||--o{ BuildPlanDefinition : owns
-    ProjectBuild ||--|| BuildPlan : maps_to
-    BuildPlan ||--o{ BuildPlanBuildInfo : has
-    BuildPlan ||--o{ BuildPlanDefinition : versions
-    BuildPlan ||--o{ BuildVersion : has
-    BuildVersion ||--o{ BuildExecution : records
-    BuildExecution ||--o{ StaticAnalysisResult : includes
-    BuildPlan ||--o{ BuildDefinitionHistory : tracks
-    BuildPlan ||--o{ BambooPublishExecution : publishes
+#RK|```mermaid
+#HT|erDiagram
+#XX|    Project ||--o{ ProjectRepository : has
+#QM|    Project ||--o{ BuildUnit : has
+#RZ|    BuildUnit ||--o{ BuildUnitDefinition : has
+#NW|    BuildUnit ||--o{ BuildVersion : has
+#TV|    BuildUnit ||--o{ BuildExecution : has
+#WQ|    BuildVersion ||--o{ BuildExecution : records
+#XR|    BuildExecution ||--o{ StaticAnalysisResult : includes
+#QY|    BuildUnit ||--o{ BuildDefinitionHistory : tracks
+#HQ|    BuildUnit ||--o{ BambooPublishExecution : publishes
+#PS|    BuildUnit ||--|| BambooBuildUnit : bamboo
+#XB|    BuildUnit ||--|| JenkinsBuildUnit : jenkins
+#BQ|    BambooBuildUnit ||--o{ BambooBuildInfo : has
+#PS|
 
     Project {
         string id PK
@@ -299,27 +338,38 @@ erDiagram
         boolean is_representative
     }
 
-    ProjectBuild {
-        string id PK
-        string project_id FK
-        string build_plan_id FK
-        string build_name
-        string build_type
-    }
+    #QP|    BuildUnit {
+#PN|        string id PK
+#BM|        string project_id FK
+#VW|        string ci_provider
+#VJ|        string external_key
+#TZ|        string display_name
+#PX|        string unit_type
+#PQ|        string language
+#KM|        string compiler
+#NH|        string latest_version_id FK
+#PX|    }
+#BQ|
+#NH|    BambooBuildUnit {
+#PN|        string build_unit_id PK (FK)
+#KJ|        string plan_key
+#PS|        string build_id
+#JV|        string static_analysis_tool_version
+#TH|        string coverity_project
+#PR|        string repository_linkage_mode_override
+#PX|    }
+#SQ|
+#NH|    JenkinsBuildUnit {
+#PN|        string build_unit_id PK (FK)
+#KJ|        string job_path
+#PS|        string job_type
+#JV|        string folder_path
+#PX|    }
+#BQ|
 
-    BuildPlan {
+    BambooBuildInfo {
         string id PK
-        string build_id
-        string plan_key
-        string static_analysis_tool_version
-        string coverity_project
-        string repository_linkage_mode_override
-        string latest_version_id FK
-    }
-
-    BuildPlanBuildInfo {
-        string id PK
-        string build_plan_id FK
+        string build_unit_id FK
         string build_key
         string operating_system
         string language
@@ -328,9 +378,9 @@ erDiagram
         string build_sub_path
     }
 
-    BuildPlanDefinition {
+    BuildUnitDefinition {
         string id PK
-        string build_plan_id FK
+        string build_unit_id FK
         string project_id FK
         string year
         string source_kind
@@ -339,7 +389,7 @@ erDiagram
 
     BuildVersion {
         string id PK
-        string build_plan_id FK
+        string build_unit_id FK
         string version_text
         int major
         int minor
@@ -351,7 +401,7 @@ erDiagram
 
     BuildExecution {
         string id PK
-        string build_plan_id FK
+        string build_unit_id FK
         string build_info_id FK
         string build_version_id FK
         string build_number
@@ -373,7 +423,7 @@ erDiagram
 
     BuildDefinitionHistory {
         string id PK
-        string build_plan_id FK
+        string build_unit_id FK
         string build_plan_definition_id FK
         string change_type
         string change_summary
@@ -381,7 +431,7 @@ erDiagram
 
     BambooPublishExecution {
         string id PK
-        string build_plan_id FK
+        string build_unit_id FK
         string status
         int return_code
     }
@@ -395,10 +445,10 @@ erDiagram
 
 - `Project`가 상위 집계 루트다.
 - `ProjectRepository`는 프로젝트에 속한 여러 저장소를 표현한다.
-- `ProjectBuild`는 프로젝트 아래 여러 빌드 항목을 표현한다.
-- `BuildPlan`은 Bamboo 플랜 단위의 대표 엔터티다.
-- `BuildPlanBuildInfo`는 플랜 아래 실제 생성 단위를 세분화하는 빌드 상세 메타데이터다.
-- `BuildPlanDefinition`은 생성기 입력 스냅샷을 나타낸다.
+- `BuildUnit` (프로젝트 빌드)는 프로젝트 아래 여러 빌드 항목을 표현한다.
+- `BuildUnit`은 Bamboo 플랜 단위의 대표 엔터티다.
+- `BambooBuildInfo`는 플랜 아래 실제 생성 단위를 세분화하는 빌드 상세 메타데이터다.
+- `BuildUnitDefinition`은 생성기 입력 스냅샷을 나타낸다.
 - `BuildVersion`은 버전 단위 대표 상태를 가진다.
 - `BuildExecution`은 실제 실행 이력을 누적 저장한다.
 - `StaticAnalysisResult`는 실행 단위의 정적분석 결과를 분리 저장한다.
@@ -407,7 +457,7 @@ erDiagram
 
 ### 준비 스테이지 조회 관점
 
-- 준비 스테이지는 `BuildPlan`에서 시작해 `ProjectBuild`, `Project`, `ProjectRepository`를 따라가며 메타데이터를 조회한다.
+- 준비 스테이지는 `BuildUnit`에서 시작해 `BuildUnit` (프로젝트 빌드), `Project`, `ProjectRepository`를 따라가며 메타데이터를 조회한다.
 - 현재 플랜에 직접 연결된 저장소뿐 아니라 같은 `Project`에 속한 전체 저장소를 함께 조회할 수 있어야 한다.
 - 대표 저장소 정보는 `Project.representative_repo_slug` 또는 `ProjectRepository.is_representative=true`로 판별할 수 있어야 한다.
 
@@ -460,22 +510,22 @@ erDiagram
   - `(project_id, repo_slug)` unique
   - 대표 저장소는 프로젝트당 1건만 허용하는 partial unique index 후보
 
-#### ProjectBuild
+#### BuildUnit
 
 - 목적: 하나의 프로젝트 아래 여러 빌드 항목 구분
 - 주요 컬럼
   - `id`: PK
   - `project_id`: FK -> `Project.id`, not null
-  - `build_plan_id`: FK -> `BuildPlan.id`, not null
+  - `build_unit_id`: FK -> `BuildUnit.id`, not null
   - `build_name`: not null
   - `build_type`: not null
   - `runtime_stack`: nullable
   - `created_at`, `updated_at`: not null
 - 제약
   - `(project_id, build_name)` unique
-  - `build_plan_id` unique
+  - `build_unit_id` unique
 
-#### BuildPlan
+#### BuildUnit
 
 - 목적: Bamboo 플랜 대표 엔터티
 - 주요 컬럼
@@ -491,12 +541,12 @@ erDiagram
   - `build_id` unique
   - `plan_key` unique
 
-#### BuildPlanBuildInfo
+#### BambooBuildInfo
 
 - 목적: 플랜 아래 빌드별 상세 명령, OS, 언어, 컴파일러, 하위 경로를 보관
 - 주요 컬럼
   - `id`: PK
-  - `build_plan_id`: FK -> `BuildPlan.id`, not null
+  - `build_unit_id`: FK -> `BuildUnit.id`, not null
   - `build_key`: not null
   - `operating_system`: nullable
   - `pre_process`, `clean_command`, `build_command`: nullable
@@ -506,14 +556,14 @@ erDiagram
   - `build_sub_path`: nullable
   - `created_at`, `updated_at`: not null
 - 제약
-  - `(build_plan_id, build_key)` unique
+  - `(build_unit_id, build_key)` unique
 
-#### BuildPlanDefinition
+#### BuildUnitDefinition
 
 - 목적: 생성기 입력 정의의 스냅샷과 활성 정의 관리
 - 주요 컬럼
   - `id`: PK
-  - `build_plan_id`: FK -> `BuildPlan.id`, not null
+  - `build_unit_id`: FK -> `BuildUnit.id`, not null
   - `project_id`: FK -> `Project.id`, not null
   - `year`: not null
   - `source_kind`: not null
@@ -522,7 +572,7 @@ erDiagram
   - `is_active`: not null, default false
   - `created_at`: not null
 - 제약
-  - `(build_plan_id, definition_hash)` unique
+  - `(build_unit_id, definition_hash)` unique
   - JSON 입력에서 해석한 연도를 DB 적재 시 별도 컬럼으로 보존한다.
   - 활성 정의는 플랜당 1건만 허용하는 partial unique index 후보
 
@@ -531,7 +581,7 @@ erDiagram
 - 목적: 플랜 버전과 최신 대표 상태 보관
 - 주요 컬럼
   - `id`: PK
-  - `build_plan_id`: FK -> `BuildPlan.id`, not null
+  - `build_unit_id`: FK -> `BuildUnit.id`, not null
   - `version_text`: not null
   - `major`, `minor`, `patch`: not null
   - `branch_kind`: not null
@@ -541,8 +591,8 @@ erDiagram
   - `latest_success`: nullable
   - `created_at`, `updated_at`: not null
 - 제약
-  - `(build_plan_id, version_text)` unique
-  - `(build_plan_id, commit_hash)` unique
+  - `(build_unit_id, version_text)` unique
+  - `(build_unit_id, commit_hash)` unique
   - `branch_kind`는 `master`, `release`, `dev` enum 후보
 
 #### BuildExecution
@@ -550,7 +600,7 @@ erDiagram
 - 목적: 버전 재시도를 포함한 실제 실행 이력 누적
 - 주요 컬럼
   - `id`: PK
-  - `build_plan_id`: FK -> `BuildPlan.id`, not null
+  - `build_unit_id`: FK -> `BuildUnit.id`, not null
   - `build_version_id`: FK -> `BuildVersion.id`, not null
   - `build_number`: not null
   - `commit_hash`: not null
@@ -561,7 +611,7 @@ erDiagram
   - `started_at`, `finished_at`: nullable
   - `created_at`: not null
 - 제약
-  - `(build_plan_id, build_info_id, build_number)` unique
+  - `(build_unit_id, build_info_id, build_number)` unique
   - `commit_hash`는 버전의 `commit_hash`와 일치해야 함
 
 #### StaticAnalysisResult
@@ -583,8 +633,8 @@ erDiagram
 - 목적: 정의 변경 이력과 변경 사유 보관
 - 주요 컬럼
   - `id`: PK
-  - `build_plan_id`: FK -> `BuildPlan.id`, not null
-  - `build_plan_definition_id`: FK -> `BuildPlanDefinition.id`, not null
+  - `build_unit_id`: FK -> `BuildUnit.id`, not null
+  - `build_plan_definition_id`: FK -> `BuildUnitDefinition.id`, not null
   - `change_type`: not null
   - `change_summary`: nullable
 
@@ -593,7 +643,7 @@ erDiagram
 - 목적: Bamboo Specs publish 시도와 결과 snapshot 저장
 - 주요 컬럼
   - `id`: PK
-  - `build_plan_id`: FK -> `BuildPlan.id`, not null
+  - `build_unit_id`: FK -> `BuildUnit.id`, not null
   - `status`: not null
   - `message`: not null
   - `output`: nullable
@@ -617,12 +667,12 @@ erDiagram
 ### 인덱스 초안
 
 - `ProjectRepository(project_id, is_representative)`
-- `ProjectBuild(project_id, build_name)`
-- `BuildPlan(plan_key)`
-- `BuildPlanDefinition(build_plan_id, is_active)`
-- `BuildVersion(build_plan_id, is_latest)`
-- `BuildVersion(build_plan_id, commit_hash)`
-- `BuildExecution(build_plan_id, build_number desc)`
+- `BuildUnit(project_id, build_name)`
+- `BuildUnit(plan_key)`
+- `BuildUnitDefinition(build_unit_id, is_active)`
+- `BuildVersion(build_unit_id, is_latest)`
+- `BuildVersion(build_unit_id, commit_hash)`
+- `BuildExecution(build_unit_id, build_number desc)`
 - `BuildExecution(build_version_id, created_at desc)`
 - `StaticAnalysisResult(build_execution_id, tool_name)`
 
@@ -631,8 +681,8 @@ erDiagram
 #### 준비 스테이지 변수 조회
 
 1. 입력: `plan_key`
-2. `BuildPlan`에서 현재 플랜 식별
-3. `ProjectBuild`로 프로젝트와 빌드 항목 식별
+2. `BuildUnit`에서 현재 플랜 식별
+3. `BuildUnit` (프로젝트 빌드)로 프로젝트와 빌드 항목 식별
 4. `Project`에서 Jira/Bitbucket 대표 값 조회
 5. `ProjectRepository`에서 현재 저장소와 프로젝트 전체 저장소 목록 조회
 6. 준비 스크립트 변수 컨텍스트로 변환
@@ -655,8 +705,8 @@ erDiagram
 #### 동일 커밋 재빌드 시작
 
 1. 입력: `plan_key`, `commit_hash`
-2. `BuildPlan.id` 조회
-3. `BuildVersion(build_plan_id, commit_hash)` 조회
+2. `BuildUnit.id` 조회
+3. `BuildVersion(build_unit_id, commit_hash)` 조회
 4. 있으면 기존 `BuildVersion.id`를 재사용하고, 중복 데이터가 존재하면 가장 높은 버전을 우선 선택
 5. 없으면 브랜치 규칙에 따라 새 버전 생성
 6. 항상 새 `BuildExecution` 생성
@@ -665,7 +715,7 @@ erDiagram
 
 1. 입력: `jira_project_key` 또는 `project_id`
 2. `ProjectRepository` 전체 조회
-3. `ProjectBuild`와 `BuildPlan` 조회
+3. `BuildUnit` (프로젝트 빌드)와 `BuildUnit` 조회
 4. 각 플랜의 `latest_version_id`와 최신 `BuildExecution` 조합
 5. 프로젝트 단위 결과 요약 생성
 
@@ -673,7 +723,7 @@ erDiagram
 
 - 버전 계산, `BuildVersion` upsert, `BuildExecution` 생성은 하나의 트랜잭션으로 묶는다.
 - 실행 종료 후 결과 갱신, `StaticAnalysisResult` 저장, `BuildVersion.latest_execution_id` 갱신도 하나의 트랜잭션으로 처리한다.
-- `BuildPlan.latest_version_id`와 `BuildVersion.is_latest` 갱신은 동시에 처리해야 한다.
+- `BuildUnit.latest_version_id`와 `BuildVersion.is_latest` 갱신은 동시에 처리해야 한다.
 
 ## 7. 버전 규칙 설계
 
@@ -695,11 +745,11 @@ erDiagram
 
 ### 처리 순서
 
-1. `build_plan_id + commit_hash`로 기존 `BuildVersion` 조회
+1. `build_unit_id + commit_hash`로 기존 `BuildVersion` 조회
 2. 있으면 해당 버전을 재사용하고, 중복 데이터가 있으면 가장 높은 버전을 대표값으로 선택
 3. `BuildExecution`은 항상 새로 생성
 4. 종료 후 `BuildVersion`의 최신 요약 필드 갱신
-5. 필요 시 `BuildPlan.latest_version_id` 유지 또는 갱신
+5. 필요 시 `BuildUnit.latest_version_id` 유지 또는 갱신
 
 ### 장점
 
@@ -772,8 +822,8 @@ erDiagram
 
 ## 12. 무결성 고려사항
 
-- `(build_plan_id, version_text)`는 유일해야 한다.
-- `(build_plan_id, commit_hash)`는 버전 레벨 유일 제약이다.
+- `(build_unit_id, version_text)`는 유일해야 한다.
+- `(build_unit_id, commit_hash)`는 버전 레벨 유일 제약이다.
 - `latest_version_id`는 같은 플랜의 버전만 가리켜야 한다.
 - 최신 포인터 갱신과 실행 결과 저장은 가능하면 같은 트랜잭션 경계에서 처리한다.
 
@@ -797,8 +847,8 @@ erDiagram
 
 ### 저장 규칙
 
-- `BuildPlanDefinition.definition_json`은 입력 원문 스냅샷을 보관한다.
-- `BuildPlanDefinition.definition_hash`는 동일 정의 중복 적재 방지에 사용한다.
+- `BuildUnitDefinition.definition_json`은 입력 원문 스냅샷을 보관한다.
+- `BuildUnitDefinition.definition_hash`는 동일 정의 중복 적재 방지에 사용한다.
 - `BuildVersion`은 버전 대표 상태를 보관한다.
 - `BuildExecution`은 실행 단위 상세 로그와 실패 위치를 보관한다.
 - `StaticAnalysisResult.metrics_json`은 도구별 확장 지표를 보관한다.
@@ -810,7 +860,7 @@ erDiagram
 ### 애플리케이션 계층 경계
 
 - `db_loader.py`
-  - 활성 `BuildPlanDefinition`을 조회해 내부 `BuildDefinition`으로 변환
+  - 활성 `BuildUnitDefinition`을 조회해 내부 `BuildDefinition`으로 변환
   - `definition_json`와 별도 `year` 컬럼을 조합해 내부 모델을 구성
 - `db_context_loader.py`
   - 준비 스테이지 변수 컨텍스트 조회
@@ -827,7 +877,7 @@ erDiagram
 ### 초기 구현 권장 순서
 
 1. 스키마 DDL 확정
-2. `BuildPlanDefinition` 적재 경로 구현
+2. `BuildUnitDefinition` 적재 경로 구현
 3. 준비 스테이지 조회 API 또는 조회 함수 구현
 4. `BuildVersion` / `BuildExecution` 저장 경로 구현
 5. 생성기 입력 어댑터를 JSON/DB 병행 구조로 확장
@@ -840,7 +890,7 @@ erDiagram
 
 - 운영 백엔드는 Django 기반으로 분리한다.
 - 영속 저장소는 PostgreSQL을 사용한다.
-- Django ORM과 migration으로 `Project`, `ProjectRepository`, `ProjectBuild`, `BuildPlan`, `BuildPlanDefinition`, `BuildVersion`, `BuildExecution`, `StaticAnalysisResult`, `BuildDefinitionHistory`를 관리한다.
+- Django ORM과 migration으로 `Project`, `ProjectRepository`, `BuildUnit` (프로젝트 빌드), `BuildUnit`, `BuildUnitDefinition`, `BuildVersion`, `BuildExecution`, `StaticAnalysisResult`, `BuildDefinitionHistory`를 관리한다.
 - Django Admin은 초기 운영 관리 화면으로 활용할 수 있다.
 
 ### Django 프로젝트 구조 초안
@@ -892,24 +942,24 @@ backend/
 - `ProjectRepository`
   - `ForeignKey(Project)`
   - `repo_slug`, `coverity_project`, `coverity_stream`, `is_representative`
-- `ProjectBuild`
+- `BuildUnit` (프로젝트 빌드)
   - `ForeignKey(Project)`
-  - `OneToOneField(BuildPlan)`
+  - `OneToOneField(BuildUnit)`
   - `build_name`, `build_type`, `runtime_stack`
-- `BuildPlan`
+- `BuildUnit`
   - `build_id`, `plan_key`
   - `ForeignKey(BuildVersion, null=True, on_delete=PROTECT)` as `latest_version`
-- `BuildPlanDefinition`
-  - `ForeignKey(BuildPlan)`
+- `BuildUnitDefinition`
+  - `ForeignKey(BuildUnit)`
   - `ForeignKey(Project)`
   - `year`, `source_kind`, `definition_json`, `definition_hash`, `is_active`
 - `BuildVersion`
-  - `ForeignKey(BuildPlan)`
+  - `ForeignKey(BuildUnit)`
   - `version_text`, `major`, `minor`, `patch`, `branch_kind`, `commit_hash`
   - `ForeignKey(BuildExecution, null=True, on_delete=PROTECT)` as `latest_execution`
   - `is_latest`, `latest_success`
 - `BuildExecution`
-  - `ForeignKey(BuildPlan)`
+  - `ForeignKey(BuildUnit)`
   - `ForeignKey(BuildVersion)`
   - `build_number`, `commit_hash`, `success`, `result_status`
   - `summary_message`, `stage_name`, `job_name`, `task_name`
@@ -918,8 +968,8 @@ backend/
   - `ForeignKey(BuildExecution)`
   - `tool_name`, `status`, `summary`, `metrics_json`
 - `BuildDefinitionHistory`
-  - `ForeignKey(BuildPlan)`
-  - `ForeignKey(BuildPlanDefinition)`
+  - `ForeignKey(BuildUnit)`
+  - `ForeignKey(BuildUnitDefinition)`
   - `change_type`, `change_summary`
 
 ### 서비스/셀렉터 분리 규칙
@@ -968,7 +1018,7 @@ backend/
 
 - `GET /api/v1/build-plans/{plan_key}/active-definition`
 - 목적: 생성기가 활성 빌드 정의를 조회
-- 응답의 `year`는 `definition` JSON 내부가 아니라 DB의 `BuildPlanDefinition.year` 필드에서 제공한다.
+- 응답의 `year`는 `definition` JSON 내부가 아니라 DB의 `BuildUnitDefinition.year` 필드에서 제공한다.
 - 응답 예시:
 
 ```json

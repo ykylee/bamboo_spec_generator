@@ -9,7 +9,7 @@ from pygments.lexers import get_lexer_by_name
 from pygments.lexers.special import TextLexer
 from pygments.util import ClassNotFound
 
-from apps.buildmeta.models import BambooPublishExecution, BuildPlan, BuildPlanBuildInfo, Project, ProjectRepository
+from apps.buildmeta.models import BambooBuildInfo, BambooBuildUnit, BambooPublishExecution, BuildExecution, Project, Repository
 from apps.buildmeta.selectors.definitions import get_build_plan_export_draft, get_build_plan_preview
 from apps.buildmeta.selectors.executions import (
     list_build_plan_summaries,
@@ -17,19 +17,27 @@ from apps.buildmeta.selectors.executions import (
     list_latest_failed_builds,
     list_publish_executions_by_plan_key,
 )
+from apps.buildmeta.selectors.jenkins import list_executions_by_job_path, list_jenkins_job_summaries
 from apps.buildmeta.selectors.projects import get_project_detail, list_project_summaries
 from apps.buildmeta.services import (
     BambooOperationError,
+    JenkinsOperationError,
+    collect_jenkins_system_status,
     create_project,
     get_bamboo_plan_details,
     get_bamboo_plan_status,
     get_bamboo_system_settings,
     get_coverity_system_settings,
+    get_jenkins_build_details,
+    get_jenkins_job_details,
+    get_jenkins_job_status,
+    get_jenkins_system_settings,
     initialize_specs_draft_data,
     initialize_specs_draft_for_plan,
     publish_bamboo_specs,
     queue_bamboo_plan_with_options,
     set_system_setting,
+    trigger_jenkins_job,
     update_build_plan_metadata,
     update_project,
     upsert_build_info,
@@ -62,13 +70,18 @@ def project_list(request):
         if registration_form.is_valid():
             try:
                 payload = _build_project_payload(registration_form, repository_rows, build_rows)
+                payload["ciProvider"] = _current_ci_provider(request)
                 payload = create_project(payload)
             except ValueError as exc:
                 registration_error = str(exc)
             else:
-                return redirect("project-detail", jira_project_key=payload["jiraProjectKey"])
+                return _redirect_with_provider(
+                    redirect("project-detail", jira_project_key=payload["jiraProjectKey"]),
+                    _current_ci_provider(request),
+                )
 
-    all_projects = list_project_summaries()
+    current_provider = _current_ci_provider(request)
+    all_projects = list_project_summaries(ci_provider=current_provider)
     projects = all_projects
     query = request.GET.get("q", "").strip().lower()
     status_filter = request.GET.get("status", "all").strip().lower()
@@ -118,7 +131,7 @@ def project_list(request):
 
 
 def build_plan_list(request):
-    plans = list_build_plan_summaries()
+    plans = list_build_plan_summaries(ci_provider=_current_ci_provider(request))
     query = request.GET.get("q", "").strip().lower()
     status_filter = request.GET.get("status", "all").strip().lower()
 
@@ -162,6 +175,81 @@ def build_plan_list(request):
         "navProjectSearchItems": _build_nav_project_search_items(list_project_summaries()),
     }
     return render(request, "ui/build_plan_list.html", context)
+
+
+def settings(request):
+    """統合設定ページ - CIサーバー、静的分析、 저장소 設定を管理"""
+    coverity_payload = get_coverity_system_settings()
+    bamboo_settings = get_bamboo_system_settings()
+    jenkins_payload = get_jenkins_system_settings()
+
+    # フォーム初期化
+    coverity_form = CoveritySystemSettingsForm(
+        initial={
+            "connect_url": coverity_payload["connectUrl"],
+            "on_new_cert": coverity_payload["onNewCert"],
+            "commit_enabled": coverity_payload["commitEnabled"],
+            "repository_linkage_mode": coverity_payload["repositoryLinkageMode"],
+            "git_clone_url_template": coverity_payload["gitCloneUrlTemplate"],
+            "bamboo_server_url": bamboo_settings["serverUrl"],
+        }
+    )
+
+    message = ""
+    error = ""
+    jenkins_error = ""
+    init_summary = None
+
+    if request.method == "POST":
+        form_kind = request.POST.get("form_kind", "").strip()
+
+        if form_kind == "system_settings":
+            coverity_form = CoveritySystemSettingsForm(request.POST)
+            if coverity_form.is_valid():
+                set_system_setting(key="coverity.connect.url", value=coverity_form.cleaned_data["connect_url"].strip(), description="Coverity Connect URL")
+                set_system_setting(key="coverity.connect.on_new_cert", value=coverity_form.cleaned_data["on_new_cert"].strip() or "trust", description="Coverity on-new-cert policy")
+                set_system_setting(key="coverity.commit.enabled", value="true" if coverity_form.cleaned_data["commit_enabled"] else "false", description="Coverity commit enabled flag")
+                set_system_setting(key="repository.git.clone_url_template", value=coverity_form.cleaned_data["git_clone_url_template"].strip(), description="Git clone URL template")
+                set_system_setting(key="repository.linkage_mode", value=coverity_form.cleaned_data["repository_linkage_mode"].strip() or "linked", description="Repository linkage mode")
+                set_system_setting(key="bamboo.server.url", value=coverity_form.cleaned_data["bamboo_server_url"].strip(), description="Bamboo server URL")
+                message = "설정을 저장했습니다."
+            else:
+                error = "설정 입력값을 다시 확인해 주세요."
+
+        elif form_kind == "jenkins_settings":
+            jenkins_server_url = request.POST.get("jenkins_server_url", "").strip()
+            set_system_setting(key="jenkins.server.url", value=jenkins_server_url, description="Jenkins server URL")
+            jenkins_payload = get_jenkins_system_settings()
+            message = "Jenkins 설정을 저장했습니다."
+
+        elif form_kind == "init_specs_drafts":
+            init_summary = initialize_specs_draft_data(reset_existing=True)
+            message = "샘플 Draft 데이터를 재초기화했습니다."
+
+    # Jenkins ノード状態取得
+    nodes = []
+    queue = []
+    try:
+        status = collect_jenkins_system_status()
+        nodes = status.get("nodes", [])
+        queue = status.get("queue", [])
+    except JenkinsOperationError as exc:
+        jenkins_error = str(exc)
+
+    context = {
+        "coverityForm": coverity_form,
+        "bambooSettings": bamboo_settings,
+        "jenkinsSettings": jenkins_payload,
+        "message": message,
+        "error": error,
+        "jenkinsError": jenkins_error,
+        "jenkinsNodes": nodes,
+        "jenkinsQueue": queue,
+        "initSummary": init_summary,
+        "navProjectSearchItems": _build_nav_project_search_items(list_project_summaries()),
+    }
+    return render(request, "ui/settings.html", context)
+
 
 
 def coverity_settings(request):
@@ -234,8 +322,47 @@ def coverity_settings(request):
     return render(request, "ui/coverity_settings.html", context)
 
 
+def jenkins_settings(request):
+    jenkins_settings_payload = get_jenkins_system_settings()
+    message = ""
+    error = ""
+    nodes = []
+    queue = []
+    node_error = ""
+
+    if request.method == "POST":
+        form_kind = request.POST.get("form_kind", "").strip()
+        if form_kind == "jenkins_settings":
+            jenkins_server_url = request.POST.get("jenkins_server_url", "").strip()
+            set_system_setting(
+                key="jenkins.server.url",
+                value=jenkins_server_url,
+                description="Jenkins server URL",
+            )
+            jenkins_settings_payload = get_jenkins_system_settings()
+            message = "Jenkins 설정을 저장했습니다."
+
+    try:
+        status = collect_jenkins_system_status()
+        nodes = status.get("nodes", [])
+        queue = status.get("queue", [])
+    except JenkinsOperationError as exc:
+        node_error = str(exc)
+
+    context = {
+        "jenkinsSettings": jenkins_settings_payload,
+        "message": message,
+        "error": error,
+        "nodes": nodes,
+        "queue": queue,
+        "nodeError": node_error,
+        "navProjectSearchItems": _build_nav_project_search_items(list_project_summaries()),
+    }
+    return render(request, "ui/jenkins_settings.html", context)
+
+
 def project_detail(request, jira_project_key: str):
-    project = get_project_detail(jira_project_key)
+    project = get_project_detail(jira_project_key, ci_provider=_current_ci_provider(request))
     if project is None:
         return render(request, "ui/project_detail.html", {"project": None})
 
@@ -257,27 +384,33 @@ def project_detail(request, jira_project_key: str):
             if edit_form.is_valid():
                 try:
                     payload = _build_project_metadata_payload(project, edit_form)
-                    project = update_project(jira_project_key, payload)
+                    project = update_project(jira_project_key, payload, ci_provider=_current_ci_provider(request))
                 except ValueError as exc:
                     edit_error = str(exc)
                 else:
                     if project is None:
                         return render(request, "ui/project_detail.html", {"project": None})
-                    return redirect("project-detail", jira_project_key=project["jiraProjectKey"])
+                    return _redirect_with_provider(
+                        redirect("project-detail", jira_project_key=project["jiraProjectKey"]),
+                        _current_ci_provider(request),
+                    )
         elif form_kind == "repository":
             repository_add_form = RepositoryMetadataForm(request.POST)
             repository_add_open = True
             if repository_add_form.is_valid():
                 try:
                     payload = _build_repository_append_payload(project, repository_add_form)
-                    update_project(jira_project_key, payload)
+                    update_project(jira_project_key, payload, ci_provider=_current_ci_provider(request))
                 except ValueError as exc:
                     repository_add_error = str(exc)
                 else:
-                    return redirect(
-                        "project-repository-detail",
-                        jira_project_key=jira_project_key,
-                        repo_slug=repository_add_form.cleaned_data["repo_slug"].strip(),
+                    return _redirect_with_provider(
+                        redirect(
+                            "project-repository-detail",
+                            jira_project_key=jira_project_key,
+                            repo_slug=repository_add_form.cleaned_data["repo_slug"].strip(),
+                        ),
+                        _current_ci_provider(request),
                     )
         elif form_kind == "build":
             build_add_form = BuildMetadataForm(request.POST)
@@ -285,14 +418,17 @@ def project_detail(request, jira_project_key: str):
             if build_add_form.is_valid():
                 try:
                     payload = _build_plan_append_payload(project, build_add_form)
-                    update_project(jira_project_key, payload)
+                    update_project(jira_project_key, payload, ci_provider=_current_ci_provider(request))
                 except ValueError as exc:
                     build_add_error = str(exc)
                 else:
-                    return redirect(
-                        "project-build-detail",
-                        jira_project_key=jira_project_key,
-                        plan_key=build_add_form.cleaned_data["plan_key"].strip(),
+                    return _redirect_with_provider(
+                        redirect(
+                            "project-build-detail",
+                            jira_project_key=jira_project_key,
+                            plan_key=build_add_form.cleaned_data["plan_key"].strip(),
+                        ),
+                        _current_ci_provider(request),
                     )
 
     context = {
@@ -314,7 +450,7 @@ def project_detail(request, jira_project_key: str):
 
 
 def project_repository_detail(request, jira_project_key: str, repo_slug: str):
-    project = get_project_detail(jira_project_key)
+    project = get_project_detail(jira_project_key, ci_provider=_current_ci_provider(request))
     if project is None:
         return render(request, "ui/repository_detail.html", {"project": None, "repository": None})
 
@@ -337,7 +473,7 @@ def project_repository_detail(request, jira_project_key: str, repo_slug: str):
 
 
 def project_build_detail(request, jira_project_key: str, plan_key: str):
-    project = get_project_detail(jira_project_key)
+    project = get_project_detail(jira_project_key, ci_provider=_current_ci_provider(request))
     if project is None:
         return render(request, "ui/build_detail.html", {"project": None, "build": None})
 
@@ -431,7 +567,7 @@ def project_build_detail(request, jira_project_key: str, plan_key: str):
                 bamboo_error = "Bamboo 실행 입력값을 다시 확인해 주세요."
                 bamboo_detail = bamboo_run_form.errors.as_text()
 
-    project = get_project_detail(jira_project_key)
+    project = get_project_detail(jira_project_key, ci_provider=_current_ci_provider(request))
     if project is None:
         return render(request, "ui/build_detail.html", {"project": None, "build": None})
 
@@ -478,7 +614,7 @@ def project_build_detail(request, jira_project_key: str, plan_key: str):
 
 
 def project_bamboo_plan_detail(request, jira_project_key: str, plan_key: str):
-    project = get_project_detail(jira_project_key)
+    project = get_project_detail(jira_project_key, ci_provider=_current_ci_provider(request))
     if project is None:
         return render(request, "ui/bamboo_plan_detail.html", {"project": None, "build": None, "bambooPlan": None})
 
@@ -514,12 +650,73 @@ def project_bamboo_plan_detail(request, jira_project_key: str, plan_key: str):
     return render(request, "ui/bamboo_plan_detail.html", context)
 
 
+def project_jenkins_build_detail(request, jira_project_key: str, job_path: str):
+    project = get_project_detail(jira_project_key, ci_provider=Project.PROVIDER_JENKINS)
+    if project is None:
+        return render(request, "ui/jenkins_build_detail.html", {"project": None, "build": None, "jenkinsStatus": None})
+
+    build = next((item for item in project["builds"] if item["jobPath"] == job_path), None)
+    if build is None:
+        return render(request, "ui/jenkins_build_detail.html", {"project": project, "build": None, "jenkinsStatus": None})
+
+    jenkins_status = get_jenkins_job_status(job_path)
+    jenkins_error = ""
+    jenkins_job = None
+
+    try:
+        jenkins_job = get_jenkins_job_details(job_path)
+    except JenkinsOperationError as exc:
+        jenkins_error = str(exc)
+
+    executions = list_executions_by_job_path(job_path) or []
+
+    context = {
+        "project": project,
+        "build": build,
+        "jenkinsStatus": jenkins_status,
+        "jenkinsJob": jenkins_job,
+        "jenkinsError": jenkins_error,
+        "executions": executions,
+        "navProjectSearchItems": _build_nav_project_search_items(list_project_summaries()),
+    }
+    return render(request, "ui/jenkins_build_detail.html", context)
+
+
+def project_jenkins_build_info_detail(request, jira_project_key: str, job_path: str, build_number: str):
+    project = get_project_detail(jira_project_key, ci_provider=Project.PROVIDER_JENKINS)
+    if project is None:
+        return render(request, "ui/jenkins_build_detail.html", {"project": None, "build": None})
+
+    build = next((item for item in project["builds"] if item["jobPath"] == job_path), None)
+    if build is None:
+        return render(request, "ui/jenkins_build_detail.html", {"project": project, "build": None})
+
+    jenkins_status = get_jenkins_job_status(job_path)
+    jenkins_error = ""
+    build_details = None
+
+    try:
+        build_details = get_jenkins_build_details(job_path, build_number)
+    except JenkinsOperationError as exc:
+        jenkins_error = str(exc)
+
+    context = {
+        "project": project,
+        "build": build,
+        "jenkinsStatus": jenkins_status,
+        "buildDetails": build_details,
+        "jenkinsError": jenkins_error,
+        "navProjectSearchItems": _build_nav_project_search_items(list_project_summaries()),
+    }
+    return render(request, "ui/jenkins_build_detail.html", context)
+
+
 def project_build_info_list(request, jira_project_key: str, plan_key: str):
     return redirect(f"/projects/{jira_project_key}/builds/{plan_key}/?add_build_info=open")
 
 
 def project_build_info_detail(request, jira_project_key: str, plan_key: str, build_key: str):
-    project = get_project_detail(jira_project_key)
+    project = get_project_detail(jira_project_key, ci_provider=_current_ci_provider(request))
     if project is None:
         return render(request, "ui/build_info_detail.html", {"project": None, "build": None, "buildInfo": None})
 
@@ -527,7 +724,7 @@ def project_build_info_detail(request, jira_project_key: str, plan_key: str, bui
     if build is None:
         return render(request, "ui/build_info_detail.html", {"project": project, "build": None, "buildInfo": None})
 
-    build_info = BuildPlanBuildInfo.objects.filter(build_plan__plan_key=plan_key, build_key=build_key).first()
+    build_info = _get_build_info(plan_key, build_key)
     if build_info is None:
         return render(request, "ui/build_info_detail.html", {"project": project, "build": build, "buildInfo": None})
 
@@ -581,6 +778,19 @@ def _build_pagination_base_query(request) -> str:
     if not encoded:
         return ""
     return f"{encoded}&"
+
+
+def _current_ci_provider(request) -> str:
+    value = (request.GET.get("provider") or request.POST.get("ci_provider") or "").strip().lower()
+    return value or Project.PROVIDER_BAMBOO
+
+
+def _redirect_with_provider(response, provider: str):
+    if provider == Project.PROVIDER_BAMBOO:
+        return response
+    separator = "&" if "?" in response.url else "?"
+    response["Location"] = f"{response.url}{separator}provider={provider}"
+    return response
 
 
 def _is_partial_project_list_request(request) -> bool:
@@ -701,28 +911,31 @@ def _blank_build_row() -> dict:
 def _build_registration_suggestions() -> dict:
     return {
         "jiraProjectKeys": list(
-            Project.objects.order_by("jira_project_key").values_list("jira_project_key", flat=True).distinct()
+            Project.objects.order_by("project_key").values_list("project_key", flat=True).distinct()
         ),
         "bitbucketProjectKeys": list(
-            Project.objects.order_by("bitbucket_project_key").values_list("bitbucket_project_key", flat=True).distinct()
+            Repository.objects.exclude(repo_key="")
+            .order_by("repo_key")
+            .values_list("repo_key", flat=True)
+            .distinct()
         ),
         "repositorySlugs": list(
-            ProjectRepository.objects.order_by("repo_slug").values_list("repo_slug", flat=True).distinct()
+            Repository.objects.order_by("repo_slug").values_list("repo_slug", flat=True).distinct()
         ),
         "coverityProjects": list(
-            ProjectRepository.objects.exclude(coverity_project="")
+            Repository.objects.exclude(coverity_project="")
             .order_by("coverity_project")
             .values_list("coverity_project", flat=True)
             .distinct()
         ),
         "staticAnalysisToolVersions": list(
-            BuildPlan.objects.exclude(static_analysis_tool_version="")
+            BambooBuildUnit.objects.exclude(static_analysis_tool_version="")
             .order_by("static_analysis_tool_version")
             .values_list("static_analysis_tool_version", flat=True)
             .distinct()
         ),
         "coverityStreams": list(
-            ProjectRepository.objects.exclude(coverity_stream="")
+            Repository.objects.exclude(coverity_stream="")
             .order_by("coverity_stream")
             .values_list("coverity_stream", flat=True)
             .distinct()
@@ -766,18 +979,18 @@ def _build_build_plan_metadata_initial(build: dict) -> dict:
     }
 
 
-def _build_info_initial(build_info: BuildPlanBuildInfo) -> dict:
+def _build_info_initial(build_info: BambooBuildInfo) -> dict:
     return {
-        "build_key": build_info.build_key,
-        "operating_system": build_info.operating_system,
-        "pre_process": build_info.pre_process,
-        "build_command": build_info.build_command,
-        "clean_command": build_info.clean_command,
-        "language": build_info.language,
-        "compiler": build_info.compiler,
-        "analysis_excluded_files": build_info.analysis_excluded_files,
-        "coverity_stream": build_info.coverity_stream,
-        "build_sub_path": build_info.build_sub_path,
+        "build_key": getattr(build_info, "build_key", ""),
+        "operating_system": getattr(build_info, "operating_system", ""),
+        "pre_process": getattr(build_info, "pre_process", ""),
+        "build_command": getattr(build_info, "build_command", ""),
+        "clean_command": getattr(build_info, "clean_command", ""),
+        "language": getattr(build_info, "language", ""),
+        "compiler": getattr(build_info, "compiler", ""),
+        "analysis_excluded_files": getattr(build_info, "analysis_excluded_files", ""),
+        "coverity_stream": getattr(build_info, "coverity_stream", ""),
+        "build_sub_path": getattr(build_info, "build_sub_path", ""),
     }
 
 
@@ -939,8 +1152,8 @@ def _build_task_inspector(preview: dict | None, export_draft: dict | None) -> di
 def _get_latest_successful_publish_snapshot(plan_key: str) -> dict:
     execution = (
         BambooPublishExecution.objects.filter(
-            build_plan__plan_key=plan_key,
-            status=BambooPublishExecution.STATUS_SUCCESS,
+            build_unit__bamboo__plan_key=plan_key,
+            status__in=["success", "successful"],
         )
         .order_by("-created_at")
         .first()
@@ -1068,6 +1281,13 @@ def _highlight_code_block(content: str, language: str) -> str:
 
 def _build_project_payload_from_detail(project: dict) -> dict:
     return {
+        "projectKey": project["projectKey"],
+        "name": project.get("name", "") or project["jiraProjectKey"],
+        "description": project.get("description", ""),
+        "ownerTeam": project.get("ownerTeam", ""),
+        "serviceType": project.get("serviceType", ""),
+        "status": project.get("status", ""),
+        "ciProvider": project.get("ciProvider", Project.PROVIDER_BAMBOO),
         "jiraProjectKey": project["jiraProjectKey"],
         "bitbucketProjectKey": project["bitbucketProjectKey"],
         "representativeRepoSlug": project["representativeRepoSlug"],
@@ -1085,9 +1305,15 @@ def _build_project_payload_from_detail(project: dict) -> dict:
                 "buildName": build["buildName"],
                 "buildType": build["buildType"],
                 "runtimeStack": build["runtimeStack"],
-                "buildId": build["buildId"],
-                "planKey": build["planKey"],
+                "externalKey": build.get("externalKey", ""),
                 "repositorySlug": build["repositorySlug"],
+                "providerDetails": {
+                    "planKey": build.get("planKey", ""),
+                    "buildId": build.get("buildId", ""),
+                    "staticAnalysisToolVersion": build.get("staticAnalysisToolVersion", ""),
+                    "coverityProject": build.get("coverityProject", ""),
+                    "repositoryLinkageMode": build.get("repositoryLinkageModeOverride", ""),
+                },
             }
             for build in project["builds"]
         ],
@@ -1151,7 +1377,16 @@ def _build_repository_entries(project: dict) -> list[dict]:
     ]
 
 
-def _serialize_build_info(build_info: BuildPlanBuildInfo) -> dict:
+def _serialize_build_info(build_info: BambooBuildInfo) -> dict:
+    execution_count = 0
+    if hasattr(build_info, "bamboo_build_unit"):
+        bamboo_unit = build_info.bamboo_build_unit
+        execution_count = BuildExecution.objects.filter(
+            build_unit=bamboo_unit.build_unit,
+            external_execution_key=build_info.build_key,
+        ).count()
+    elif hasattr(build_info, "executions"):
+        execution_count = build_info.executions.count()
     return {
         "buildKey": build_info.build_key,
         "operatingSystem": build_info.operating_system,
@@ -1163,17 +1398,25 @@ def _serialize_build_info(build_info: BuildPlanBuildInfo) -> dict:
         "analysisExcludedFiles": build_info.analysis_excluded_files,
         "coverityStream": build_info.coverity_stream,
         "buildSubPath": build_info.build_sub_path,
-        "executionCount": build_info.executions.count(),
+        "executionCount": execution_count,
     }
 
 
 def _list_build_info_entries(plan_key: str) -> list[dict]:
+    bamboo_unit = BambooBuildUnit.objects.filter(plan_key=plan_key).first()
+    if bamboo_unit is None:
+        return []
     return [
         _serialize_build_info(build_info)
-        for build_info in BuildPlanBuildInfo.objects.filter(build_plan__plan_key=plan_key)
-        .prefetch_related("executions")
-        .order_by("build_key")
+        for build_info in BambooBuildInfo.objects.filter(bamboo_build_unit=bamboo_unit).order_by("build_key")
     ]
+
+
+def _get_build_info(plan_key: str, build_key: str) -> BambooBuildInfo | None:
+    bamboo_unit = BambooBuildUnit.objects.filter(plan_key=plan_key).first()
+    if bamboo_unit is None:
+        return None
+    return BambooBuildInfo.objects.filter(bamboo_build_unit=bamboo_unit, build_key=build_key).first()
 
 
 def _list_execution_groups(plan_key: str) -> list[dict]:

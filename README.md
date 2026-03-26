@@ -1,6 +1,6 @@
 # bamboo_spec_generator
 
-`bamboo_spec_generator`는 연도별 JSON 빌드 정의를 읽어 Bamboo Specs Java 코드를 생성하는 로컬 실행형 샘플 생성기입니다. 여러 빌드 플랜을 하나의 `bamboo-specs/` Maven 프로젝트 형태로 만들고, 이를 Bamboo Repository Stored Specs 또는 수동 Java Specs 배포 흐름에서 사용할 수 있도록 하는 것을 목표로 합니다.
+`bamboo_spec_generator`는 연도별 JSON 빌드 정의를 읽어 Bamboo Specs Java 코드를 생성하는 로컬 실행형 생성기에서 출발했지만, 현재는 Bamboo와 Jenkins를 함께 다루는 CI/CD 운영 시스템으로 확장 중인 저장소입니다. 현재 구현의 중심은 여전히 Bamboo Specs 생성과 Bamboo 운영 백엔드이지만, 요구사항과 문서 기준 제품 방향은 다중 CI 도구를 지원하는 공통 운영 콘솔입니다.
 
 현재 저장소에는 요구사항 문서, 설계 문서, Python 기반 생성기 구현, 스크립트 자산, 샘플 입력 JSON, 일부 테스트가 포함되어 있습니다.
 
@@ -20,13 +20,19 @@
 - 프로젝트 등록 UI는 여러 저장소를 한 번에 입력할 수 있고, 각 빌드는 특정 저장소 slug에 연결되도록 구성되어 있습니다.
 - 등록 메타데이터와 `BuildPlanBuildInfo`를 바탕으로 활성 정의, prepare context, Specs preview/export draft를 합성할 수 있습니다.
 - `backend/manage.py check`, `migrate` 기준의 기본 백엔드 진입점은 확인되었습니다.
+- 문서 기준 장기 목표는 상단 UI에서 `Bamboo 관리`와 `Jenkins 관리`를 전환할 수 있는 공통 CI 운영 콘솔입니다.
+- 문서 기준 Jenkins 범위는 프로젝트/빌드 잡 등록, 도구별 운영 현황 조회, 공통 UI 구조와 도구별 테마 분리까지 포함합니다.
+- 백엔드 모델은 기존 `BuildPlan` 중심 구조를 호환 유지하지 않고, `BuildUnit` 중심 공통 모델로 재구축하는 방향을 기준으로 합니다.
 
 ## 아직 미구현인 범위
 
 - Bamboo 준비 스테이지와 운영 API의 실제 변수 주입 연동은 부분 구현 상태이며, 실제 Bamboo 작업에서의 end-to-end 검증은 아직 남아 있습니다.
 - Bamboo 실행 결과, 버전, 실패 위치, 정적분석 결과의 end-to-end 적재는 부분 구현 상태입니다.
 - 배포/릴리스 관리와 사용자/권한 관리는 아직 미구현입니다.
-- Bamboo 시스템 운영 현황 조회는 아직 미구현입니다.
+- CI 도구별 시스템 운영 현황 조회는 아직 미구현이며, 현재 문서 범위에서는 Bamboo/Jenkins를 모두 대상으로 정의하고 있습니다.
+- Jenkins 프로젝트/빌드 잡 등록, Jenkins 운영 현황 조회, Bamboo/Jenkins 모드 전환 UI는 아직 미구현입니다.
+- 현재 UI 카피와 정보 구조는 Bamboo 중심 표현이 일부 남아 있으며, 공통 CI 콘솔 기준으로 정리 중입니다.
+- 구조 전환 과정에서 기존 로컬 DB/개발 데이터는 마이그레이션하지 않고 삭제 후 재구성할 수 있습니다.
 
 현재 운영 백엔드는 스캐폴딩과 기본 기능이 구현되었지만, 운영 데이터 적재/조회 흐름은 아직 확장 중입니다.
 
@@ -40,6 +46,14 @@
 - 테스트: `tests/`
 - 문서: `docs/`
 - 생성 결과 기본 경로: `bamboo-specs/`
+
+## 제품 방향
+
+- 단기 구현 중심: Bamboo Specs 생성, Bamboo 운영 메타데이터 관리, Django/Ninja 기반 운영 백엔드
+- 중기 확장 방향: 프로젝트 등록 기반 생성 흐름 강화, 운영 API 표준화, 빌드/배포 메타데이터 고도화
+- 장기 제품 방향: Bamboo와 Jenkins를 함께 관리하는 공통 CI/CD 관제 시스템
+- UI 방향: 상단에서 `Bamboo 관리`와 `Jenkins 관리`를 전환하고, 전체 정보 구조는 공통으로 유지
+- 테마 방향: Bamboo 모드는 밝은 파란색, Jenkins 모드는 밝은 빨간색
 
 ## 공통 워크플로우
 
@@ -56,6 +70,8 @@
 - `Custom Analysis`
 
 입력 JSON은 스테이지 구조 자체를 정의하지 않고, 이 공통 워크플로우 안에서 달라지는 빌드 상세 설정만 제공합니다.
+
+이 워크플로우는 현재 Bamboo Specs 생성 경로의 기준이다. Jenkins 지원 범위는 별도 잡 등록과 운영 관리에서 시작하며, Jenkins용 실제 실행 파이프라인 생성 규칙은 후속 설계 범위다.
 
 ## 입력 JSON
 

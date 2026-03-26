@@ -9,6 +9,7 @@ from apps.buildmeta.models import SystemSetting
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 DEFAULT_BAMBOO_TOKEN_PATH = REPO_ROOT / "ops" / "credentials" / ".credentials"
+DEFAULT_JENKINS_TOKEN_PATH = REPO_ROOT / "ops" / "credentials" / ".jenkins_credentials"
 
 
 def get_system_setting(key: str, default: str = "") -> str:
@@ -41,13 +42,29 @@ def get_coverity_system_settings() -> dict[str, str | bool]:
 
 
 def get_bamboo_system_settings() -> dict[str, str | bool]:
+    env_declared = "BAMBOO_SERVER_TOKEN" in os.environ
     env_token = os.environ.get("BAMBOO_SERVER_TOKEN", "").strip()
-    file_token = DEFAULT_BAMBOO_TOKEN_PATH.read_text(encoding="utf-8").strip() if DEFAULT_BAMBOO_TOKEN_PATH.is_file() else ""
+    file_token = ""
+    if not env_declared and DEFAULT_BAMBOO_TOKEN_PATH.is_file():
+        file_token = DEFAULT_BAMBOO_TOKEN_PATH.read_text(encoding="utf-8").strip()
     return {
         "serverUrl": get_system_setting(SystemSetting.KEY_BAMBOO_SERVER_URL).strip(),
         "tokenConfigured": bool(env_token or file_token),
         "tokenSource": "env" if env_token else "file" if file_token else "",
         "tokenFilePath": str(DEFAULT_BAMBOO_TOKEN_PATH),
+    }
+
+
+def get_jenkins_system_settings() -> dict[str, str | bool]:
+    env_token = os.environ.get("JENKINS_TOKEN", "").strip()
+    file_token = ""
+    if not env_token and DEFAULT_JENKINS_TOKEN_PATH.is_file():
+        file_token = DEFAULT_JENKINS_TOKEN_PATH.read_text(encoding="utf-8").strip()
+    return {
+        "serverUrl": get_system_setting(SystemSetting.KEY_JENKINS_SERVER_URL).strip(),
+        "tokenConfigured": bool(env_token or file_token),
+        "tokenSource": "env" if env_token else "file" if file_token else "",
+        "tokenFilePath": str(DEFAULT_JENKINS_TOKEN_PATH),
     }
 
 

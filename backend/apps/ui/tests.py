@@ -4,16 +4,18 @@ from django.test import TestCase
 from unittest.mock import patch
 
 from apps.buildmeta.models import (
-    BambooPublishExecution,
     BuildExecution,
+    BuildVersion,
+    SystemSetting,
+)
+from apps.buildmeta.tests_support import (
+    BambooPublishExecution,
     BuildPlan,
     BuildPlanBuildInfo,
     BuildPlanDefinition,
-    BuildVersion,
     Project,
     ProjectBuild,
     ProjectRepository,
-    SystemSetting,
 )
 from apps.buildmeta.services import BambooOperationError
 from apps.ui.views import (
@@ -108,24 +110,24 @@ class ProjectViewTest(TestCase):
             )
         if latest_success is not None:
             version = BuildVersion.objects.create(
-                build_plan=build_plan,
+                build_unit=build_plan,
                 version_text="v1.0.0",
-                major=1,
-                minor=0,
-                patch=0,
+                version_major=1,
+                version_minor=0,
+                version_patch=0,
+                branch_name="dev",
                 branch_kind=BuildVersion.BRANCH_KIND_DEV,
                 commit_hash=f"commit-{plan_key.lower()}",
                 is_latest=True,
                 latest_success=latest_success,
             )
             execution = BuildExecution.objects.create(
-                build_plan=build_plan,
+                build_unit=build_plan,
                 build_version=version,
-                build_number=build_number,
+                execution_number=build_number,
                 commit_hash=version.commit_hash,
-                success=latest_success,
-                result_status=result_status,
-                summary_message=summary_message,
+                status=result_status or ("success" if latest_success else "failed"),
+                summary=summary_message,
             )
             version.latest_execution = execution
             version.save(update_fields=["latest_execution"])
@@ -190,11 +192,9 @@ class ProjectViewTest(TestCase):
 
     def test_build_plan_list_renders_global_index(self) -> None:
         build_plan = BuildPlan.objects.get(plan_key="SAMPAPI")
-        build_plan.static_analysis_tool_version = "coverity-2024.12"
-        build_plan.coverity_project = "sample-api-coverity"
-        build_plan.save(
-            update_fields=["static_analysis_tool_version", "coverity_project", "updated_at"]
-        )
+        build_plan.bamboo.static_analysis_tool_version = "coverity-2024.12"
+        build_plan.bamboo.coverity_project = "sample-api-coverity"
+        build_plan.bamboo.save(update_fields=["static_analysis_tool_version", "coverity_project", "updated_at"])
 
         response = self.client.get("/build-plans/")
 

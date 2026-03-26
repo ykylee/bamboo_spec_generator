@@ -4,47 +4,46 @@ import re
 
 from django.db import transaction
 
-from apps.buildmeta.models import BuildPlan, BuildPlanBuildInfo
+from apps.buildmeta.models import BambooBuildInfo, BambooBuildUnit
 
 
 def initialize_specs_draft_data(*, reset_existing: bool = False) -> dict[str, int]:
-    plans = (
-        BuildPlan.objects.select_related("project_build__repository")
-        .prefetch_related("definitions", "build_infos")
+    bamboo_units = (
+        BambooBuildUnit.objects.select_related("build_unit__repository")
+        .prefetch_related("build_unit__definitions", "build_infos")
         .order_by("plan_key")
     )
-
-    return _initialize_specs_draft_plans(plans=plans, reset_existing=reset_existing)
+    return _initialize_specs_draft_plans(bamboo_units=bamboo_units, reset_existing=reset_existing)
 
 
 def initialize_specs_draft_for_plan(*, plan_key: str, reset_existing: bool = False) -> dict[str, int]:
-    plans = (
-        BuildPlan.objects.filter(plan_key=plan_key)
-        .select_related("project_build__repository")
-        .prefetch_related("definitions", "build_infos")
+    bamboo_units = (
+        BambooBuildUnit.objects.filter(plan_key=plan_key)
+        .select_related("build_unit__repository")
+        .prefetch_related("build_unit__definitions", "build_infos")
     )
-    return _initialize_specs_draft_plans(plans=plans, reset_existing=reset_existing)
+    return _initialize_specs_draft_plans(bamboo_units=bamboo_units, reset_existing=reset_existing)
 
 
-def _initialize_specs_draft_plans(*, plans, reset_existing: bool) -> dict[str, int]:
+def _initialize_specs_draft_plans(*, bamboo_units, reset_existing: bool) -> dict[str, int]:
     initialized_count = 0
     updated_count = 0
     removed_count = 0
     skipped_count = 0
 
     with transaction.atomic():
-        for plan in plans:
-            if not hasattr(plan, "project_build"):
+        for bamboo_unit in bamboo_units:
+            build_unit = bamboo_unit.build_unit
+            if build_unit.project.project_key.startswith("DETACHED-") and build_unit.repository_id is None:
                 skipped_count += 1
                 continue
-
-            repository = getattr(plan.project_build, "repository", None)
-            existing_build_infos = list(plan.build_infos.all().order_by("build_key"))
+            repository = build_unit.repository
+            existing_build_infos = list(bamboo_unit.build_infos.all().order_by("build_key"))
 
             if existing_build_infos:
                 inferred_language, inferred_compiler = _infer_language_and_compiler(
-                    build_type=plan.project_build.build_type,
-                    runtime_stack=plan.project_build.runtime_stack,
+                    compiler=build_unit.compiler,
+                    runtime_stack=build_unit.runtime_stack,
                 )
                 for build_info in existing_build_infos:
                     changed = False
@@ -86,26 +85,19 @@ def _initialize_specs_draft_plans(*, plans, reset_existing: bool) -> dict[str, i
                             "updated_at",
                         ]
                         if reset_existing:
-                            update_fields.extend(
-                                [
-                                    "pre_process",
-                                    "build_command",
-                                    "clean_command",
-                                    "analysis_excluded_files",
-                                ]
-                            )
+                            update_fields.extend(["pre_process", "build_command", "clean_command", "analysis_excluded_files"])
                         build_info.save(update_fields=update_fields)
                         updated_count += 1
                 continue
 
             operating_system = "linux"
             inferred_language, inferred_compiler = _infer_language_and_compiler(
-                build_type=plan.project_build.build_type,
-                runtime_stack=plan.project_build.runtime_stack,
+                compiler=build_unit.compiler,
+                runtime_stack=build_unit.runtime_stack,
             )
-            BuildPlanBuildInfo.objects.create(
-                build_plan=plan,
-                build_key=_default_build_key(build_id=plan.build_id, operating_system=operating_system),
+            BambooBuildInfo.objects.create(
+                bamboo_build_unit=bamboo_unit,
+                build_key=_default_build_key(build_id=bamboo_unit.build_id, operating_system=operating_system),
                 operating_system=operating_system,
                 pre_process="",
                 build_command="",
@@ -137,18 +129,18 @@ def _normalize_build_sub_path(value: str) -> str:
     return normalized or "."
 
 
-def _infer_language_and_compiler(*, build_type: str, runtime_stack: str) -> tuple[str, str]:
-    normalized_build_type = (build_type or "").strip().lower()
+def _infer_language_and_compiler(*, compiler: str, runtime_stack: str) -> tuple[str, str]:
+    normalized_compiler = (compiler or "").strip().lower()
     normalized_runtime = (runtime_stack or "").strip().lower()
 
-    if normalized_build_type == "gradle":
+    if normalized_compiler == "gradle":
         return "java", "gradle"
-    if normalized_build_type == "maven" or "java" in normalized_runtime:
-        return "java", "maven" if normalized_build_type == "maven" else "java"
-    if normalized_build_type in {"node", "javascript", "typescript"} or "node" in normalized_runtime:
+    if normalized_compiler == "maven" or "java" in normalized_runtime:
+        return "java", "maven" if normalized_compiler == "maven" else "java"
+    if normalized_compiler in {"node", "javascript", "typescript", "node.js"} or "node" in normalized_runtime:
         return "javascript", "node.js"
-    if normalized_build_type == "python" or "python" in normalized_runtime:
+    if normalized_compiler == "python" or "python" in normalized_runtime:
         return "python", "python"
-    if normalized_build_type == "dotnet" or ".net" in normalized_runtime:
+    if normalized_compiler == "dotnet" or ".net" in normalized_runtime:
         return "csharp", "dotnet"
     return "", ""
