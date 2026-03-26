@@ -40,8 +40,8 @@ class ProjectAdmin(admin.ModelAdmin):
 
 @admin.register(Repository)
 class RepositoryAdmin(admin.ModelAdmin):
-    list_display = ("project", "repo_slug", "repo_type", "default_branch", "is_representative")
-    list_filter = ("repo_type", "is_representative")
+    list_display = ("project", "repo_slug", "repository_type", "repository_provider", "default_branch", "is_representative")
+    list_filter = ("repository_type", "repository_provider", "is_representative")
     search_fields = ("repo_slug", "repo_key", "clone_url")
 
 

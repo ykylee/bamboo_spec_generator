@@ -79,7 +79,7 @@
           <span class="status-light status-light--success" aria-label="정상" title="정상"></span>
           {% endif %}
         </td>
-        <td><a class="chip chip--neutral" href="{% url 'project-detail' project.jiraProjectKey %}{{ provider_query }}">상세 보기</a></td>
+        <td><a class="chip chip--neutral" href="{% url 'project-detail' project.jiraProjectKey %}">상세 보기</a></td>
       </tr>
     {% endfor %}
     </tbody>
@@ -109,7 +109,7 @@
         </div>
       </div>
       <div class="project-compact-item__actions">
-        <a class="chip chip--neutral" href="{% url 'project-detail' project.jiraProjectKey %}{{ provider_query }}">상세 보기</a>
+        <a class="chip chip--neutral" href="{% url 'project-detail' project.jiraProjectKey %}">상세 보기</a>
       </div>
     </article>
     {% endfor %}

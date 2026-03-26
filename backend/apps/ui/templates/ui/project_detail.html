@@ -36,7 +36,7 @@
       {% else %}
       <span class="chip chip--warning">연결 점검 필요</span>
       {% endif %}
-      <a class="chip chip--neutral" href="{% url 'project-list' %}{{ provider_query }}">목록으로</a>
+      <a class="chip chip--neutral" href="{% url 'project-list' %}">목록으로</a>
     </div>
   </div>
   <div class="signal-hero__board" aria-label="프로젝트 상태 보드">
@@ -96,7 +96,6 @@
 
     <form class="project-form" method="post" action="{% url 'project-detail' project.jiraProjectKey %}">
       {% csrf_token %}
-      <input type="hidden" name="ci_provider" value="{{ current_provider }}">
       <input type="hidden" name="form_kind" value="project">
       <div class="project-form__grid">
         <label class="project-form__field">
@@ -171,9 +170,13 @@
 
     <form class="project-form" method="post" action="{% url 'project-detail' project.jiraProjectKey %}">
       {% csrf_token %}
-      <input type="hidden" name="ci_provider" value="{{ current_provider }}">
       <input type="hidden" name="form_kind" value="repository">
       <div class="project-form__grid">
+        <label class="project-form__field">
+          <span class="project-form__label">저장소 타입</span>
+          {{ repositoryAddForm.repo_type }}
+          {% if repositoryAddForm.repo_type.errors %}<span class="project-form__error">{{ repositoryAddForm.repo_type.errors|join:", " }}</span>{% endif %}
+        </label>
         <label class="project-form__field">
           <span class="project-form__label">저장소 Slug</span>
           {{ repositoryAddForm.repo_slug }}
@@ -226,7 +229,6 @@
 
     <form class="project-form" method="post" action="{% url 'project-detail' project.jiraProjectKey %}">
       {% csrf_token %}
-      <input type="hidden" name="ci_provider" value="{{ current_provider }}">
       <input type="hidden" name="form_kind" value="build">
       <div class="project-form__grid project-form__grid--build">
         <label class="project-form__field">
@@ -245,15 +247,22 @@
           {% if buildAddForm.runtime_stack.errors %}<span class="project-form__error">{{ buildAddForm.runtime_stack.errors|join:", " }}</span>{% endif %}
         </label>
         <label class="project-form__field">
-          <span class="project-form__label">Build ID</span>
+          <span class="project-form__label">{% if current_provider == "jenkins" %}Job Key{% else %}Build ID{% endif %}</span>
           {{ buildAddForm.build_id }}
           {% if buildAddForm.build_id.errors %}<span class="project-form__error">{{ buildAddForm.build_id.errors|join:", " }}</span>{% endif %}
         </label>
         <label class="project-form__field">
-          <span class="project-form__label">Plan Key</span>
+          <span class="project-form__label">{% if current_provider == "jenkins" %}Job Path{% else %}Plan Key{% endif %}</span>
           {{ buildAddForm.plan_key }}
           {% if buildAddForm.plan_key.errors %}<span class="project-form__error">{{ buildAddForm.plan_key.errors|join:", " }}</span>{% endif %}
         </label>
+        {% if current_provider == "bamboo" %}
+        <label class="project-form__field">
+          <span class="project-form__label">Bamboo 저장소 연결</span>
+          {{ buildAddForm.repository_linkage_mode }}
+          {% if buildAddForm.repository_linkage_mode.errors %}<span class="project-form__error">{{ buildAddForm.repository_linkage_mode.errors|join:", " }}</span>{% endif %}
+        </label>
+        {% endif %}
         <label class="project-form__field">
           <span class="project-form__label">연결 저장소 Slug</span>
           {{ buildAddForm.build_repository_slug }}
@@ -272,7 +281,7 @@
     </div>
     <ul class="meta-list">
       <li><strong>저장소 연결</strong> 빌드는 이미 등록된 저장소 slug 중 하나에 연결되어야 합니다.</li>
-      <li><strong>식별자 일관성</strong> Build ID와 Plan Key는 기존 빌드 플랜과 충돌하면 등록되지 않습니다.</li>
+      <li><strong>식별자 일관성</strong>{% if current_provider == "jenkins" %} Job Key와 Job Path는 기존 Jenkins 잡과 충돌하면 등록되지 않습니다.{% else %} Build ID와 Plan Key는 기존 빌드 플랜과 충돌하면 등록되지 않습니다.{% endif %}</li>
     </ul>
   </aside>
 </section>
@@ -327,6 +336,7 @@
           <p>{{ repository.coverityProject|default:"Coverity Project 미지정" }} · {{ repository.coverityStream|default:"Coverity Stream 미지정" }}</p>
         </div>
         <div class="chip-row">
+          <span class="chip chip--neutral">{{ repository.repoType }}</span>
           {% if repository.isRepresentative %}
           <span class="chip chip--success">대표</span>
           {% endif %}
@@ -358,13 +368,16 @@
           <p>{{ build.planKey }} · {{ build.repositorySlug|default:"미연결" }}</p>
         </div>
         <div class="chip-row">
+          {% if build.ciProvider == "bamboo" %}
+          <span class="chip chip--neutral">{{ build.repositoryLinkageModeOverride|default:"linked" }}</span>
+          {% endif %}
           <span class="chip chip--neutral">{{ build.buildInfoCount }} infos</span>
           {% if build.latestSuccess == False %}
           <span class="chip chip--warning">최근 실패</span>
           {% else %}
           <span class="chip chip--success">연결됨</span>
           {% endif %}
-          <a class="chip chip--neutral" href="{% url 'project-build-detail' project.jiraProjectKey build.planKey %}">상세</a>
+          <a class="chip chip--neutral" href="{{ build.detailUrl }}">상세</a>
         </div>
       </li>
       {% empty %}
@@ -471,7 +484,7 @@
   <h1 class="empty-state__title">프로젝트를 찾을 수 없습니다.</h1>
   <p class="empty-state__body">요청한 Jira Project Key에 해당하는 메타데이터가 없습니다.</p>
   <p class="empty-state__body stack-top">
-    <a class="chip chip--neutral" href="{% url 'project-list' %}{{ provider_query }}">프로젝트 목록으로 돌아가기</a>
+    <a class="chip chip--neutral" href="{% url 'project-list' %}">프로젝트 목록으로 돌아가기</a>
   </p>
 </section>
 {% endif %}

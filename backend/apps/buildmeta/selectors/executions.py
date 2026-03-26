@@ -62,6 +62,7 @@ def list_build_plan_summaries(*, ci_provider: str | None = None) -> list[dict]:
         summaries.append(
             {
                 "projectKey": build_unit.project.project_key,
+                "ciProvider": build_unit.ci_provider,
                 "buildName": build_unit.display_name,
                 "buildType": build_unit.compiler,
                 "runtimeStack": build_unit.runtime_stack,
@@ -160,7 +161,7 @@ def _bamboo_attr(build_unit: BuildUnit, attr: str) -> str:
 def _detail_url(build_unit: BuildUnit) -> str:
     if build_unit.ci_provider == BuildUnit.PROVIDER_JENKINS:
         job_path = getattr(getattr(build_unit, "jenkins", None), "job_path", "") or build_unit.external_key
-        return f"/projects/{build_unit.project.project_key}/jenkins-jobs/{job_path}/?provider=jenkins"
+        return f"/projects/{build_unit.project.project_key}/jenkins-jobs/{job_path}/"
     return f"/projects/{build_unit.project.project_key}/builds/{_plan_key(build_unit)}/"
 
 

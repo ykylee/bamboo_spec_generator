@@ -307,6 +307,14 @@ class UiPlaywrightE2ETest(unittest.TestCase):
 
         self.page.goto(self.base_url, wait_until="domcontentloaded")
         self.page.get_by_role("button", name="프로젝트 등록").click()
+        self.page.locator('select[name="ci_provider"]').select_option("jenkins")
+        self.page.wait_for_timeout(150)
+
+        self.assertTrue(self.page.get_by_text("Job Key").first.is_visible())
+        self.assertTrue(self.page.get_by_text("Job Path").first.is_visible())
+
+        self.page.locator('select[name="ci_provider"]').select_option("bamboo")
+        self.page.wait_for_timeout(150)
 
         representative_input = self.page.locator('input[name="representative_repo_slug"]')
         representative_input.fill("ops")
@@ -326,10 +334,12 @@ class UiPlaywrightE2ETest(unittest.TestCase):
         self.page.goto(self.base_url, wait_until="domcontentloaded")
         self.page.get_by_role("button", name="프로젝트 등록").click()
 
+        self.page.locator('select[name="ci_provider"]').select_option("bamboo")
         self.page.locator('input[name="jira_project_key"]').fill("OPS")
         self.page.locator('input[name="bitbucket_project_key"]').fill("OPS")
         self.page.locator('input[name="representative_repo_slug"]').fill("ops-api")
 
+        self.page.locator('select[name="repo_type"]').first.select_option("git")
         self.page.locator('input[name="repo_slug"]').first.fill("ops-api")
         self.page.locator('input[name="coverity_project"]').first.fill("ops-api")
         self.page.locator('input[name="coverity_stream"]').first.fill("ops-api-dev")
@@ -339,6 +349,7 @@ class UiPlaywrightE2ETest(unittest.TestCase):
         self.page.locator('input[name="runtime_stack"]').first.fill("python3.12")
         self.page.locator('input[name="build_id"]').first.fill("ops-api")
         self.page.locator('input[name="plan_key"]').first.fill("OPSAPI")
+        self.page.locator('select[name="repository_linkage_mode"]').first.select_option("create_if_missing")
         self.page.locator('input[name="build_repository_slug"]').first.fill("ops-api")
 
         self.page.get_by_role("button", name="등록하기").click()
@@ -346,6 +357,10 @@ class UiPlaywrightE2ETest(unittest.TestCase):
 
         self.assertEqual(f"{self.base_url}/projects/OPS/", self.page.url)
         self.assertTrue(self.Project.objects.filter(project_key="OPS", ci_provider="bamboo").exists())
+        self.assertTrue(self.Repository.objects.filter(project__project_key="OPS", repo_type="git").exists())
+        self.assertTrue(
+            self.BambooBuildUnit.objects.filter(build_unit__project__project_key="OPS", repository_linkage_mode="create_if_missing").exists()
+        )
         self.assertEqual("OPS", self.page.locator(".hero__title").inner_text())
         self.assertTrue(self.page.get_by_text("연결 점검 필요").is_visible())
         self.assertTrue(self.page.locator("#project-repository-add-panel").count() == 1)

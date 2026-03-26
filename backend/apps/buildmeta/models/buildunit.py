@@ -67,6 +67,26 @@ class Project(TimestampedModel):
 
 
 class Repository(TimestampedModel):
+    REPOSITORY_TYPE_GIT = "git"
+    REPOSITORY_TYPE_SVN = "svn"
+    REPOSITORY_TYPE_CHOICES = [
+        (REPOSITORY_TYPE_GIT, "git"),
+        (REPOSITORY_TYPE_SVN, "svn"),
+    ]
+
+    REPOSITORY_PROVIDER_GENERIC_GIT = "generic_git"
+    REPOSITORY_PROVIDER_GITHUB = "github"
+    REPOSITORY_PROVIDER_BITBUCKET = "bitbucket"
+    REPOSITORY_PROVIDER_GITEA = "gitea"
+    REPOSITORY_PROVIDER_GENERIC_SVN = "generic_svn"
+    REPOSITORY_PROVIDER_CHOICES = [
+        (REPOSITORY_PROVIDER_GENERIC_GIT, "generic_git"),
+        (REPOSITORY_PROVIDER_GITHUB, "github"),
+        (REPOSITORY_PROVIDER_BITBUCKET, "bitbucket"),
+        (REPOSITORY_PROVIDER_GITEA, "gitea"),
+        (REPOSITORY_PROVIDER_GENERIC_SVN, "generic_svn"),
+    ]
+
     TYPE_BITBUCKET = "bitbucket"
     TYPE_GIT = "git"
     TYPE_CHOICES = [
@@ -76,6 +96,12 @@ class Repository(TimestampedModel):
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     project = models.ForeignKey(Project, on_delete=models.CASCADE, related_name="repositories")
+    repository_type = models.CharField(max_length=32, choices=REPOSITORY_TYPE_CHOICES, default=REPOSITORY_TYPE_GIT)
+    repository_provider = models.CharField(
+        max_length=32,
+        choices=REPOSITORY_PROVIDER_CHOICES,
+        default=REPOSITORY_PROVIDER_BITBUCKET,
+    )
     repo_type = models.CharField(max_length=32, choices=TYPE_CHOICES, default=TYPE_BITBUCKET)
     repo_key = models.CharField(max_length=128, blank=True)
     repo_slug = models.CharField(max_length=255)
@@ -98,6 +124,47 @@ class Repository(TimestampedModel):
 
     def __str__(self) -> str:
         return self.repo_slug
+
+    @staticmethod
+    def infer_repository_type(*, repository_type: str = "", repository_provider: str = "", legacy_repo_type: str = "") -> str:
+        normalized_type = (repository_type or "").strip().lower()
+        if normalized_type in {Repository.REPOSITORY_TYPE_GIT, Repository.REPOSITORY_TYPE_SVN}:
+            return normalized_type
+        normalized_provider = (repository_provider or "").strip().lower()
+        if normalized_provider == Repository.REPOSITORY_PROVIDER_GENERIC_SVN:
+            return Repository.REPOSITORY_TYPE_SVN
+        return Repository.REPOSITORY_TYPE_GIT if (legacy_repo_type or "").strip().lower() in {
+            Repository.TYPE_GIT,
+            Repository.TYPE_BITBUCKET,
+        } else Repository.REPOSITORY_TYPE_GIT
+
+    @staticmethod
+    def infer_repository_provider(*, repository_provider: str = "", legacy_repo_type: str = "", repository_type: str = "") -> str:
+        normalized_provider = (repository_provider or "").strip().lower()
+        if normalized_provider in {
+            Repository.REPOSITORY_PROVIDER_GENERIC_GIT,
+            Repository.REPOSITORY_PROVIDER_GITHUB,
+            Repository.REPOSITORY_PROVIDER_BITBUCKET,
+            Repository.REPOSITORY_PROVIDER_GITEA,
+            Repository.REPOSITORY_PROVIDER_GENERIC_SVN,
+        }:
+            return normalized_provider
+        normalized_type = (repository_type or "").strip().lower()
+        if normalized_type == Repository.REPOSITORY_TYPE_SVN:
+            return Repository.REPOSITORY_PROVIDER_GENERIC_SVN
+        if (legacy_repo_type or "").strip().lower() == Repository.TYPE_BITBUCKET:
+            return Repository.REPOSITORY_PROVIDER_BITBUCKET
+        return Repository.REPOSITORY_PROVIDER_GENERIC_GIT
+
+    @staticmethod
+    def to_legacy_repo_type(*, repository_provider: str = "", repository_type: str = "") -> str:
+        normalized_provider = (repository_provider or "").strip().lower()
+        if normalized_provider == Repository.REPOSITORY_PROVIDER_BITBUCKET:
+            return Repository.TYPE_BITBUCKET
+        normalized_type = (repository_type or "").strip().lower()
+        if normalized_type in {Repository.REPOSITORY_TYPE_GIT, Repository.REPOSITORY_TYPE_SVN}:
+            return Repository.TYPE_GIT
+        return Repository.TYPE_GIT
 
 
 class BuildUnit(TimestampedModel):

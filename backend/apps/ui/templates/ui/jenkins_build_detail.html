@@ -96,7 +96,7 @@
       <tbody>
         {% for execution in executions %}
         <tr>
-          <td><a href="{% url 'project-jenkins-build-info-detail' project.jiraProjectKey build.jobPath execution.buildNumber %}?provider=jenkins">{{ execution.buildNumber }}</a></td>
+          <td><a href="{% url 'project-jenkins-build-info-detail' project.jiraProjectKey build.jobPath execution.buildNumber %}">{{ execution.buildNumber }}</a></td>
           <td>{{ execution.version|default:"-" }}</td>
           <td>
             {% if execution.success %}
@@ -160,7 +160,7 @@
 <div class="empty-state">
   <h2>프로젝트 또는 빌드를 찾을 수 없습니다.</h2>
   <p>Jenkins Job이 아직 등록되지 않았거나 존재하지 않습니다.</p>
-  <a class="action-button" href="{% url 'project-list' %}?provider=jenkins">프로젝트 목록으로</a>
+  <a class="action-button" href="{% url 'project-list' %}">프로젝트 목록으로</a>
 </div>
 {% endif %}
 {% endblock %}

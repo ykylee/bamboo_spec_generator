@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from django.core.exceptions import ObjectDoesNotExist
+from django.core.exceptions import MultipleObjectsReturned, ObjectDoesNotExist
 
 from apps.buildmeta.models import BuildUnit, Project
 
@@ -74,6 +74,10 @@ def get_project_detail(project_key: str, *, ci_provider: str | None = None) -> d
         queryset = queryset.filter(ci_provider=ci_provider)
     try:
         project = queryset.get(project_key=project_key)
+    except MultipleObjectsReturned:
+        project = queryset.filter(project_key=project_key).order_by("ci_provider", "project_key").first()
+        if project is None:
+            return None
     except ObjectDoesNotExist:
         return None
 
@@ -97,6 +101,8 @@ def get_project_detail(project_key: str, *, ci_provider: str | None = None) -> d
         "repositories": [
             {
                 "repoSlug": repo.repo_slug,
+                "repositoryType": repo.repository_type,
+                "repositoryProvider": repo.repository_provider,
                 "repoType": repo.repo_type,
                 "repoKey": repo.repo_key,
                 "cloneUrl": repo.clone_url,
@@ -148,6 +154,11 @@ def _serialize_build_unit(build_unit: BuildUnit) -> dict:
 
 def _serialize_legacy_build(build_unit: BuildUnit) -> dict:
     provider_details = _serialize_build_unit(build_unit)["providerDetails"]
+    detail_url = ""
+    if build_unit.ci_provider == Project.PROVIDER_JENKINS:
+        detail_url = f"/projects/{build_unit.project.project_key}/jenkins-jobs/{provider_details.get('jobPath', build_unit.external_key)}/"
+    else:
+        detail_url = f"/projects/{build_unit.project.project_key}/builds/{provider_details.get('planKey', build_unit.external_key)}/"
     return {
         "buildName": build_unit.display_name,
         "buildType": build_unit.compiler,
@@ -169,6 +180,8 @@ def _serialize_legacy_build(build_unit: BuildUnit) -> dict:
         "latestVersion": build_unit.latest_version.version_text if build_unit.latest_version_id else "",
         "latestSuccess": build_unit.latest_version.latest_success if build_unit.latest_version_id else None,
         "buildInfoUrl": "",
+        "detailUrl": detail_url,
+        "ciProvider": build_unit.ci_provider,
     }
 
 

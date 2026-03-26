@@ -5,7 +5,6 @@
 {% block page_heading %}빌드 플랜 인덱스{% endblock %}
 {% block topbar_controls %}
 <form class="global-filter-bar global-filter-bar--status" method="get" action="{% url 'build-plan-list' %}">
-  <input type="hidden" name="provider" value="{{ current_provider }}">
   <label class="filter-field">
     <span class="filter-field__label">상태</span>
     <select class="filter-field__input" name="status">

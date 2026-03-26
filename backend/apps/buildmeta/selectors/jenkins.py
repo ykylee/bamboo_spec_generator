@@ -72,7 +72,7 @@ def list_jenkins_job_summaries(*, ci_provider: str | None = None) -> list[dict]:
                 "latestSuccess": build_unit.latest_version.latest_success if build_unit.latest_version else None,
                 "resultStatus": _result_status(latest_execution.status) if latest_execution else "",
                 "summaryMessage": latest_execution.summary if latest_execution else "",
-                "detailUrl": f"/projects/{build_unit.project.project_key}/jenkins-jobs/{_job_path(build_unit)}/?provider=jenkins",
+                "detailUrl": f"/projects/{build_unit.project.project_key}/jenkins-jobs/{_job_path(build_unit)}/",
             }
         )
     return summaries

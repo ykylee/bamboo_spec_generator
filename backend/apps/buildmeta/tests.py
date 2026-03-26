@@ -331,7 +331,7 @@ class BuildPlanSummarySelectorTest(TestCase):
 
         self.assertEqual(1, len(summaries))
         self.assertEqual(
-            "/projects/JENKINS/jenkins-jobs/folder/jenkins-app/?provider=jenkins",
+            "/projects/JENKINS/jenkins-jobs/folder/jenkins-app/",
             summaries[0]["detailUrl"],
         )
 
@@ -2326,6 +2326,76 @@ class InitPostgresDbCommandTest(SimpleTestCase):
 
 
 class ProjectServiceTest(TestCase):
+    def test_create_project_persists_ci_provider_and_repository_type(self) -> None:
+        payload = create_project(
+            {
+                "ciProvider": ProjectModel.PROVIDER_JENKINS,
+                "jiraProjectKey": "OPS",
+                "bitbucketProjectKey": "OPS",
+                "representativeRepoSlug": "ops-api",
+                "repositories": [
+                    {
+                        "repoType": RepositoryModel.TYPE_GIT,
+                        "repoSlug": "ops-api",
+                        "coverityProject": "",
+                        "coverityStream": "",
+                        "isRepresentative": True,
+                    }
+                ],
+                "builds": [
+                    {
+                        "buildName": "API",
+                        "buildType": "python",
+                        "runtimeStack": "python3.12",
+                        "buildId": "ops-api",
+                        "planKey": "ops/folder/api",
+                        "repositorySlug": "ops-api",
+                    }
+                ],
+            }
+        )
+
+        self.assertEqual(ProjectModel.PROVIDER_JENKINS, payload["ciProvider"])
+        self.assertTrue(ProjectModel.objects.filter(project_key="OPS", ci_provider=ProjectModel.PROVIDER_JENKINS).exists())
+        self.assertEqual(RepositoryModel.TYPE_GIT, RepositoryModel.objects.get(project__project_key="OPS").repo_type)
+        self.assertTrue(BuildUnit.objects.filter(project__project_key="OPS", ci_provider=ProjectModel.PROVIDER_JENKINS).exists())
+
+    def test_create_project_persists_bamboo_repository_linkage_mode(self) -> None:
+        payload = create_project(
+            {
+                "ciProvider": ProjectModel.PROVIDER_BAMBOO,
+                "jiraProjectKey": "OPS",
+                "bitbucketProjectKey": "OPS",
+                "representativeRepoSlug": "ops-api",
+                "repositories": [
+                    {
+                        "repoType": RepositoryModel.TYPE_BITBUCKET,
+                        "repoSlug": "ops-api",
+                        "coverityProject": "",
+                        "coverityStream": "",
+                        "isRepresentative": True,
+                    }
+                ],
+                "builds": [
+                    {
+                        "buildName": "API",
+                        "buildType": "python",
+                        "runtimeStack": "python3.12",
+                        "buildId": "ops-api",
+                        "planKey": "OPSAPI",
+                        "repositorySlug": "ops-api",
+                        "providerDetails": {
+                            "repositoryLinkageMode": "create_if_missing",
+                        },
+                    }
+                ],
+            }
+        )
+
+        build_unit = BuildUnit.objects.get(project__project_key="OPS", ci_provider=ProjectModel.PROVIDER_BAMBOO)
+        self.assertEqual("create_if_missing", build_unit.bamboo.repository_linkage_mode)
+        self.assertEqual("create_if_missing", payload["builds"][0]["repositoryLinkageModeOverride"])
+
     def test_create_project_marks_generation_not_ready_without_build_infos(self) -> None:
         payload = create_project(
             {

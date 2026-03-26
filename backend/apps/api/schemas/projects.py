@@ -5,6 +5,8 @@ from ninja import Schema
 
 class ProjectRepositoryIn(Schema):
     repoSlug: str
+    repositoryType: str = "git"
+    repositoryProvider: str = "bitbucket"
     repoType: str = "bitbucket"
     repoKey: str = ""
     cloneUrl: str = ""

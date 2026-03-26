@@ -5,7 +5,6 @@
 {% block page_heading %}프로젝트 대시보드{% endblock %}
 {% block topbar_controls %}
 <form class="global-filter-bar global-filter-bar--status" method="get" action="{% url 'project-list' %}">
-  <input type="hidden" name="provider" value="{{ current_provider }}">
   <label class="filter-field">
     <span class="filter-field__label">상태</span>
     <select class="filter-field__input" name="status">
@@ -157,8 +156,12 @@
 
     <form class="project-form" method="post" action="{% url 'project-list' %}">
       {% csrf_token %}
-      <input type="hidden" name="ci_provider" value="{{ current_provider }}">
       <div class="project-form__grid">
+        <label class="project-form__field">
+          <span class="project-form__label">CI Provider</span>
+          {{ registrationForm.ci_provider }}
+          {% if registrationForm.ci_provider.errors %}<span class="project-form__error">{{ registrationForm.ci_provider.errors|join:", " }}</span>{% endif %}
+        </label>
         <label class="project-form__field">
           <span class="project-form__label">Jira Project Key</span>
           {{ registrationForm.jira_project_key }}
@@ -188,6 +191,13 @@
           {% for repository in repositoryRows %}
           <div class="repeater-card" data-repository-row>
             <div class="repeater-card__grid">
+              <label class="project-form__field">
+                <span class="project-form__label">저장소 타입</span>
+                <select name="repo_type">
+                  <option value="bitbucket"{% if repository.repoType|default:'bitbucket' == 'bitbucket' %} selected{% endif %}>bitbucket</option>
+                  <option value="git"{% if repository.repoType == 'git' %} selected{% endif %}>git</option>
+                </select>
+              </label>
               <label class="project-form__field">
                 <span class="project-form__label">저장소 Slug</span>
                 <input type="text" name="repo_slug" value="{{ repository.repoSlug }}" placeholder="sample-app-api" list="repository-slug-options">
@@ -232,11 +242,18 @@
               </label>
               <label class="project-form__field">
                 <span class="project-form__label">Build ID</span>
-                <input type="text" name="build_id" value="{{ build.buildId }}" placeholder="ops-api">
+                <input type="text" name="build_id" value="{{ build.buildId }}" placeholder="ops-api" data-build-id-input data-bamboo-label="Build ID" data-jenkins-label="Job Key" data-bamboo-placeholder="ops-api" data-jenkins-placeholder="sample-web-job">
               </label>
               <label class="project-form__field">
                 <span class="project-form__label">Plan Key</span>
-                <input type="text" name="plan_key" value="{{ build.planKey }}" placeholder="OPSAPI">
+                <input type="text" name="plan_key" value="{{ build.planKey }}" placeholder="OPSAPI" data-plan-key-input data-bamboo-label="Plan Key" data-jenkins-label="Job Path" data-bamboo-placeholder="OPSAPI" data-jenkins-placeholder="folder/sample-web-job">
+              </label>
+              <label class="project-form__field" data-bamboo-only-field>
+                <span class="project-form__label">Bamboo 저장소 연결</span>
+                <select name="repository_linkage_mode">
+                  <option value="linked"{% if build.repositoryLinkageMode|default:'linked' == 'linked' %} selected{% endif %}>linked</option>
+                  <option value="create_if_missing"{% if build.repositoryLinkageMode == 'create_if_missing' %} selected{% endif %}>create_if_missing</option>
+                </select>
               </label>
               <label class="project-form__field">
                 <span class="project-form__label">연결 저장소 Slug</span>
@@ -281,6 +298,13 @@
   <div class="repeater-card" data-repository-row>
     <div class="repeater-card__grid">
       <label class="project-form__field">
+        <span class="project-form__label">저장소 타입</span>
+        <select name="repo_type">
+          <option value="bitbucket" selected>bitbucket</option>
+          <option value="git">git</option>
+        </select>
+      </label>
+      <label class="project-form__field">
         <span class="project-form__label">저장소 Slug</span>
         <input type="text" name="repo_slug" placeholder="sample-app-api" list="repository-slug-options">
       </label>
@@ -313,11 +337,18 @@
       </label>
       <label class="project-form__field">
         <span class="project-form__label">Build ID</span>
-        <input type="text" name="build_id" placeholder="ops-api">
+        <input type="text" name="build_id" placeholder="ops-api" data-build-id-input data-bamboo-label="Build ID" data-jenkins-label="Job Key" data-bamboo-placeholder="ops-api" data-jenkins-placeholder="sample-web-job">
       </label>
       <label class="project-form__field">
         <span class="project-form__label">Plan Key</span>
-        <input type="text" name="plan_key" placeholder="OPSAPI">
+        <input type="text" name="plan_key" placeholder="OPSAPI" data-plan-key-input data-bamboo-label="Plan Key" data-jenkins-label="Job Path" data-bamboo-placeholder="OPSAPI" data-jenkins-placeholder="folder/sample-web-job">
+      </label>
+      <label class="project-form__field" data-bamboo-only-field>
+        <span class="project-form__label">Bamboo 저장소 연결</span>
+        <select name="repository_linkage_mode">
+          <option value="linked" selected>linked</option>
+          <option value="create_if_missing">create_if_missing</option>
+        </select>
       </label>
       <label class="project-form__field">
         <span class="project-form__label">연결 저장소 Slug</span>
@@ -421,6 +452,7 @@
 
 <script>
   (function () {
+    const providerInput = document.querySelector('select[name="ci_provider"]');
     const registrationPanel = document.getElementById("project-registration-panel");
     const toggleRegistrationButton = document.querySelector("[data-toggle-registration]");
     const scrollLinks = document.querySelectorAll("[data-scroll-link]");
@@ -431,6 +463,24 @@
     const addRepositoryButton = document.querySelector("[data-add-repository]");
     const addBuildButton = document.querySelector("[data-add-build]");
     const registrationForm = registrationPanel ? registrationPanel.querySelector(".project-form") : null;
+
+    function syncProviderLabels(root) {
+      const provider = providerInput ? providerInput.value || "bamboo" : "bamboo";
+      (root || document).querySelectorAll("[data-build-id-input], [data-plan-key-input]").forEach(function (input) {
+        const field = input.closest(".project-form__field");
+        const label = field ? field.querySelector(".project-form__label") : null;
+        if (label) {
+          label.textContent = provider === "jenkins" ? input.dataset.jenkinsLabel : input.dataset.bambooLabel;
+        }
+        input.setAttribute(
+          "placeholder",
+          provider === "jenkins" ? input.dataset.jenkinsPlaceholder : input.dataset.bambooPlaceholder
+        );
+      });
+      (root || document).querySelectorAll("[data-bamboo-only-field]").forEach(function (field) {
+        field.hidden = provider === "jenkins";
+      });
+    }
 
     function scrollWithHeaderOffset(target) {
       if (!target) {
@@ -484,6 +534,7 @@
       if (window.BambooUiEnhanceSuggestionInputs) {
         window.BambooUiEnhanceSuggestionInputs(registrationPanel);
       }
+      syncProviderLabels(registrationPanel);
     }
 
     function syncDashboardHeights() {
@@ -610,9 +661,16 @@
     if (buildTemplate && buildStack && addBuildButton) {
       addBuildButton.addEventListener("click", function () {
         buildStack.appendChild(buildTemplate.content.cloneNode(true));
+        syncProviderLabels(buildStack);
         if (window.BambooUiEnhanceSuggestionInputs) {
           window.BambooUiEnhanceSuggestionInputs(buildStack);
         }
+      });
+    }
+
+    if (providerInput) {
+      providerInput.addEventListener("change", function () {
+        syncProviderLabels(registrationPanel || document);
       });
     }
 
@@ -621,6 +679,7 @@
     if (window.BambooUiEnhanceSuggestionInputs) {
       window.BambooUiEnhanceSuggestionInputs(document);
     }
+    syncProviderLabels(registrationPanel || document);
     syncDashboardHeights();
     window.addEventListener("load", syncDashboardHeights);
     window.addEventListener("resize", syncDashboardHeights);

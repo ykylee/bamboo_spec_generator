@@ -454,7 +454,11 @@ def _build_definition_payload_from_registration(*, bamboo_unit: BambooBuildUnit 
         "language": language or "python",
         "compiler": compiler or "script",
         "repository": {
-            "provider": getattr(repository, "repo_type", "bitbucket") if repository else "bitbucket",
+            "provider": (
+                (getattr(repository, "repository_provider", "") or getattr(repository, "repo_type", "bitbucket"))
+                if repository
+                else "bitbucket"
+            ),
             "projectKey": getattr(repository, "repo_key", "") if repository else getattr(project, "bitbucket_project_key", ""),
             "repoSlug": repository.repo_slug if repository else "",
             "linkageMode": linkage_mode,

@@ -63,25 +63,23 @@ def project_list(request):
     registration_open = request.GET.get("register", "").lower() in {"1", "true", "open"}
 
     if request.method == "POST":
-        registration_form = ProjectRegistrationForm(request.POST)
+        post_data = request.POST.copy()
+        if not post_data.get("ci_provider", "").strip():
+            post_data["ci_provider"] = Project.PROVIDER_BAMBOO
+        registration_form = ProjectRegistrationForm(post_data)
         repository_rows = _extract_repository_rows(request.POST)
         build_rows = _extract_build_rows(request.POST)
         registration_open = True
         if registration_form.is_valid():
             try:
                 payload = _build_project_payload(registration_form, repository_rows, build_rows)
-                payload["ciProvider"] = _current_ci_provider(request)
                 payload = create_project(payload)
             except ValueError as exc:
                 registration_error = str(exc)
             else:
-                return _redirect_with_provider(
-                    redirect("project-detail", jira_project_key=payload["jiraProjectKey"]),
-                    _current_ci_provider(request),
-                )
+                return redirect("project-detail", jira_project_key=payload["jiraProjectKey"])
 
-    current_provider = _current_ci_provider(request)
-    all_projects = list_project_summaries(ci_provider=current_provider)
+    all_projects = list_project_summaries()
     projects = all_projects
     query = request.GET.get("q", "").strip().lower()
     status_filter = request.GET.get("status", "all").strip().lower()
@@ -131,7 +129,7 @@ def project_list(request):
 
 
 def build_plan_list(request):
-    plans = list_build_plan_summaries(ci_provider=_current_ci_provider(request))
+    plans = list_build_plan_summaries()
     query = request.GET.get("q", "").strip().lower()
     status_filter = request.GET.get("status", "all").strip().lower()
 
@@ -362,7 +360,7 @@ def jenkins_settings(request):
 
 
 def project_detail(request, jira_project_key: str):
-    project = get_project_detail(jira_project_key, ci_provider=_current_ci_provider(request))
+    project = get_project_detail(jira_project_key)
     if project is None:
         return render(request, "ui/project_detail.html", {"project": None})
 
@@ -384,33 +382,27 @@ def project_detail(request, jira_project_key: str):
             if edit_form.is_valid():
                 try:
                     payload = _build_project_metadata_payload(project, edit_form)
-                    project = update_project(jira_project_key, payload, ci_provider=_current_ci_provider(request))
+                    project = update_project(jira_project_key, payload, ci_provider=project["ciProvider"])
                 except ValueError as exc:
                     edit_error = str(exc)
                 else:
                     if project is None:
                         return render(request, "ui/project_detail.html", {"project": None})
-                    return _redirect_with_provider(
-                        redirect("project-detail", jira_project_key=project["jiraProjectKey"]),
-                        _current_ci_provider(request),
-                    )
+                    return redirect("project-detail", jira_project_key=project["jiraProjectKey"])
         elif form_kind == "repository":
             repository_add_form = RepositoryMetadataForm(request.POST)
             repository_add_open = True
             if repository_add_form.is_valid():
                 try:
                     payload = _build_repository_append_payload(project, repository_add_form)
-                    update_project(jira_project_key, payload, ci_provider=_current_ci_provider(request))
+                    update_project(jira_project_key, payload, ci_provider=project["ciProvider"])
                 except ValueError as exc:
                     repository_add_error = str(exc)
                 else:
-                    return _redirect_with_provider(
-                        redirect(
-                            "project-repository-detail",
-                            jira_project_key=jira_project_key,
-                            repo_slug=repository_add_form.cleaned_data["repo_slug"].strip(),
-                        ),
-                        _current_ci_provider(request),
+                    return redirect(
+                        "project-repository-detail",
+                        jira_project_key=jira_project_key,
+                        repo_slug=repository_add_form.cleaned_data["repo_slug"].strip(),
                     )
         elif form_kind == "build":
             build_add_form = BuildMetadataForm(request.POST)
@@ -418,17 +410,20 @@ def project_detail(request, jira_project_key: str):
             if build_add_form.is_valid():
                 try:
                     payload = _build_plan_append_payload(project, build_add_form)
-                    update_project(jira_project_key, payload, ci_provider=_current_ci_provider(request))
+                    update_project(jira_project_key, payload, ci_provider=project["ciProvider"])
                 except ValueError as exc:
                     build_add_error = str(exc)
                 else:
-                    return _redirect_with_provider(
-                        redirect(
-                            "project-build-detail",
+                    if project["ciProvider"] == Project.PROVIDER_JENKINS:
+                        return redirect(
+                            "project-jenkins-build-detail",
                             jira_project_key=jira_project_key,
-                            plan_key=build_add_form.cleaned_data["plan_key"].strip(),
-                        ),
-                        _current_ci_provider(request),
+                            job_path=build_add_form.cleaned_data["plan_key"].strip(),
+                        )
+                    return redirect(
+                        "project-build-detail",
+                        jira_project_key=jira_project_key,
+                        plan_key=build_add_form.cleaned_data["plan_key"].strip(),
                     )
 
     context = {
@@ -445,12 +440,13 @@ def project_detail(request, jira_project_key: str):
         "registrationSuggestions": _build_registration_suggestions(),
         "navProjectSearchItems": _build_nav_project_search_items(list_project_summaries()),
         "repositoryEntries": _build_repository_entries(project),
+        "current_provider": project["ciProvider"],
     }
     return render(request, "ui/project_detail.html", context)
 
 
 def project_repository_detail(request, jira_project_key: str, repo_slug: str):
-    project = get_project_detail(jira_project_key, ci_provider=_current_ci_provider(request))
+    project = get_project_detail(jira_project_key)
     if project is None:
         return render(request, "ui/repository_detail.html", {"project": None, "repository": None})
 
@@ -468,12 +464,13 @@ def project_repository_detail(request, jira_project_key: str, repo_slug: str):
         "repository": repository,
         "linkedBuilds": linked_builds,
         "navProjectSearchItems": _build_nav_project_search_items(list_project_summaries()),
+        "current_provider": project["ciProvider"],
     }
     return render(request, "ui/repository_detail.html", context)
 
 
 def project_build_detail(request, jira_project_key: str, plan_key: str):
-    project = get_project_detail(jira_project_key, ci_provider=_current_ci_provider(request))
+    project = get_project_detail(jira_project_key, ci_provider=Project.PROVIDER_BAMBOO)
     if project is None:
         return render(request, "ui/build_detail.html", {"project": None, "build": None})
 
@@ -567,7 +564,7 @@ def project_build_detail(request, jira_project_key: str, plan_key: str):
                 bamboo_error = "Bamboo 실행 입력값을 다시 확인해 주세요."
                 bamboo_detail = bamboo_run_form.errors.as_text()
 
-    project = get_project_detail(jira_project_key, ci_provider=_current_ci_provider(request))
+    project = get_project_detail(jira_project_key, ci_provider=Project.PROVIDER_BAMBOO)
     if project is None:
         return render(request, "ui/build_detail.html", {"project": None, "build": None})
 
@@ -609,12 +606,13 @@ def project_build_detail(request, jira_project_key: str, plan_key: str):
         "bambooPublishExecutions": list_publish_executions_by_plan_key(plan_key),
         "registrationSuggestions": _build_registration_suggestions(),
         "navProjectSearchItems": _build_nav_project_search_items(list_project_summaries()),
+        "current_provider": project["ciProvider"],
     }
     return render(request, "ui/build_detail.html", context)
 
 
 def project_bamboo_plan_detail(request, jira_project_key: str, plan_key: str):
-    project = get_project_detail(jira_project_key, ci_provider=_current_ci_provider(request))
+    project = get_project_detail(jira_project_key, ci_provider=Project.PROVIDER_BAMBOO)
     if project is None:
         return render(request, "ui/bamboo_plan_detail.html", {"project": None, "build": None, "bambooPlan": None})
 
@@ -646,6 +644,7 @@ def project_bamboo_plan_detail(request, jira_project_key: str, plan_key: str):
         ),
         "bambooError": bamboo_error,
         "navProjectSearchItems": _build_nav_project_search_items(list_project_summaries()),
+        "current_provider": project["ciProvider"],
     }
     return render(request, "ui/bamboo_plan_detail.html", context)
 
@@ -678,6 +677,7 @@ def project_jenkins_build_detail(request, jira_project_key: str, job_path: str):
         "jenkinsError": jenkins_error,
         "executions": executions,
         "navProjectSearchItems": _build_nav_project_search_items(list_project_summaries()),
+        "current_provider": project["ciProvider"],
     }
     return render(request, "ui/jenkins_build_detail.html", context)
 
@@ -707,6 +707,7 @@ def project_jenkins_build_info_detail(request, jira_project_key: str, job_path: 
         "buildDetails": build_details,
         "jenkinsError": jenkins_error,
         "navProjectSearchItems": _build_nav_project_search_items(list_project_summaries()),
+        "current_provider": project["ciProvider"],
     }
     return render(request, "ui/jenkins_build_detail.html", context)
 
@@ -716,7 +717,7 @@ def project_build_info_list(request, jira_project_key: str, plan_key: str):
 
 
 def project_build_info_detail(request, jira_project_key: str, plan_key: str, build_key: str):
-    project = get_project_detail(jira_project_key, ci_provider=_current_ci_provider(request))
+    project = get_project_detail(jira_project_key, ci_provider=Project.PROVIDER_BAMBOO)
     if project is None:
         return render(request, "ui/build_info_detail.html", {"project": None, "build": None, "buildInfo": None})
 
@@ -767,6 +768,7 @@ def project_build_info_detail(request, jira_project_key: str, plan_key: str, bui
         "buildInfoError": error,
         "executionGroups": _list_execution_groups(plan_key),
         "navProjectSearchItems": _build_nav_project_search_items(list_project_summaries()),
+        "current_provider": project["ciProvider"],
     }
     return render(request, "ui/build_info_detail.html", context)
 
@@ -780,19 +782,6 @@ def _build_pagination_base_query(request) -> str:
     return f"{encoded}&"
 
 
-def _current_ci_provider(request) -> str:
-    value = (request.GET.get("provider") or request.POST.get("ci_provider") or "").strip().lower()
-    return value or Project.PROVIDER_BAMBOO
-
-
-def _redirect_with_provider(response, provider: str):
-    if provider == Project.PROVIDER_BAMBOO:
-        return response
-    separator = "&" if "?" in response.url else "?"
-    response["Location"] = f"{response.url}{separator}provider={provider}"
-    return response
-
-
 def _is_partial_project_list_request(request) -> bool:
     return (
         request.method == "GET"
@@ -802,26 +791,44 @@ def _is_partial_project_list_request(request) -> bool:
 
 
 def _build_project_payload(registration_form: ProjectRegistrationForm, repository_rows: list[dict], build_rows: list[dict]) -> dict:
+    ci_provider = (
+        registration_form.cleaned_data.get("ci_provider", Project.PROVIDER_BAMBOO) or Project.PROVIDER_BAMBOO
+    ).strip()
+    def _clean(row: dict, key: str, default: str = "") -> str:
+        return (row.get(key, default) or "").strip()
+
     repositories = [
         {
-            "repoSlug": row["repoSlug"].strip(),
-            "coverityProject": row["coverityProject"].strip(),
-            "coverityStream": row["coverityStream"].strip(),
+            "repoType": _clean(row, "repoType", Repository.TYPE_BITBUCKET),
+            "repositoryType": Repository.infer_repository_type(
+                legacy_repo_type=_clean(row, "repoType", Repository.TYPE_BITBUCKET)
+            ),
+            "repositoryProvider": Repository.infer_repository_provider(
+                legacy_repo_type=_clean(row, "repoType", Repository.TYPE_BITBUCKET)
+            ),
+            "repoSlug": _clean(row, "repoSlug"),
+            "coverityProject": _clean(row, "coverityProject"),
+            "coverityStream": _clean(row, "coverityStream"),
         }
         for row in repository_rows
-        if any(value.strip() for value in row.values())
+        if any((value or "").strip() for value in row.values())
     ]
     builds = [
         {
-            "buildName": row["buildName"].strip(),
-            "buildType": row["buildType"].strip(),
-            "runtimeStack": row["runtimeStack"].strip(),
-            "buildId": row["buildId"].strip(),
-            "planKey": row["planKey"].strip(),
-            "repositorySlug": row["repositorySlug"].strip(),
+            "buildName": _clean(row, "buildName"),
+            "buildType": _clean(row, "buildType"),
+            "runtimeStack": _clean(row, "runtimeStack"),
+            "buildId": _clean(row, "buildId"),
+            "planKey": _clean(row, "planKey"),
+            "repositorySlug": _clean(row, "repositorySlug"),
+            "providerDetails": (
+                {"repositoryLinkageMode": _clean(row, "repositoryLinkageMode", "linked") or "linked"}
+                if ci_provider == Project.PROVIDER_BAMBOO
+                else {}
+            ),
         }
         for row in build_rows
-        if any(value.strip() for value in row.values())
+        if any((value or "").strip() for value in row.values())
     ]
     if not repositories:
         raise ValueError("최소 1개 저장소를 입력해 주세요.")
@@ -837,6 +844,7 @@ def _build_project_payload(registration_form: ProjectRegistrationForm, repositor
         repository["isRepresentative"] = repository["repoSlug"] == representative_repo_slug
 
     return {
+        "ciProvider": ci_provider,
         "jiraProjectKey": registration_form.cleaned_data["jira_project_key"].strip(),
         "bitbucketProjectKey": registration_form.cleaned_data["bitbucket_project_key"].strip(),
         "representativeRepoSlug": representative_repo_slug,
@@ -846,14 +854,16 @@ def _build_project_payload(registration_form: ProjectRegistrationForm, repositor
 
 
 def _extract_repository_rows(post_data) -> list[dict]:
+    repo_types = post_data.getlist("repo_type")
     repo_slugs = post_data.getlist("repo_slug")
     coverity_projects = post_data.getlist("coverity_project")
     coverity_streams = post_data.getlist("coverity_stream")
-    row_count = max(len(repo_slugs), len(coverity_projects), len(coverity_streams), 1)
+    row_count = max(len(repo_types), len(repo_slugs), len(coverity_projects), len(coverity_streams), 1)
     rows = []
     for index in range(row_count):
         rows.append(
             {
+                "repoType": repo_types[index] if index < len(repo_types) else "",
                 "repoSlug": repo_slugs[index] if index < len(repo_slugs) else "",
                 "coverityProject": coverity_projects[index] if index < len(coverity_projects) else "",
                 "coverityStream": coverity_streams[index] if index < len(coverity_streams) else "",
@@ -868,6 +878,7 @@ def _extract_build_rows(post_data) -> list[dict]:
     runtime_stacks = post_data.getlist("runtime_stack")
     build_ids = post_data.getlist("build_id")
     plan_keys = post_data.getlist("plan_key")
+    repository_linkage_modes = post_data.getlist("repository_linkage_mode")
     repository_slugs = post_data.getlist("build_repository_slug")
     row_count = max(
         len(build_names),
@@ -875,6 +886,7 @@ def _extract_build_rows(post_data) -> list[dict]:
         len(runtime_stacks),
         len(build_ids),
         len(plan_keys),
+        len(repository_linkage_modes),
         len(repository_slugs),
         1,
     )
@@ -887,6 +899,9 @@ def _extract_build_rows(post_data) -> list[dict]:
                 "runtimeStack": runtime_stacks[index] if index < len(runtime_stacks) else "",
                 "buildId": build_ids[index] if index < len(build_ids) else "",
                 "planKey": plan_keys[index] if index < len(plan_keys) else "",
+                "repositoryLinkageMode": (
+                    repository_linkage_modes[index] if index < len(repository_linkage_modes) else ""
+                ),
                 "repositorySlug": repository_slugs[index] if index < len(repository_slugs) else "",
             }
         )
@@ -894,7 +909,12 @@ def _extract_build_rows(post_data) -> list[dict]:
 
 
 def _blank_repository_row() -> dict:
-    return {"repoSlug": "", "coverityProject": "", "coverityStream": ""}
+    return {
+        "repoType": Repository.TYPE_BITBUCKET,
+        "repoSlug": "",
+        "coverityProject": "",
+        "coverityStream": "",
+    }
 
 
 def _blank_build_row() -> dict:
@@ -904,6 +924,7 @@ def _blank_build_row() -> dict:
         "runtimeStack": "",
         "buildId": "",
         "planKey": "",
+        "repositoryLinkageMode": "linked",
         "repositorySlug": "",
     }
 
@@ -1293,6 +1314,15 @@ def _build_project_payload_from_detail(project: dict) -> dict:
         "representativeRepoSlug": project["representativeRepoSlug"],
         "repositories": [
             {
+                "repositoryType": repository.get(
+                    "repositoryType",
+                    Repository.infer_repository_type(legacy_repo_type=repository.get("repoType", Repository.TYPE_BITBUCKET)),
+                ),
+                "repositoryProvider": repository.get(
+                    "repositoryProvider",
+                    Repository.infer_repository_provider(legacy_repo_type=repository.get("repoType", Repository.TYPE_BITBUCKET)),
+                ),
+                "repoType": repository.get("repoType", Repository.TYPE_BITBUCKET),
                 "repoSlug": repository["repoSlug"],
                 "coverityProject": repository["coverityProject"],
                 "coverityStream": repository["coverityStream"],
@@ -1338,6 +1368,9 @@ def _build_repository_append_payload(project: dict, add_form: RepositoryMetadata
     payload = _build_project_payload_from_detail(project)
     payload["repositories"].append(
         {
+            "repoType": add_form.cleaned_data["repo_type"].strip(),
+            "repositoryType": Repository.infer_repository_type(legacy_repo_type=add_form.cleaned_data["repo_type"].strip()),
+            "repositoryProvider": Repository.infer_repository_provider(legacy_repo_type=add_form.cleaned_data["repo_type"].strip()),
             "repoSlug": add_form.cleaned_data["repo_slug"].strip(),
             "coverityProject": add_form.cleaned_data["coverity_project"].strip(),
             "coverityStream": add_form.cleaned_data["coverity_stream"].strip(),
@@ -1349,6 +1382,9 @@ def _build_repository_append_payload(project: dict, add_form: RepositoryMetadata
 
 def _build_plan_append_payload(project: dict, add_form: BuildMetadataForm) -> dict:
     payload = _build_project_payload_from_detail(project)
+    provider_details = {}
+    if project.get("ciProvider") == Project.PROVIDER_BAMBOO:
+        provider_details["repositoryLinkageMode"] = add_form.cleaned_data["repository_linkage_mode"].strip() or "linked"
     payload["builds"].append(
         {
             "buildName": add_form.cleaned_data["build_name"].strip(),
@@ -1357,6 +1393,7 @@ def _build_plan_append_payload(project: dict, add_form: BuildMetadataForm) -> di
             "buildId": add_form.cleaned_data["build_id"].strip(),
             "planKey": add_form.cleaned_data["plan_key"].strip(),
             "repositorySlug": add_form.cleaned_data["build_repository_slug"].strip(),
+            "providerDetails": provider_details,
         }
     )
     return payload

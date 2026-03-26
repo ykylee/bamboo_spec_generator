@@ -2,8 +2,16 @@ from __future__ import annotations
 
 from django import forms
 
+from apps.buildmeta.models import Project, Repository
+
 
 class ProjectRegistrationForm(forms.Form):
+    ci_provider = forms.ChoiceField(
+        label="CI Provider",
+        choices=Project.PROVIDER_CHOICES,
+        initial=Project.PROVIDER_BAMBOO,
+        required=False,
+    )
     jira_project_key = forms.CharField(
         label="Jira Project Key",
         max_length=64,
@@ -35,6 +43,12 @@ class ProjectMetadataForm(forms.Form):
 
 
 class RepositoryMetadataForm(forms.Form):
+    repo_type = forms.ChoiceField(
+        label="저장소 타입",
+        choices=Repository.TYPE_CHOICES,
+        initial=Repository.TYPE_BITBUCKET,
+        required=False,
+    )
     repo_slug = forms.CharField(
         label="저장소 Slug",
         max_length=255,
@@ -53,13 +67,28 @@ class RepositoryMetadataForm(forms.Form):
         widget=forms.TextInput(attrs={"list": "coverity-stream-options"}),
     )
 
+    def clean_repo_type(self) -> str:
+        value = (self.cleaned_data.get("repo_type") or "").strip()
+        return value or Repository.TYPE_BITBUCKET
+
 
 class BuildMetadataForm(forms.Form):
+    REPOSITORY_LINKAGE_MODE_CHOICES = [
+        ("linked", "linked"),
+        ("create_if_missing", "create_if_missing"),
+    ]
+
     build_name = forms.CharField(label="빌드 이름", max_length=255)
     build_type = forms.CharField(label="Build Type", max_length=128)
     runtime_stack = forms.CharField(label="Runtime Stack", max_length=128, required=False)
     build_id = forms.CharField(label="Build ID", max_length=255)
     plan_key = forms.CharField(label="Plan Key", max_length=64)
+    repository_linkage_mode = forms.ChoiceField(
+        label="Bamboo 저장소 연결 방식",
+        choices=REPOSITORY_LINKAGE_MODE_CHOICES,
+        required=False,
+        initial="linked",
+    )
     build_repository_slug = forms.CharField(
         label="연결 저장소 Slug",
         max_length=255,

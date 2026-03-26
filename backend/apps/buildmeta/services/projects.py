@@ -126,6 +126,7 @@ def _build_units(data: dict) -> list[dict]:
                 "providerDetails": {
                     "planKey": plan_key,
                     "buildId": build_id,
+                    "repositoryLinkageMode": provider_details.get("repositoryLinkageMode") or build.get("repositoryLinkageMode", ""),
                 },
             }
         )
@@ -185,7 +186,9 @@ def _upsert_repositories(project: Project, repositories: list[dict], *, default_
             project=project,
             repo_slug=_repo_slug(repository),
             defaults={
-                "repo_type": (_value(repository, "repoType") or Repository.TYPE_BITBUCKET).strip() or Repository.TYPE_BITBUCKET,
+                "repository_type": _repository_type(repository),
+                "repository_provider": _repository_provider(repository),
+                "repo_type": _legacy_repo_type(repository),
                 "repo_key": (_value(repository, "repoKey") or _value(repository, "bitbucketProjectKey") or default_repo_key).strip(),
                 "clone_url": _value(repository, "cloneUrl"),
                 "default_branch": _value(repository, "defaultBranch"),
@@ -325,6 +328,29 @@ def _prune_removed_repositories(project: Project, repositories: list[dict]) -> N
 
 def _repo_slug(repository: dict) -> str:
     return _value(repository, "repoSlug").strip()
+
+
+def _repository_type(repository: dict) -> str:
+    return Repository.infer_repository_type(
+        repository_type=_value(repository, "repositoryType"),
+        repository_provider=_value(repository, "repositoryProvider"),
+        legacy_repo_type=_value(repository, "repoType"),
+    )
+
+
+def _repository_provider(repository: dict) -> str:
+    return Repository.infer_repository_provider(
+        repository_provider=_value(repository, "repositoryProvider"),
+        legacy_repo_type=_value(repository, "repoType"),
+        repository_type=_value(repository, "repositoryType"),
+    )
+
+
+def _legacy_repo_type(repository: dict) -> str:
+    return Repository.to_legacy_repo_type(
+        repository_provider=_repository_provider(repository),
+        repository_type=_repository_type(repository),
+    )
 
 
 def _value(data: dict, key: str) -> str:

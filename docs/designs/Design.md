@@ -27,6 +27,7 @@
   - [CI/CD 공통 백엔드 모델 일반화 검토](./detailed_designs/backend_model_generalization_review.md)
   - [BuildUnit 중심 백엔드 모델 초안](./detailed_designs/buildunit_backend_model_draft.md)
   - [BuildUnit 중심 백엔드 모델 ERD](./detailed_designs/buildunit_backend_model_erd.md)
+  - [저장소 연결 지원 방식 설계](./repository_connection_support.md)
 - 현재 추가된 결정사항 문서:
   - [다중 CI 콘솔 결정사항](./detailed_designs/multi_ci_console_decisions.md)
 - Jenkins 등록/모드 전환 상세 설계는 아직 별도 문서가 없으며 후속 상세 설계 범위다.
@@ -233,11 +234,11 @@ scripts/plan_tasks/
 
 ## 7. 공통 CI 콘솔 UI 설계 방향
 
-### 모드 전환
+### 뷰 선택
 
-- 상단 주요 네비게이션에 `Bamboo 관리`, `Jenkins 관리` 전환 컨트롤을 둔다.
-- 현재 모드는 URL, 세션, 또는 동등한 상태 모델로 일관되게 유지한다.
-- 모드 전환 후에도 메뉴 구조와 화면 배치는 가능한 범위에서 동일하게 유지한다.
+- 전역 `Bamboo/Jenkins` 토글은 두지 않는다.
+- 프로젝트와 빌드 단위가 가진 `ci_provider`를 기준으로 상세 뷰를 자동 선택한다.
+- 목록과 검색 결과는 전체 프로젝트를 함께 보여주되, 상세 링크는 연결된 CI 유형에 맞는 화면으로 이동한다.
 
 ### 테마
 
@@ -445,8 +446,10 @@ scripts/plan_tasks/
 
 - `Project`가 상위 집계 루트다.
 - `ProjectRepository`는 프로젝트에 속한 여러 저장소를 표현한다.
+- 프로젝트 등록/수정 UI는 각 저장소에 대해 `repoType`을 직접 선택할 수 있어야 한다.
 - `BuildUnit` (프로젝트 빌드)는 프로젝트 아래 여러 빌드 항목을 표현한다.
 - `BuildUnit`은 Bamboo 플랜 단위의 대표 엔터티다.
+- Bamboo 프로젝트 등록/수정 UI는 빌드 단위별 `repository_linkage_mode`를 `linked` 또는 `create_if_missing`로 저장할 수 있어야 한다.
 - `BambooBuildInfo`는 플랜 아래 실제 생성 단위를 세분화하는 빌드 상세 메타데이터다.
 - `BuildUnitDefinition`은 생성기 입력 스냅샷을 나타낸다.
 - `BuildVersion`은 버전 단위 대표 상태를 가진다.

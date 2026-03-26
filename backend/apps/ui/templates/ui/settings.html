@@ -29,7 +29,6 @@
     <p class="panel__body">Bamboo 및 Jenkins 서버 연결 정보를 설정합니다.</p>
     <form class="project-form" method="post">
       {% csrf_token %}
-      <input type="hidden" name="ci_provider" value="{{ current_provider }}">
       <input type="hidden" name="form_kind" value="system_settings">
       <div class="project-form__grid">
         <label class="project-form__field project-form__field--span-3">
@@ -43,7 +42,6 @@
     </form>
     <form class="project-form" method="post">
       {% csrf_token %}
-      <input type="hidden" name="ci_provider" value="{{ current_provider }}">
       <input type="hidden" name="form_kind" value="jenkins_settings">
       <div class="project-form__grid">
         <label class="project-form__field project-form__field--span-3">
@@ -69,7 +67,6 @@
     <p class="panel__body">Coverity Connect 정적 분석 도구 연결 정보를 설정합니다.</p>
     <form class="project-form" method="post">
       {% csrf_token %}
-      <input type="hidden" name="ci_provider" value="{{ current_provider }}">
       <input type="hidden" name="form_kind" value="system_settings">
       <div class="project-form__grid">
         <label class="project-form__field project-form__field--span-3">
@@ -99,7 +96,6 @@
     <p class="panel__body">Git 저장소 클론 및 연결 모드를 설정합니다.</p>
     <form class="project-form" method="post">
       {% csrf_token %}
-      <input type="hidden" name="ci_provider" value="{{ current_provider }}">
       <input type="hidden" name="form_kind" value="system_settings">
       <div class="project-form__grid">
         <label class="project-form__field">
@@ -185,7 +181,6 @@
     <p class="panel__body">DB에 등록된 메타데이터를 기준으로 BuildInfo 초안 데이터를 다시 생성합니다.</p>
     <form method="post">
       {% csrf_token %}
-      <input type="hidden" name="ci_provider" value="{{ current_provider }}">
       <input type="hidden" name="form_kind" value="init_specs_drafts">
       <button class="action-button" type="submit">샘플 Draft 재초기화</button>
     </form>
