@@ -24,6 +24,7 @@ from apps.buildmeta.services import (
     JenkinsOperationError,
     collect_jenkins_system_status,
     create_project,
+    configure_jenkins_job,
     get_bamboo_plan_details,
     get_bamboo_plan_status,
     get_bamboo_system_settings,
@@ -32,6 +33,7 @@ from apps.buildmeta.services import (
     get_jenkins_job_details,
     get_jenkins_job_status,
     get_jenkins_system_settings,
+    get_repository_system_settings,
     initialize_specs_draft_data,
     initialize_specs_draft_for_plan,
     publish_bamboo_specs,
@@ -180,6 +182,7 @@ def settings(request):
     coverity_payload = get_coverity_system_settings()
     bamboo_settings = get_bamboo_system_settings()
     jenkins_payload = get_jenkins_system_settings()
+    repository_settings = get_repository_system_settings()
 
     # フォーム初期化
     coverity_form = CoveritySystemSettingsForm(
@@ -188,7 +191,14 @@ def settings(request):
             "on_new_cert": coverity_payload["onNewCert"],
             "commit_enabled": coverity_payload["commitEnabled"],
             "repository_linkage_mode": coverity_payload["repositoryLinkageMode"],
-            "git_clone_url_template": coverity_payload["gitCloneUrlTemplate"],
+            "git_clone_url_template": repository_settings["gitCloneUrlTemplate"],
+            "svn_checkout_url_template": repository_settings["svnCheckoutUrlTemplate"],
+            "github_base_url": repository_settings["githubBaseUrl"],
+            "github_token": repository_settings["githubToken"],
+            "bitbucket_base_url": repository_settings["bitbucketBaseUrl"],
+            "bitbucket_token": repository_settings["bitbucketToken"],
+            "gitea_base_url": repository_settings["giteaBaseUrl"],
+            "gitea_token": repository_settings["giteaToken"],
             "bamboo_server_url": bamboo_settings["serverUrl"],
         }
     )
@@ -208,6 +218,13 @@ def settings(request):
                 set_system_setting(key="coverity.connect.on_new_cert", value=coverity_form.cleaned_data["on_new_cert"].strip() or "trust", description="Coverity on-new-cert policy")
                 set_system_setting(key="coverity.commit.enabled", value="true" if coverity_form.cleaned_data["commit_enabled"] else "false", description="Coverity commit enabled flag")
                 set_system_setting(key="repository.git.clone_url_template", value=coverity_form.cleaned_data["git_clone_url_template"].strip(), description="Git clone URL template")
+                set_system_setting(key="repository.svn.checkout_url_template", value=coverity_form.cleaned_data["svn_checkout_url_template"].strip(), description="SVN checkout URL template")
+                set_system_setting(key="repository.github.base_url", value=coverity_form.cleaned_data["github_base_url"].strip(), description="GitHub base URL")
+                set_system_setting(key="repository.github.token", value=coverity_form.cleaned_data["github_token"].strip(), description="GitHub token")
+                set_system_setting(key="repository.bitbucket.base_url", value=coverity_form.cleaned_data["bitbucket_base_url"].strip(), description="Bitbucket base URL")
+                set_system_setting(key="repository.bitbucket.token", value=coverity_form.cleaned_data["bitbucket_token"].strip(), description="Bitbucket token")
+                set_system_setting(key="repository.gitea.base_url", value=coverity_form.cleaned_data["gitea_base_url"].strip(), description="Gitea base URL")
+                set_system_setting(key="repository.gitea.token", value=coverity_form.cleaned_data["gitea_token"].strip(), description="Gitea token")
                 set_system_setting(key="repository.linkage_mode", value=coverity_form.cleaned_data["repository_linkage_mode"].strip() or "linked", description="Repository linkage mode")
                 set_system_setting(key="bamboo.server.url", value=coverity_form.cleaned_data["bamboo_server_url"].strip(), description="Bamboo server URL")
                 message = "설정을 저장했습니다."
@@ -216,7 +233,9 @@ def settings(request):
 
         elif form_kind == "jenkins_settings":
             jenkins_server_url = request.POST.get("jenkins_server_url", "").strip()
+            jenkins_token = request.POST.get("jenkins_token", "").strip()
             set_system_setting(key="jenkins.server.url", value=jenkins_server_url, description="Jenkins server URL")
+            set_system_setting(key="jenkins.server.token", value=jenkins_token, description="Jenkins server token")
             jenkins_payload = get_jenkins_system_settings()
             message = "Jenkins 설정을 저장했습니다."
 
@@ -332,10 +351,16 @@ def jenkins_settings(request):
         form_kind = request.POST.get("form_kind", "").strip()
         if form_kind == "jenkins_settings":
             jenkins_server_url = request.POST.get("jenkins_server_url", "").strip()
+            jenkins_token = request.POST.get("jenkins_token", "").strip()
             set_system_setting(
                 key="jenkins.server.url",
                 value=jenkins_server_url,
                 description="Jenkins server URL",
+            )
+            set_system_setting(
+                key="jenkins.server.token",
+                value=jenkins_token,
+                description="Jenkins server token",
             )
             jenkins_settings_payload = get_jenkins_system_settings()
             message = "Jenkins 설정을 저장했습니다."
@@ -660,7 +685,30 @@ def project_jenkins_build_detail(request, jira_project_key: str, job_path: str):
 
     jenkins_status = get_jenkins_job_status(job_path)
     jenkins_error = ""
+    jenkins_message = ""
+    jenkins_detail = ""
     jenkins_job = None
+    jenkins_config_error = ""
+
+    if request.method == "POST":
+        form_kind = request.POST.get("form_kind", "").strip()
+        if form_kind == "jenkins_configure":
+            try:
+                result = configure_jenkins_job(job_path)
+            except JenkinsOperationError as exc:
+                jenkins_config_error = exc.summary
+                jenkins_detail = exc.detail
+            else:
+                jenkins_message = result["message"]
+                jenkins_detail = result.get("detail", "")
+        elif form_kind == "jenkins_run":
+            try:
+                result = trigger_jenkins_job(job_path, {})
+            except JenkinsOperationError as exc:
+                jenkins_config_error = exc.summary
+                jenkins_detail = exc.detail
+            else:
+                jenkins_message = result["message"]
 
     try:
         jenkins_job = get_jenkins_job_details(job_path)
@@ -675,6 +723,9 @@ def project_jenkins_build_detail(request, jira_project_key: str, job_path: str):
         "jenkinsStatus": jenkins_status,
         "jenkinsJob": jenkins_job,
         "jenkinsError": jenkins_error,
+        "jenkinsMessage": jenkins_message,
+        "jenkinsConfigError": jenkins_config_error,
+        "jenkinsDetail": jenkins_detail,
         "executions": executions,
         "navProjectSearchItems": _build_nav_project_search_items(list_project_summaries()),
         "current_provider": project["ciProvider"],
@@ -794,54 +845,53 @@ def _build_project_payload(registration_form: ProjectRegistrationForm, repositor
     ci_provider = (
         registration_form.cleaned_data.get("ci_provider", Project.PROVIDER_BAMBOO) or Project.PROVIDER_BAMBOO
     ).strip()
+
     def _clean(row: dict, key: str, default: str = "") -> str:
         return (row.get(key, default) or "").strip()
+    repositories = []
+    for row in repository_rows:
+        if not _is_valid_repository_row(row):
+            continue
+        legacy_repo_type = _clean(row, "repoType", Repository.TYPE_BITBUCKET)
+        repositories.append(
+            {
+                "repoType": legacy_repo_type,
+                "repositoryType": Repository.infer_repository_type(legacy_repo_type=legacy_repo_type),
+                "repositoryProvider": Repository.infer_repository_provider(legacy_repo_type=legacy_repo_type),
+                "repoSlug": _clean(row, "repoSlug"),
+                "coverityProject": _clean(row, "coverityProject"),
+                "coverityStream": _clean(row, "coverityStream"),
+            }
+        )
 
-    repositories = [
-        {
-            "repoType": _clean(row, "repoType", Repository.TYPE_BITBUCKET),
-            "repositoryType": Repository.infer_repository_type(
-                legacy_repo_type=_clean(row, "repoType", Repository.TYPE_BITBUCKET)
-            ),
-            "repositoryProvider": Repository.infer_repository_provider(
-                legacy_repo_type=_clean(row, "repoType", Repository.TYPE_BITBUCKET)
-            ),
-            "repoSlug": _clean(row, "repoSlug"),
-            "coverityProject": _clean(row, "coverityProject"),
-            "coverityStream": _clean(row, "coverityStream"),
-        }
-        for row in repository_rows
-        if any((value or "").strip() for value in row.values())
-    ]
-    builds = [
-        {
-            "buildName": _clean(row, "buildName"),
-            "buildType": _clean(row, "buildType"),
-            "runtimeStack": _clean(row, "runtimeStack"),
-            "buildId": _clean(row, "buildId"),
-            "planKey": _clean(row, "planKey"),
-            "repositorySlug": _clean(row, "repositorySlug"),
-            "providerDetails": (
-                {"repositoryLinkageMode": _clean(row, "repositoryLinkageMode", "linked") or "linked"}
-                if ci_provider == Project.PROVIDER_BAMBOO
-                else {}
-            ),
-        }
-        for row in build_rows
-        if any((value or "").strip() for value in row.values())
-    ]
-    if not repositories:
-        raise ValueError("최소 1개 저장소를 입력해 주세요.")
-    if not builds:
-        raise ValueError("최소 1개 빌드를 입력해 주세요.")
+    builds: list[dict] = []
+    if repositories:
+        for row in build_rows:
+            if not _is_valid_build_row(row):
+                continue
+            build = {
+                "buildName": _clean(row, "buildName"),
+                "buildType": _clean(row, "buildType"),
+                "runtimeStack": _clean(row, "runtimeStack"),
+                "buildId": _clean(row, "buildId"),
+                "planKey": _clean(row, "planKey"),
+                "repositorySlug": _clean(row, "repositorySlug"),
+            }
+            if ci_provider == Project.PROVIDER_BAMBOO:
+                build["providerDetails"] = {
+                    "repositoryLinkageMode": _clean(row, "repositoryLinkageMode", "linked") or "linked"
+                }
+            builds.append(build)
 
-    representative_repo_slug = registration_form.cleaned_data["representative_repo_slug"].strip()
-    repository_slugs = {repository["repoSlug"] for repository in repositories}
-    if representative_repo_slug not in repository_slugs:
-        raise ValueError("대표 저장소는 등록한 저장소 목록 중 하나여야 합니다.")
-
-    for repository in repositories:
-        repository["isRepresentative"] = repository["repoSlug"] == representative_repo_slug
+    representative_repo_slug = registration_form.cleaned_data.get("representative_repo_slug", "").strip()
+    if repositories:
+        repository_slugs = {repository["repoSlug"] for repository in repositories}
+        if representative_repo_slug not in repository_slugs:
+            representative_repo_slug = repositories[0]["repoSlug"]
+        for repository in repositories:
+            repository["isRepresentative"] = repository["repoSlug"] == representative_repo_slug
+    else:
+        representative_repo_slug = ""
 
     return {
         "ciProvider": ci_provider,
@@ -851,6 +901,17 @@ def _build_project_payload(registration_form: ProjectRegistrationForm, repositor
         "repositories": repositories,
         "builds": builds,
     }
+
+
+def _is_valid_repository_row(row: dict) -> bool:
+    return bool((row.get("repoSlug") or "").strip())
+
+
+def _is_valid_build_row(row: dict) -> bool:
+    build_name = (row.get("buildName") or "").strip()
+    build_id = (row.get("buildId") or "").strip()
+    plan_key = (row.get("planKey") or "").strip()
+    return bool(build_name and (build_id or plan_key))
 
 
 def _extract_repository_rows(post_data) -> list[dict]:

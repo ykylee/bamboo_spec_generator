@@ -10,7 +10,7 @@
   <div class="signal-hero__content">
     <p class="signal-hero__eyebrow">Build Info Index</p>
     <h1 class="hero__title">{{ build.buildName }} 빌드 정보</h1>
-    <p class="signal-hero__body">플랜 아래 여러 빌드키를 등록하고, pre process, 빌드/클린 명령어, 언어, 컴파일러, 분석 제외 파일, Coverity Stream, 빌드 sub path를 개별 관리합니다.</p>
+    <p class="signal-hero__body">플랜 아래 여러 빌드키를 등록하고, pre process, 빌드/클린 명령어, language, compiler, 분석 제외 파일, Coverity Stream, 빌드 sub path를 개별 관리합니다.</p>
     <div class="hero__actions">
       <a class="action-button" href="{% url 'project-build-detail' project.jiraProjectKey build.planKey %}">빌드 플랜 상세</a>
       {% if repository %}
@@ -46,7 +46,7 @@
       </div>
       <ul class="signal-queue">
         <li class="signal-queue__item"><strong>빌드키</strong><span>플랜 내부 여러 빌드 단위를 구분하는 키입니다.</span></li>
-        <li class="signal-queue__item"><strong>환경구성</strong><span>명령어, 언어, 컴파일러, 제외 파일, sub path를 빌드별로 관리합니다.</span></li>
+        <li class="signal-queue__item"><strong>환경구성</strong><span>명령어, language, compiler, 제외 파일, sub path를 빌드별로 관리합니다.</span></li>
         <li class="signal-queue__item"><strong>집계 연결</strong><span>실행 이력은 앞으로 buildKey 기준으로 연결되어 개별 분석 결과를 취합합니다.</span></li>
       </ul>
     </article>
@@ -79,11 +79,11 @@
           {{ buildInfoForm.build_key }}
         </label>
         <label class="project-form__field">
-          <span class="project-form__label">언어</span>
+          <span class="project-form__label">language</span>
           {{ buildInfoForm.language }}
         </label>
         <label class="project-form__field">
-          <span class="project-form__label">컴파일러</span>
+          <span class="project-form__label">compiler</span>
           {{ buildInfoForm.compiler }}
         </label>
         <label class="project-form__field">
@@ -120,7 +120,7 @@
       <thead>
         <tr>
           <th>Build Key</th>
-          <th>언어/컴파일러</th>
+          <th>language/compiler</th>
           <th>Coverity</th>
           <th>Sub Path</th>
           <th></th>
@@ -158,7 +158,7 @@
         <div class="project-compact-item__main">
           <div>
             <h3 class="project-compact-item__title">{{ buildInfo.buildKey }}</h3>
-            <p class="project-compact-item__sub">{{ buildInfo.language|default:"언어 미지정" }} · {{ buildInfo.compiler|default:"컴파일러 미지정" }}</p>
+            <p class="project-compact-item__sub">{{ buildInfo.language|default:"language 미지정" }} · {{ buildInfo.compiler|default:"compiler 미지정" }}</p>
           </div>
           <div class="chip-row">
             <span class="chip chip--neutral">{{ buildInfo.coverityStream|default:"Coverity Stream 미지정" }}</span>

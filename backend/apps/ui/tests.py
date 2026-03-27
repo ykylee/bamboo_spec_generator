@@ -560,30 +560,32 @@ class ProjectViewTest(TestCase):
         self.assertContains(response, 'id="project-registration-panel"', html=False)
         self.assertNotContains(response, 'id="project-registration-panel" hidden', html=False)
 
-    def test_project_registration_from_main_page_requires_at_least_one_repository(self) -> None:
+    def test_project_registration_from_main_page_creates_project_only_when_repository_and_build_are_invalid(self) -> None:
         response = self.client.post(
             "/",
             data={
                 "jira_project_key": "OPS",
                 "bitbucket_project_key": "OPS",
-                "representative_repo_slug": "ops-api",
+                "representative_repo_slug": "",
                 "repo_slug": [""],
                 "coverity_project": [""],
                 "coverity_stream": [""],
                 "build_name": ["Operations API"],
                 "build_type": ["python"],
                 "runtime_stack": ["python3.12"],
-                "build_id": ["ops-api"],
-                "plan_key": ["OPSAPI"],
+                "build_id": [""],
+                "plan_key": [""],
                 "build_repository_slug": ["ops-api"],
             },
         )
 
-        self.assertEqual(200, response.status_code)
-        self.assertContains(response, "최소 1개 저장소를 입력해 주세요.", html=False)
-        self.assertNotContains(response, 'id="project-registration-panel" hidden', html=False)
+        self.assertEqual(302, response.status_code)
+        self.assertEqual("/projects/OPS/", response["Location"])
+        project = Project.objects.get(jira_project_key="OPS")
+        self.assertEqual(0, ProjectRepository.objects.filter(project=project).count())
+        self.assertEqual(0, ProjectBuild.objects.filter(project=project).count())
 
-    def test_project_registration_from_main_page_requires_at_least_one_build(self) -> None:
+    def test_project_registration_from_main_page_creates_repository_only_when_build_is_invalid(self) -> None:
         response = self.client.post(
             "/",
             data={
@@ -593,18 +595,21 @@ class ProjectViewTest(TestCase):
                 "repo_slug": ["ops-api"],
                 "coverity_project": [""],
                 "coverity_stream": [""],
-                "build_name": [""],
-                "build_type": [""],
-                "runtime_stack": [""],
+                "build_name": ["Operations API"],
+                "build_type": ["python"],
+                "runtime_stack": ["python3.12"],
                 "build_id": [""],
                 "plan_key": [""],
                 "build_repository_slug": [""],
             },
         )
 
-        self.assertEqual(200, response.status_code)
-        self.assertContains(response, "최소 1개 빌드를 입력해 주세요.", html=False)
-        self.assertNotContains(response, 'id="project-registration-panel" hidden', html=False)
+        self.assertEqual(302, response.status_code)
+        self.assertEqual("/projects/OPS/", response["Location"])
+        project = Project.objects.get(jira_project_key="OPS")
+        self.assertEqual("bamboo", project.ci_provider)
+        self.assertEqual(1, ProjectRepository.objects.filter(project=project).count())
+        self.assertEqual(0, ProjectBuild.objects.filter(project=project).count())
 
     def test_project_registration_from_main_page_rejects_duplicate_repository_slug_in_request(self) -> None:
         response = self.client.post(
@@ -1420,6 +1425,32 @@ class ProjectViewTest(TestCase):
             build_rows=[{"buildName": "API", "buildType": "python", "runtimeStack": "python3.12", "buildId": "ops-api", "planKey": "OPSAPI", "repositorySlug": "ops-api"}],
         )
         self.assertEqual("ops-api", payload["representativeRepoSlug"])
+
+        jenkins_payload = _build_project_payload(
+            registration_form=type(
+                "FormStub",
+                (),
+                {"cleaned_data": {
+                    "ci_provider": "jenkins",
+                    "jira_project_key": "OPS",
+                    "bitbucket_project_key": "OPS",
+                    "representative_repo_slug": "ops-api",
+                }},
+            )(),
+            repository_rows=[{"repoType": "git", "repoSlug": "ops-api", "coverityProject": "", "coverityStream": ""}],
+            build_rows=[
+                {
+                    "buildName": "API",
+                    "buildType": "python",
+                    "runtimeStack": "python3.12",
+                    "buildId": "ops-api-job",
+                    "planKey": "folder/ops-api-job",
+                    "repositoryLinkageMode": "create_if_missing",
+                    "repositorySlug": "ops-api",
+                }
+            ],
+        )
+        self.assertNotIn("providerDetails", jenkins_payload["builds"][0])
 
         indexed = _index_export_draft_files({"files": [{"path": "drafts/SAMPAPI/jobs/api-linux/run_build.py", "label": "run", "language": "python", "content": "print(1)"}, None, {"path": 10}]})
         snippets = _build_task_snippets(build_key="api-linux", task_name="Run Build Script", draft_index=indexed)

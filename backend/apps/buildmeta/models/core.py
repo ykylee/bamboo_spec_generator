@@ -19,9 +19,17 @@ class SystemSetting(TimestampedModel):
     KEY_COVERITY_ON_NEW_CERT = "coverity.connect.on_new_cert"
     KEY_COVERITY_COMMIT_ENABLED = "coverity.commit.enabled"
     KEY_GIT_CLONE_URL_TEMPLATE = "repository.git.clone_url_template"
+    KEY_SVN_CHECKOUT_URL_TEMPLATE = "repository.svn.checkout_url_template"
+    KEY_GITHUB_BASE_URL = "repository.github.base_url"
+    KEY_GITHUB_TOKEN = "repository.github.token"
+    KEY_BITBUCKET_BASE_URL = "repository.bitbucket.base_url"
+    KEY_BITBUCKET_TOKEN = "repository.bitbucket.token"
+    KEY_GITEA_BASE_URL = "repository.gitea.base_url"
+    KEY_GITEA_TOKEN = "repository.gitea.token"
     KEY_REPOSITORY_LINKAGE_MODE = "repository.linkage_mode"
     KEY_BAMBOO_SERVER_URL = "bamboo.server.url"
     KEY_JENKINS_SERVER_URL = "jenkins.server.url"
+    KEY_JENKINS_TOKEN = "jenkins.server.token"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     key = models.CharField(max_length=128, unique=True)

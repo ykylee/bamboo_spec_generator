@@ -5,11 +5,13 @@ import json
 import os
 from pathlib import Path
 from urllib import error, parse, request
+from xml.sax.saxutils import escape as xml_escape
 
 from django.utils import timezone
 from apps.buildmeta.models import JenkinsBuildUnit, JenkinsNodeSnapshot, JenkinsQueueItemSnapshot, BuildUnit
+from apps.buildmeta.models import SystemSetting
 
-from .system_settings import DEFAULT_JENKINS_TOKEN_PATH, get_jenkins_system_settings
+from .system_settings import DEFAULT_JENKINS_TOKEN_PATH, get_jenkins_system_settings, get_system_setting
 
 
 class JenkinsOperationError(RuntimeError):
@@ -33,17 +35,18 @@ def get_jenkins_client_config() -> JenkinsClientConfig:
     server_url = str(settings_payload["serverUrl"]).rstrip("/")
     env_token = os.environ.get("JENKINS_TOKEN", "").strip()
     env_username = os.environ.get("JENKINS_USERNAME", "").strip()
+    settings_token = get_system_setting(SystemSetting.KEY_JENKINS_TOKEN).strip()
     file_token = ""
-    if not env_token and DEFAULT_JENKINS_TOKEN_PATH.is_file():
+    if not env_token and not settings_token and DEFAULT_JENKINS_TOKEN_PATH.is_file():
         file_token = DEFAULT_JENKINS_TOKEN_PATH.read_text(encoding="utf-8").strip()
     username = env_username or "admin"
-    token = env_token or file_token
+    token = env_token or settings_token or file_token
     if not server_url:
         raise JenkinsOperationError("Jenkins 서버 URL이 설정되지 않았습니다.")
     if not token:
         raise JenkinsOperationError(
             "Jenkins 토큰이 설정되지 않았습니다.",
-            f"환경 변수 `JENKINS_TOKEN` 또는 `{DEFAULT_JENKINS_TOKEN_PATH}` 파일이 필요합니다.",
+            f"환경 변수 `JENKINS_TOKEN`, 운영 설정 토큰, 또는 `{DEFAULT_JENKINS_TOKEN_PATH}` 파일이 필요합니다.",
         )
     return JenkinsClientConfig(
         server_url=server_url,
@@ -175,6 +178,27 @@ def trigger_jenkins_job(job_path: str, parameters: dict | None = None) -> dict:
     }
 
 
+def configure_jenkins_job(job_path: str) -> dict:
+    jenkins_unit = _get_jenkins_build_unit(job_path)
+    if jenkins_unit is None:
+        raise JenkinsOperationError("Jenkins job을 찾지 못했습니다.")
+
+    build_unit = jenkins_unit.build_unit
+    identity = _build_job_identity(jenkins_unit)
+    client = _JenkinsClient(get_jenkins_client_config())
+    script = _build_pipeline_script(build_unit)
+    description = f"Auto managed by CI Ops Console ({build_unit.project.project_key})"
+    applied = client.create_or_update_pipeline_job(identity["jobPath"], pipeline_script=script, description=description)
+    return {
+        **identity,
+        "configured": True,
+        "created": applied["created"],
+        "updated": applied["updated"],
+        "message": "Jenkins job 구성을 반영했습니다.",
+        "detail": "created" if applied["created"] else "updated",
+    }
+
+
 def collect_jenkins_system_status() -> dict:
     client = _JenkinsClient(get_jenkins_client_config())
     nodes = client.get_computer_list()
@@ -283,28 +307,131 @@ def _extract_actions(actions: list) -> list[dict]:
     return result
 
 
+def _build_pipeline_script(build_unit: BuildUnit) -> str:
+    repository = build_unit.repository
+    clone_url = (repository.clone_url if repository else "").strip()
+    default_branch = ((repository.default_branch if repository else "") or "main").strip() or "main"
+    branch_escaped = default_branch.replace("'", "\\'")
+    clone_escaped = clone_url.replace("'", "\\'")
+    stage_commands = _default_pipeline_stage_commands(build_unit)
+
+    checkout_stage = "        echo 'Repository clone URL not configured'"
+    if clone_url:
+        checkout_stage = f"        git branch: '{branch_escaped}', url: '{clone_escaped}'"
+
+    dynamic_stages = [
+        _pipeline_stage_shell_block(stage_name, commands)
+        for stage_name, commands in stage_commands.items()
+        if commands
+    ]
+    if not dynamic_stages:
+        dynamic_stages = [_pipeline_stage_shell_block("Build", ["echo 'No build command configured'"])]
+
+    return (
+        "pipeline {\n"
+        "  agent any\n"
+        "  options { timestamps() }\n"
+        "  stages {\n"
+        "    stage('Checkout') {\n"
+        "      steps {\n"
+        f"{checkout_stage}\n"
+        "      }\n"
+        "    }\n"
+        + "".join(dynamic_stages)
+        + "  }\n"
+        + "}\n"
+    )
+
+
+def _default_pipeline_stage_commands(build_unit: BuildUnit) -> dict[str, list[str]]:
+    language = (build_unit.language or "").strip().lower()
+    compiler = (build_unit.compiler or "").strip().lower()
+    runtime_stack = (build_unit.runtime_stack or "").strip().lower()
+    signal = " ".join([language, compiler, runtime_stack])
+
+    if "maven" in signal or "java" in signal:
+        return {
+            "Install": ["echo 'Using Maven wrapper/config from repository'"],
+            "Build": ["mvn -B -DskipTests package"],
+            "Test": ["mvn -B test"],
+            "Static Analysis": ["echo 'Static analysis stage placeholder (Coverity/Sonar integration point)'"],
+        }
+    if "gradle" in signal:
+        return {
+            "Install": ["echo 'Using Gradle wrapper from repository'"],
+            "Build": ["./gradlew build -x test"],
+            "Test": ["./gradlew test"],
+            "Static Analysis": ["echo 'Static analysis stage placeholder (Coverity/Sonar integration point)'"],
+        }
+    if "node" in signal or "npm" in signal:
+        return {
+            "Install": ["npm ci || npm install"],
+            "Build": ["npm run build --if-present"],
+            "Test": ["npm test --if-present"],
+            "Static Analysis": ["echo 'Static analysis stage placeholder (Coverity/Sonar integration point)'"],
+        }
+    if "dotnet" in signal or ".net" in signal:
+        return {
+            "Install": ["dotnet restore"],
+            "Build": ["dotnet build -c Release --no-restore"],
+            "Test": ["dotnet test -c Release --no-build"],
+            "Static Analysis": ["echo 'Static analysis stage placeholder (Coverity/Sonar integration point)'"],
+        }
+    return {
+        "Install": [
+            "python3 -m pip install -U pip",
+            "if [ -f requirements.txt ]; then pip3 install -r requirements.txt; fi",
+        ],
+        "Build": ["python3 -m compileall ."],
+        "Test": [
+            "if [ -d tests ]; then python3 -m unittest discover -s tests; else echo 'No tests directory'; fi"
+        ],
+        "Static Analysis": ["echo 'Static analysis stage placeholder (Coverity/Sonar integration point)'"],
+    }
+
+
+def _pipeline_stage_shell_block(stage_name: str, commands: list[str]) -> str:
+    command_block = "\n".join(commands).strip() or "echo 'No command configured'"
+    return (
+        f"    stage('{stage_name}') {{\n"
+        "      steps {\n"
+        "        sh '''\n"
+        f"{command_block}\n"
+        "        '''\n"
+        "      }\n"
+        "    }\n"
+    )
+
+
 class _JenkinsClient:
     def __init__(self, config: JenkinsClientConfig) -> None:
         self._config = config
+        self._crumb_field: str | None = None
+        self._crumb_value: str | None = None
 
     def get_job(self, job_path: str, depth: int = 0) -> dict | None:
-        encoded_path = "/".join(parse.quote(part, safe="") for part in job_path.split("/"))
-        path = f"/api/json?depth={depth}"
-        return self._request_json("GET", f"/job/{encoded_path}/{path}", allow_not_found=True)
+        return self._request_json("GET", f"/{_job_path_url(job_path)}/api/json?depth={depth}", allow_not_found=True)
 
     def get_build(self, job_path: str, build_number: str) -> dict | None:
-        encoded_path = "/".join(parse.quote(part, safe="") for part in job_path.split("/"))
-        path = f"/{build_number}/api/json"
-        return self._request_json("GET", f"/job/{encoded_path}/{path}", allow_not_found=True)
+        return self._request_json("GET", f"/{_job_path_url(job_path)}/{build_number}/api/json", allow_not_found=True)
 
     def build_job(self, job_path: str, parameters: dict | None = None) -> dict:
-        encoded_path = "/".join(parse.quote(part, safe="") for part in job_path.split("/"))
         if parameters:
             params = parse.urlencode(parameters)
-            path = f"/job/{encoded_path}/buildWithParameters?{params}"
+            path = f"/{_job_path_url(job_path)}/buildWithParameters?{params}"
         else:
-            path = f"/job/{encoded_path}/build"
-        return self._request_json("POST", path, default={})
+            path = f"/{_job_path_url(job_path)}/build"
+        return self._request_json("POST", path, default={}, include_crumb=True)
+
+    def create_or_update_pipeline_job(self, job_path: str, *, pipeline_script: str, description: str = "") -> dict:
+        config_xml = _pipeline_job_config_xml(pipeline_script=pipeline_script, description=description)
+        existing = self.get_job(job_path)
+        if existing is None:
+            self._ensure_folders(job_path)
+            self._create_job(job_path, config_xml)
+            return {"created": True, "updated": False}
+        self._update_job_config(job_path, config_xml)
+        return {"created": False, "updated": True}
 
     def get_computer_list(self) -> list:
         result = self._request_json("GET", "/computer/api/json?depth=1", default={})
@@ -318,26 +445,124 @@ class _JenkinsClient:
             return result.get("items", [])
         return []
 
-    def _request_json(self, method: str, path: str, allow_not_found: bool = False, default: dict | None = None) -> dict | list | None:
+    def _ensure_folders(self, job_path: str) -> None:
+        parts = [part for part in job_path.split("/") if part]
+        current_path = ""
+        for part in parts[:-1]:
+            current_path = f"{current_path}/{part}" if current_path else part
+            if self.get_job(current_path) is None:
+                self._create_folder(current_path)
+
+    def _create_folder(self, folder_path: str) -> None:
+        parts = [part for part in folder_path.split("/") if part]
+        folder_name = parts[-1]
+        parent = "/".join(parts[:-1])
+        parent_prefix = f"/{_job_path_url(parent)}" if parent else ""
+        params = parse.urlencode(
+            {
+                "name": folder_name,
+                "mode": "com.cloudbees.hudson.plugins.folder.Folder",
+                "from": "",
+                "json": json.dumps(
+                    {
+                        "name": folder_name,
+                        "mode": "com.cloudbees.hudson.plugins.folder.Folder",
+                        "from": "",
+                        "Submit": "OK",
+                    }
+                ),
+                "Submit": "OK",
+            }
+        )
+        self._request(
+            "POST",
+            f"{parent_prefix}/createItem?{params}",
+            data=b"",
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+            include_crumb=True,
+            allow_not_found=False,
+            expect_json=False,
+        )
+
+    def _create_job(self, job_path: str, config_xml: str) -> None:
+        parts = [part for part in job_path.split("/") if part]
+        job_name = parts[-1]
+        parent = "/".join(parts[:-1])
+        parent_prefix = f"/{_job_path_url(parent)}" if parent else ""
+        self._request(
+            "POST",
+            f"{parent_prefix}/createItem?name={parse.quote(job_name, safe='')}",
+            data=config_xml.encode("utf-8"),
+            headers={"Content-Type": "application/xml"},
+            include_crumb=True,
+            allow_not_found=False,
+            expect_json=False,
+        )
+
+    def _update_job_config(self, job_path: str, config_xml: str) -> None:
+        self._request(
+            "POST",
+            f"/{_job_path_url(job_path)}/config.xml",
+            data=config_xml.encode("utf-8"),
+            headers={"Content-Type": "application/xml"},
+            include_crumb=True,
+            allow_not_found=False,
+            expect_json=False,
+        )
+
+    def _request_json(
+        self,
+        method: str,
+        path: str,
+        allow_not_found: bool = False,
+        default: dict | None = None,
+        include_crumb: bool = False,
+    ) -> dict | list | None:
+        payload = self._request(
+            method,
+            path,
+            include_crumb=include_crumb,
+            allow_not_found=allow_not_found,
+            expect_json=True,
+        )
+        if payload is None:
+            return None
+        if not payload.strip():
+            return default or {}
+        return json.loads(payload)
+
+    def _request(
+        self,
+        method: str,
+        path: str,
+        *,
+        data: bytes | None = None,
+        headers: dict[str, str] | None = None,
+        include_crumb: bool = False,
+        allow_not_found: bool = False,
+        expect_json: bool = True,
+    ) -> str | None:
         credentials = f"{self._config.username}:{self._config.token}"
         import base64
         auth_header = f"Basic {base64.b64encode(credentials.encode()).decode()}"
-
+        request_headers = {
+            "Authorization": auth_header,
+        }
+        if expect_json:
+            request_headers["Accept"] = "application/json"
+        if headers:
+            request_headers.update(headers)
+        if include_crumb:
+            request_headers.update(self._crumb_headers())
         req = request.Request(
             f"{self._config.server_url}{path}",
-            data=None,
-            headers={
-                "Accept": "application/json",
-                "Authorization": auth_header,
-            },
+            data=data,
+            headers=request_headers,
             method=method,
         )
         try:
             with request.urlopen(req, timeout=self._config.timeout_seconds) as response:
-                content = response.read().decode("utf-8")
-                if not content.strip():
-                    return default or {}
-                return json.loads(content)
+                return response.read().decode("utf-8")
         except error.HTTPError as exc:
             if allow_not_found and exc.code == 404:
                 return None
@@ -345,3 +570,43 @@ class _JenkinsClient:
             raise JenkinsOperationError("Jenkins API 요청이 실패했습니다.", f"{exc.code} {payload}".strip()) from exc
         except error.URLError as exc:
             raise JenkinsOperationError("Jenkins API 연결에 실패했습니다.", str(exc.reason)) from exc
+
+    def _crumb_headers(self) -> dict[str, str]:
+        if self._crumb_field and self._crumb_value:
+            return {self._crumb_field: self._crumb_value}
+        try:
+            payload = self._request_json("GET", "/crumbIssuer/api/json", allow_not_found=True)
+        except JenkinsOperationError:
+            return {}
+        if not isinstance(payload, dict):
+            return {}
+        field = str(payload.get("crumbRequestField", "")).strip()
+        value = str(payload.get("crumb", "")).strip()
+        if not field or not value:
+            return {}
+        self._crumb_field = field
+        self._crumb_value = value
+        return {field: value}
+
+
+def _job_path_url(job_path: str) -> str:
+    return "/".join(f"job/{parse.quote(part, safe='')}" for part in job_path.split("/") if part)
+
+
+def _pipeline_job_config_xml(*, pipeline_script: str, description: str) -> str:
+    escaped_description = xml_escape(description or "")
+    escaped_script = xml_escape(pipeline_script)
+    return (
+        '<?xml version="1.1" encoding="UTF-8"?>\n'
+        '<flow-definition plugin="workflow-job">\n'
+        f"  <description>{escaped_description}</description>\n"
+        "  <keepDependencies>false</keepDependencies>\n"
+        '  <properties/>\n'
+        '  <definition class="org.jenkinsci.plugins.workflow.cps.CpsFlowDefinition" plugin="workflow-cps">\n'
+        f"    <script>{escaped_script}</script>\n"
+        "    <sandbox>true</sandbox>\n"
+        "  </definition>\n"
+        "  <triggers/>\n"
+        "  <disabled>false</disabled>\n"
+        "</flow-definition>\n"
+    )

@@ -70,7 +70,7 @@
       <li class="entity-preview-item">
         <div>
           <strong>{{ build.buildName }}</strong>
-          <p>{{ build.planKey }} · {{ build.buildType|default:"미지정" }} · {{ build.runtimeStack|default:"미지정" }}</p>
+          <p>{{ build.planKey }} · language {{ build.buildType|default:"미지정" }} · compiler {{ build.runtimeStack|default:"미지정" }}</p>
         </div>
         <div class="chip-row">
           {% if build.latestSuccess == False %}

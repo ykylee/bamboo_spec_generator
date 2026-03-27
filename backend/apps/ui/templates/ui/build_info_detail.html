@@ -18,8 +18,8 @@
     <div class="chip-row">
       <span class="chip">{{ build.planKey }}</span>
       <span class="chip chip--neutral">{{ buildInfo.operatingSystem|default:"OS 미지정" }}</span>
-      <span class="chip chip--neutral">{{ buildInfo.language|default:"언어 미지정" }}</span>
-      <span class="chip chip--neutral">{{ buildInfo.compiler|default:"컴파일러 미지정" }}</span>
+      <span class="chip chip--neutral">{{ buildInfo.language|default:"language 미지정" }}</span>
+      <span class="chip chip--neutral">{{ buildInfo.compiler|default:"compiler 미지정" }}</span>
       <span class="chip chip--neutral">{{ buildInfo.executionCount }} runs</span>
     </div>
   </div>
@@ -37,12 +37,12 @@
     <article class="signal-metric">
       <span class="signal-metric__label">Language</span>
       <strong class="signal-metric__value signal-metric__value--compact">{{ buildInfo.language|default:"-" }}</strong>
-      <p class="signal-metric__meta">빌드 기준 언어</p>
+      <p class="signal-metric__meta">빌드 기준 language</p>
     </article>
     <article class="signal-metric">
       <span class="signal-metric__label">Compiler</span>
       <strong class="signal-metric__value signal-metric__value--compact">{{ buildInfo.compiler|default:"-" }}</strong>
-      <p class="signal-metric__meta">빌드 기준 컴파일러</p>
+      <p class="signal-metric__meta">빌드 기준 compiler</p>
     </article>
     <article class="signal-metric signal-metric--list">
       <div class="signal-metric__header">
@@ -84,11 +84,11 @@
           {{ buildInfoForm.operating_system }}
         </label>
         <label class="project-form__field">
-          <span class="project-form__label">언어</span>
+          <span class="project-form__label">language</span>
           {{ buildInfoForm.language }}
         </label>
         <label class="project-form__field">
-          <span class="project-form__label">컴파일러</span>
+          <span class="project-form__label">compiler</span>
           {{ buildInfoForm.compiler }}
         </label>
         <label class="project-form__field">

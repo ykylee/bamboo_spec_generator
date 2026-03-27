@@ -198,11 +198,11 @@
           {{ buildInfoForm.operating_system }}
         </label>
         <label class="project-form__field">
-          <span class="project-form__label">언어</span>
+          <span class="project-form__label">language</span>
           {{ buildInfoForm.language }}
         </label>
         <label class="project-form__field">
-          <span class="project-form__label">컴파일러</span>
+          <span class="project-form__label">compiler</span>
           {{ buildInfoForm.compiler }}
         </label>
         <label class="project-form__field">
@@ -242,7 +242,7 @@
     </div>
     <ul class="meta-list">
       <li><strong>빌드키</strong> 같은 플랜 안에서 개별 빌드를 구분하는 고유 키입니다.</li>
-      <li><strong>환경구성</strong> 명령어, 언어, 컴파일러, sub path를 빌드별로 분리해 관리합니다.</li>
+      <li><strong>환경구성</strong> 명령어, language, compiler, sub path를 빌드별로 분리해 관리합니다.</li>
       <li><strong>실행 연결</strong> Bamboo 실행 시 `buildKey`를 넘기면 이 항목 기준으로 결과를 취합할 수 있습니다.</li>
     </ul>
   </aside>
@@ -421,8 +421,8 @@
     <ul class="meta-list">
       <li><strong>Project</strong>{{ project.jiraProjectKey }}</li>
       <li><strong>Build Name</strong>{{ build.buildName }}</li>
-      <li><strong>Build Type</strong>{{ build.buildType|default:"미지정" }}</li>
-      <li><strong>Runtime Stack</strong>{{ build.runtimeStack|default:"미지정" }}</li>
+      <li><strong>language</strong>{{ build.buildType|default:"미지정" }}</li>
+      <li><strong>compiler</strong>{{ build.runtimeStack|default:"미지정" }}</li>
       <li><strong>Build ID</strong>{{ build.buildId }}</li>
       <li><strong>Plan Key</strong>{{ build.planKey }}</li>
       <li><strong>정적분석 도구 버전</strong>{{ build.staticAnalysisToolVersion|default:"미지정" }}</li>
@@ -470,7 +470,7 @@
     <li class="entity-preview-item">
       <div>
         <strong>{{ buildInfo.buildKey }}</strong>
-        <p>{{ buildInfo.operatingSystem|default:"OS 미지정" }} · {{ buildInfo.language|default:"언어 미지정" }} · {{ buildInfo.compiler|default:"컴파일러 미지정" }} · {{ buildInfo.coverityStream|default:"Coverity Stream 미지정" }}</p>
+        <p>{{ buildInfo.operatingSystem|default:"OS 미지정" }} · {{ buildInfo.language|default:"language 미지정" }} · {{ buildInfo.compiler|default:"compiler 미지정" }} · {{ buildInfo.coverityStream|default:"Coverity Stream 미지정" }}</p>
       </div>
       <div class="chip-row">
         <span class="chip chip--neutral">{{ buildInfo.executionCount }} runs</span>

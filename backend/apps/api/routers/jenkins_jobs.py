@@ -5,6 +5,7 @@ from ninja.errors import HttpError
 
 from apps.buildmeta.selectors.jenkins import list_executions_by_job_path, list_jenkins_job_summaries
 from apps.buildmeta.services.jenkins import (
+    configure_jenkins_job,
     JenkinsOperationError,
     get_jenkins_build_details,
     get_jenkins_client_config,
@@ -50,6 +51,14 @@ def get_jenkins_executions(request, job_path: str) -> list[dict]:
 def trigger_jenkins_job_endpoint(request, job_path: str, parameters: dict | None = None) -> dict:
     try:
         return trigger_jenkins_job(job_path, parameters)
+    except JenkinsOperationError as exc:
+        raise HttpError(400, exc.summary)
+
+
+@router.post("/{path:job_path}/configure")
+def configure_jenkins_job_endpoint(request, job_path: str) -> dict:
+    try:
+        return configure_jenkins_job(job_path)
     except JenkinsOperationError as exc:
         raise HttpError(400, exc.summary)
 

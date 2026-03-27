@@ -237,12 +237,12 @@
           {% if buildAddForm.build_name.errors %}<span class="project-form__error">{{ buildAddForm.build_name.errors|join:", " }}</span>{% endif %}
         </label>
         <label class="project-form__field">
-          <span class="project-form__label">Build Type</span>
+          <span class="project-form__label">language</span>
           {{ buildAddForm.build_type }}
           {% if buildAddForm.build_type.errors %}<span class="project-form__error">{{ buildAddForm.build_type.errors|join:", " }}</span>{% endif %}
         </label>
         <label class="project-form__field">
-          <span class="project-form__label">Runtime Stack</span>
+          <span class="project-form__label">compiler</span>
           {{ buildAddForm.runtime_stack }}
           {% if buildAddForm.runtime_stack.errors %}<span class="project-form__error">{{ buildAddForm.runtime_stack.errors|join:", " }}</span>{% endif %}
         </label>

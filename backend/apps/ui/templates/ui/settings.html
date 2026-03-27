@@ -48,6 +48,10 @@
           <span class="project-form__label">Jenkins Server URL</span>
           <input class="project-form__input" type="url" name="jenkins_server_url" value="{{ jenkinsSettings.serverUrl }}" placeholder="https://jenkins.example.com">
         </label>
+        <label class="project-form__field project-form__field--span-3">
+          <span class="project-form__label">Jenkins Token</span>
+          <input class="project-form__input" type="password" name="jenkins_token" value="{{ jenkinsSettings.tokenValue|default:'' }}" placeholder="Jenkins API token">
+        </label>
       </div>
       <div class="project-form__actions">
         <button class="action-button" type="submit">CI 서버 설정 저장</button>
@@ -55,7 +59,9 @@
     </form>
     <ul class="meta-list">
       <li><strong>Bamboo Token</strong>{% if bambooSettings.tokenConfigured %}{% if bambooSettings.tokenSource == "env" %}서버 환경 변수{% elif bambooSettings.tokenSource == "file" %}파일{% else %}설정됨{% endif %}{% else %}미설정{% endif %}</li>
-      <li><strong>Jenkins Token</strong>{% if jenkinsSettings.tokenConfigured %}{% if jenkinsSettings.tokenSource == "env" %}서버 환경 변수{% elif jenkinsSettings.tokenSource == "file" %}파일{% else %}설정됨{% endif %}{% else %}미설정{% endif %}</li>
+      <li><strong>Jenkins Token</strong>{% if jenkinsSettings.tokenConfigured %}{% if jenkinsSettings.tokenSource == "env" %}서버 환경 변수{% elif jenkinsSettings.tokenSource == "settings" %}운영 설정{% elif jenkinsSettings.tokenSource == "file" %}파일{% else %}설정됨{% endif %}{% else %}미설정{% endif %}</li>
+      <li><strong>Bamboo 준비도</strong>{% if infraReadiness.bamboo.ready %}준비됨{% else %}미설정{% endif %}</li>
+      <li><strong>Jenkins 준비도</strong>{% if infraReadiness.jenkins.ready %}준비됨{% else %}미설정{% endif %}</li>
     </ul>
   </article>
 
@@ -93,7 +99,7 @@
     <div class="panel__header">
       <h2 class="panel__title">저장소</h2>
     </div>
-    <p class="panel__body">Git 저장소 클론 및 연결 모드를 설정합니다.</p>
+    <p class="panel__body">저장소 종류(Git/SVN, GitHub/Bitbucket/Gitea)별 연결 정보를 설정합니다.</p>
     <form class="project-form" method="post">
       {% csrf_token %}
       <input type="hidden" name="form_kind" value="system_settings">
@@ -106,11 +112,46 @@
           <span class="project-form__label">Git Clone URL Template</span>
           {{ coverityForm.git_clone_url_template }}
         </label>
+        <label class="project-form__field project-form__field--span-3">
+          <span class="project-form__label">SVN Checkout URL Template</span>
+          {{ coverityForm.svn_checkout_url_template }}
+        </label>
+        <label class="project-form__field">
+          <span class="project-form__label">GitHub Base URL</span>
+          {{ coverityForm.github_base_url }}
+        </label>
+        <label class="project-form__field">
+          <span class="project-form__label">GitHub Token</span>
+          {{ coverityForm.github_token }}
+        </label>
+        <label class="project-form__field">
+          <span class="project-form__label">Bitbucket Base URL</span>
+          {{ coverityForm.bitbucket_base_url }}
+        </label>
+        <label class="project-form__field">
+          <span class="project-form__label">Bitbucket Token</span>
+          {{ coverityForm.bitbucket_token }}
+        </label>
+        <label class="project-form__field">
+          <span class="project-form__label">Gitea Base URL</span>
+          {{ coverityForm.gitea_base_url }}
+        </label>
+        <label class="project-form__field">
+          <span class="project-form__label">Gitea Token</span>
+          {{ coverityForm.gitea_token }}
+        </label>
       </div>
       <div class="project-form__actions">
         <button class="action-button" type="submit">저장소 설정 저장</button>
       </div>
     </form>
+    <ul class="meta-list">
+      <li><strong>Git</strong>{% if infraReadiness.repository_git.ready %}준비됨{% else %}미설정{% endif %}</li>
+      <li><strong>SVN</strong>{% if infraReadiness.repository_svn.ready %}준비됨{% else %}미설정{% endif %}</li>
+      <li><strong>GitHub</strong>{% if infraReadiness.repository_github.ready %}준비됨{% else %}미설정{% endif %}</li>
+      <li><strong>Bitbucket</strong>{% if infraReadiness.repository_bitbucket.ready %}준비됨{% else %}미설정{% endif %}</li>
+      <li><strong>Gitea</strong>{% if infraReadiness.repository_gitea.ready %}준비됨{% else %}미설정{% endif %}</li>
+    </ul>
   </article>
 
   <!-- Jenkins 노드 상태 -->

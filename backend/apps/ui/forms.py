@@ -25,6 +25,7 @@ class ProjectRegistrationForm(forms.Form):
     representative_repo_slug = forms.CharField(
         label="대표 저장소",
         max_length=255,
+        required=False,
         widget=forms.TextInput(attrs={"list": "repository-slug-options"}),
     )
 
@@ -79,8 +80,8 @@ class BuildMetadataForm(forms.Form):
     ]
 
     build_name = forms.CharField(label="빌드 이름", max_length=255)
-    build_type = forms.CharField(label="Build Type", max_length=128)
-    runtime_stack = forms.CharField(label="Runtime Stack", max_length=128, required=False)
+    build_type = forms.CharField(label="language", max_length=128)
+    runtime_stack = forms.CharField(label="compiler", max_length=128, required=False)
     build_id = forms.CharField(label="Build ID", max_length=255)
     plan_key = forms.CharField(label="Plan Key", max_length=64)
     repository_linkage_mode = forms.ChoiceField(
@@ -129,8 +130,8 @@ class BuildInfoMetadataForm(forms.Form):
     pre_process = forms.CharField(label="Pre Process", required=False, widget=forms.Textarea(attrs={"rows": 3}))
     build_command = forms.CharField(label="빌드 명령어", required=False, widget=forms.Textarea(attrs={"rows": 3}))
     clean_command = forms.CharField(label="클린 명령어", required=False, widget=forms.Textarea(attrs={"rows": 3}))
-    language = forms.CharField(label="언어", max_length=64, required=False)
-    compiler = forms.CharField(label="컴파일러", max_length=128, required=False)
+    language = forms.CharField(label="language", max_length=64, required=False)
+    compiler = forms.CharField(label="compiler", max_length=128, required=False)
     analysis_excluded_files = forms.CharField(
         label="분석 제외 파일",
         required=False,
@@ -166,6 +167,43 @@ class CoveritySystemSettingsForm(forms.Form):
         widget=forms.TextInput(
             attrs={"placeholder": "https://git.example.com/scm/{project_key_lower}/{repo_slug}.git"}
         ),
+    )
+    svn_checkout_url_template = forms.CharField(
+        label="SVN Checkout URL Template",
+        required=False,
+        widget=forms.TextInput(
+            attrs={"placeholder": "https://svn.example.com/repos/{project_key_lower}/{repo_slug}"}
+        ),
+    )
+    github_base_url = forms.CharField(
+        label="GitHub Base URL",
+        required=False,
+        widget=forms.TextInput(attrs={"placeholder": "https://github.example.com"}),
+    )
+    github_token = forms.CharField(
+        label="GitHub Token",
+        required=False,
+        widget=forms.TextInput(attrs={"placeholder": "optional"}),
+    )
+    bitbucket_base_url = forms.CharField(
+        label="Bitbucket Base URL",
+        required=False,
+        widget=forms.TextInput(attrs={"placeholder": "https://bitbucket.example.com"}),
+    )
+    bitbucket_token = forms.CharField(
+        label="Bitbucket Token",
+        required=False,
+        widget=forms.TextInput(attrs={"placeholder": "optional"}),
+    )
+    gitea_base_url = forms.CharField(
+        label="Gitea Base URL",
+        required=False,
+        widget=forms.TextInput(attrs={"placeholder": "https://gitea.example.com"}),
+    )
+    gitea_token = forms.CharField(
+        label="Gitea Token",
+        required=False,
+        widget=forms.TextInput(attrs={"placeholder": "optional"}),
     )
     bamboo_server_url = forms.CharField(
         label="Bamboo Server URL",
