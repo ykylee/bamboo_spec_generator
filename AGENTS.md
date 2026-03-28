@@ -68,3 +68,278 @@
 - 요구사항 문서는 가능하면 `요약`, `배경`, `문제`, `범위`, `요구사항`, `수용 기준`, `제약/가정`, `오픈 이슈`, `다음 단계`를 포함합니다.
 - 디자인 문서는 가능하면 `요약`, `배경`, `목표`, `비목표`, `설계안`, `대안`, `영향 범위`, `수용 기준`, `오픈 이슈`를 포함합니다.
 - 문서 내 링크는 웹 환경에서도 동작할 수 있도록 절대경로 대신 상대경로 마크다운 링크를 사용합니다.
+
+
+
+## Rust 백엔드 리팩토링 (Refactoring)
+
+### 개요
+
+기존 Django/Ninja 백엔드를 Rust 기반으로 리팩토링합니다.
+
+- **프론트엔드**: React + TypeScript
+- **백엔드**: Rust + Actix-web 또는 Axum
+- **데이터베이스**: PostgreSQL (기존 유지)
+
+### 백엔드 구조
+
+```
+backend-rs/
+├── src/
+│   ├── main.rs              # 진입점
+│   ├── lib.rs               # 라이브러리 루트
+│   ├── api/                 # API 레이어
+│   │   ├── mod.rs
+│   │   ├── routes/          # API 엔드포인트
+│   │   ├── models/          # Request/Response 모델
+│   │   └── middleware/      # 인증, 로깅 등
+│   ├── domain/              # 도메인 레이어
+│   │   ├── mod.rs
+│   │   ├── projects/        # 프로젝트 도메인
+│   │   ├── build_plans/     # 빌드 플랜 도메인
+│   │   ├── executions/      # 실행 이력 도메인
+│   │   └── module_registry/ # 모듈 레지스트리
+│   ├── infrastructure/      # 인프라 레이어
+│   │   ├── mod.rs
+│   │   ├── database/        # DB 연결 (sqlx)
+│   │   ├── repositories/    # 데이터 접근
+│   │   └── external/        # Bamboo/Jenkins API 클라이언트
+│   └── workers/             # 백그라운드 워커
+│       ├── mod.rs
+│       └── build_collector/ # 빌드 결과 수집
+├── Cargo.toml
+└── .env.example
+```
+
+### API 엔드포인트 매핑 (Django → Rust)
+
+| 기존 Django 엔드포인트 | Rust 엔드포인트 | 상태 |
+|----------------------|----------------|------|
+| `GET /api/v1/projects/` | `GET /api/v1/projects/` | 구현 |
+| `POST /api/v1/projects/` | `POST /api/v1/projects/` | 구현 |
+| `GET /api/v1/projects/{key}` | `GET /api/v1/projects/{key}` | 구현 |
+| `PUT /api/v1/projects/{key}` | `PUT /api/v1/projects/{key}` | 구현 |
+| `GET /api/v1/build-plans/{plan_key}/active-definition` | 同 | 구현 |
+| `GET /api/v1/build-plans/{plan_key}/prepare-context` | 同 | 구현 |
+| `GET /api/v1/build-plans/{plan_key}/executions` | 同 | 구현 |
+| `GET /api/v1/admin/modules/` | `GET /api/v1/modules/` | 구현 |
+| `POST /api/v1/admin/modules/uploads` | `POST /api/v1/modules/upload` | 구현 |
+| `POST /api/v1/admin/modules/reload` | `POST /api/v1/modules/reload` | 구현 |
+| `GET /api/v1/system-settings/` | `GET /api/v1/settings/` | 구현 |
+| `PUT /api/v1/system-settings/{key}` | `PUT /api/v1/settings/{key}` | 구현 |
+
+### Rust 의존성
+
+```toml
+[dependencies]
+actix-web = "4"          # 또는 axum = "0.7"
+tokio = { version = "1", features = ["full"] }
+sqlx = { version = "0.7", features = ["runtime-tokio-native-tls", "postgres"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tracing = "0.1"
+tracing-subscriber = "0.3"
+thiserror = "1"
+anyhow = "1"
+uuid = { version = "1", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+```
+
+### 빌드 & 실행 명령
+
+```bash
+# 빌드
+cd backend-rs
+cargo build --release
+
+# 개발 모드
+cargo run
+
+# 테스트
+cargo test
+
+# 린트
+cargo clippy
+cargo fmt
+```
+
+### 데이터베이스 마이그레이션
+
+- 기존 PostgreSQL 스키마 유지
+- `sqlx`의 offline mode로 마이그레이션 관리
+- 마이그레이션 파일: `migrations/` 디렉토리
+
+---
+
+## Rust 문서화 규칙
+
+### 구현 시 문서 필수 작성
+
+Rust 모듈/함수를 구현할 때 반드시 다음 문서를 함께 작성합니다:
+
+| 단계 | 문서 | 위치 |
+|------|------|------|
+| 1 | API 엔드포인트 설명 | 코드 주석 (`///`) 또는 `docs/api/` |
+| 2 | 도메인 로직 설명 | `docs/refactoring/domain/` |
+| 3 | 데이터 모델 변경 | `docs/refactoring/models/` |
+| 4 | 아키텍처 결정 (ADR) | `docs/refactoring/adrs/` |
+
+### 문서 템플릿
+
+#### 1. API 엔드포인트 문서 (`docs/refactoring/api/{도메인}.md`)
+
+```markdown
+# {도메인} API
+
+## 엔드포인트 목록
+
+| 메서드 | 경로 | 설명 |
+|--------|------|------|
+| GET | /api/v1/{resource} | 목록 조회 |
+| POST | /api/v1/{resource} | 생성 |
+| GET | /api/v1/{resource}/{{id}} | 상세 조회 |
+| PUT | /api/v1/{resource}/{{id}} | 수정 |
+
+## 요청/응답 예시
+
+### GET /api/v1/projects
+
+**Request:**
+```http
+GET /api/v1/projects
+Authorization: Bearer {token}
+```
+
+**Response:**
+```json
+{
+  "projects": [...]
+}
+```
+```
+
+#### 2. 도메인 문서 (`docs/refactoring/domain/{도메인}.md`)
+
+```markdown
+# {도메인} 도메인
+
+## 개요
+
+{도메인의 목적과 책임에 대한 설명}
+
+## 주요 개념
+
+- **Concept A**: 설명
+- **Concept B**: 설명
+
+##业务流程
+
+1. 사용자 요청 수신
+2. 검증
+3. 도메인 로직 실행
+4. 응답 반환
+
+## 기존 Django 코드 대응
+
+| Django | Rust |
+|--------|------|
+| `models.py` | `domain/{도메인}.rs` |
+| `services.py` | `domain/{도메인}/services.rs` |
+| `selectors.py` | `infrastructure/repositories/` |
+```
+
+#### 3. ADR (Architecture Decision Record) (`docs/refactoring/adrs/adr-001-{제목}.md`)
+
+```markdown
+# ADR-{序号}: {제목}
+
+## 상태
+
+- 제안됨 / 수락됨 / 폐기됨
+
+## 배경
+
+{결정이 필요한 상황 설명}
+
+## 결정 사항
+
+{採择한 결정}
+
+## 대안
+
+### 대안 1: {제목}
+- 장점: ...
+- 단점: ...
+
+### 대안 2: {제목}
+- 장점: ...
+- 단점: ...
+
+## 결과
+
+### 긍정적 효과
+- ...
+
+### 부정적 효과
+- ...
+
+## 참고
+
+- 관련 이슈/PR
+```
+
+### 코드 주석 규칙
+
+```rust
+/// 프로젝트 목록 조회
+///
+/// # Arguments
+/// * `ci_provider` - 선택적 CI 제공자 필터 (bamboo 또는 jenkins)
+///
+/// # Errors
+/// - 401: 인증 실패
+/// - 500: 서버 오류
+///
+/// # Example
+/// ```rust
+/// let projects = list_projects(pool, None).await?;
+/// ```
+async fn list_projects(
+    State(pool): State<PgPool>,
+    Query(params): Query<ListProjectsQuery>,
+) -> Result<Json<ListProjectsResponse>, AppError> {
+    // ...
+}
+```
+
+### 가이드라인
+
+1. **구현 전**: 기존 Django 코드를 분석하고 문서화
+2. **구현 중**: 코드와 함께 주석 작성
+3. **구현 후**: `docs/refactoring/`에 종합 문서 업데이트
+4. **변경 시**: changelog 또는 ADR에 기록
+
+---
+
+## 기존 Django 백엔드 참조
+
+기존 Django/Ninja 백엔드는 `backend/`에 위치하며, Rust로의 마이그레이션 완료 후 비활성화합니다.
+
+### 참고 파일
+
+- API 라우터: `backend/apps/api/router.py`
+- 도메인 모델: `backend/apps/buildmeta/models/`
+- 서비스 로직: `backend/apps/buildmeta/services/`
+- API 스키마: `backend/apps/api/schemas/`
+
+### 마이그레이션 체크리스트
+
+- [ ] 프로젝트 CRUD API
+- [ ] 빌드 플랜 API
+- [ ] 실행 이력 API
+- [ ] 모듈 레지스트리 API
+- [ ] 시스템 설정 API
+- [ ] Jenkins 연동 API
+- [ ] Bamboo 연동 API
+- [ ] 인증/인가 레이어
+- [ ] 데이터 마이그레이션 스크립트
