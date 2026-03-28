@@ -239,3 +239,28 @@ class BambooRunForm(forms.Form):
             if not key.strip():
                 raise forms.ValidationError("변수 키는 비워둘 수 없습니다.")
         return value
+
+
+class ModuleAssetUploadForm(forms.Form):
+    asset_kind = forms.ChoiceField(
+        label="자산 유형",
+        choices=[
+            ("stage_module", "stage_module"),
+            ("job_module", "job_module"),
+            ("task_module", "task_module"),
+            ("script_template", "script_template"),
+        ],
+    )
+    provider_scope = forms.ChoiceField(
+        label="Provider Scope",
+        choices=[
+            ("common", "common"),
+            ("bamboo", "bamboo"),
+            ("jenkins", "jenkins"),
+        ],
+        initial="common",
+        required=False,
+    )
+    module_id = forms.CharField(label="Module ID", max_length=128)
+    activate_after_upload = forms.BooleanField(label="업로드 후 즉시 활성화", required=False, initial=True)
+    file = forms.FileField(label="모듈 파일")

@@ -53,7 +53,7 @@
           {% endif %}
           {% endwith %}
           <span class="app-header__nav-link app-header__nav-link--muted">실행 이력</span>
-          <a class="app-header__nav-link{% if request.resolver_match.url_name == 'settings' or request.resolver_match.url_name == 'coverity-settings' or request.resolver_match.url_name == 'jenkins-settings' %} app-header__nav-link--active{% endif %}" href="{% url 'settings' %}">운영 설정</a>
+          <a class="app-header__nav-link{% if request.resolver_match.url_name == 'settings' or request.resolver_match.url_name == 'coverity-settings' or request.resolver_match.url_name == 'jenkins-settings' or request.resolver_match.url_name == 'module-registry-settings' %} app-header__nav-link--active{% endif %}" href="{% url 'settings' %}">운영 설정</a>
         </nav>
         <div class="app-header__search" data-project-search>
           <label class="app-header__search-label" for="project-nav-search">프로젝트 검색</label>
@@ -158,7 +158,7 @@
             </span>
             <span class="sidebar__nav-text">실행 이력</span>
           </span>
-          <a class="sidebar__nav-item{% if request.resolver_match.url_name == 'settings' or request.resolver_match.url_name == 'coverity-settings' or request.resolver_match.url_name == 'jenkins-settings' %} sidebar__nav-item--active{% else %} sidebar__nav-item--muted{% endif %}" href="{% url 'settings' %}">
+          <a class="sidebar__nav-item{% if request.resolver_match.url_name == 'settings' or request.resolver_match.url_name == 'coverity-settings' or request.resolver_match.url_name == 'jenkins-settings' or request.resolver_match.url_name == 'module-registry-settings' %} sidebar__nav-item--active{% else %} sidebar__nav-item--muted{% endif %}" href="{% url 'settings' %}">
             <span class="sidebar__nav-icon" aria-hidden="true">
               <svg viewBox="0 0 20 20" focusable="false">
                 <path d="M10 3 12 6.5 16 7l-3 3 1 4-4-2.5L6 14l1-4-3-3 4-.5z"/>

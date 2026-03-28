@@ -1,14 +1,16 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 import os
+import shutil
+from pathlib import Path
 from tempfile import TemporaryDirectory
 from textwrap import dedent
 from unittest.mock import Mock, patch
 from urllib import error
 
 from django.core.management import CommandError, call_command
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import SimpleTestCase, TestCase
 from django.utils import timezone
 
@@ -18,6 +20,9 @@ from apps.buildmeta.models import (
     BuildUnit,
     BuildVersion,
     JenkinsBuildUnit,
+    ModuleAsset,
+    ModuleAssetVersion,
+    ModuleLoadSnapshot,
     Project as ProjectModel,
     Repository as RepositoryModel,
     StaticAnalysisResult,
@@ -65,8 +70,10 @@ from apps.buildmeta.services import (
     initialize_specs_draft_for_plan,
     load_definition_import_records,
     publish_bamboo_specs,
+    reload_module_assets,
     set_system_setting,
     sync_definition_records,
+    upload_module_asset,
     update_project,
 )
 from apps.buildmeta.services.bamboo import (
@@ -2892,3 +2899,77 @@ class ProjectServiceTest(TestCase):
                     ],
                 },
             )
+
+
+class ModuleRegistryServiceTest(TestCase):
+    def tearDown(self) -> None:
+        managed_root = Path(__file__).resolve().parents[3] / "managed_modules"
+        if managed_root.exists():
+            shutil.rmtree(managed_root)
+
+    def test_upload_activate_and_reload_module_asset(self) -> None:
+        stage_upload = SimpleUploadedFile(
+            "prepare.json",
+            b'{"apiVersion":"buildmod/v1alpha1","kind":"StageModule","metadata":{"id":"prepare","name":"Prepare"},"spec":{"order":10,"enabled":true,"jobs":["prepare-linux"]}}',
+            content_type="application/json",
+        )
+        job_upload = SimpleUploadedFile(
+            "prepare-linux.json",
+            b'{"apiVersion":"buildmod/v1alpha1","kind":"JobModule","metadata":{"id":"prepare-linux","name":"Prepare Linux"},"spec":{"ciProvider":"bamboo","enabled":true,"tasks":["bamboo-prepare-python"]}}',
+            content_type="application/json",
+        )
+        task_upload = SimpleUploadedFile(
+            "bamboo-prepare-python.json",
+            b'{"apiVersion":"buildmod/v1alpha1","kind":"BambooTaskModule","metadata":{"id":"bamboo-prepare-python","name":"Bamboo Prepare Python"},"spec":{"taskKind":"script"}}',
+            content_type="application/json",
+        )
+
+        result = upload_module_asset(
+            asset_kind=ModuleAsset.KIND_STAGE_MODULE,
+            provider_scope=ModuleAsset.PROVIDER_COMMON,
+            module_id="prepare",
+            upload=stage_upload,
+            activate_after_upload=True,
+        )
+        upload_module_asset(
+            asset_kind=ModuleAsset.KIND_JOB_MODULE,
+            provider_scope=ModuleAsset.PROVIDER_COMMON,
+            module_id="prepare-linux",
+            upload=job_upload,
+            activate_after_upload=True,
+        )
+        upload_module_asset(
+            asset_kind=ModuleAsset.KIND_TASK_MODULE,
+            provider_scope=ModuleAsset.PROVIDER_BAMBOO,
+            module_id="bamboo-prepare-python",
+            upload=task_upload,
+            activate_after_upload=True,
+        )
+
+        self.assertEqual(ModuleAssetVersion.VALIDATION_VALID, result["validationStatus"])
+        asset = ModuleAsset.objects.get(module_id="prepare")
+        self.assertEqual(ModuleAsset.STATUS_ACTIVE, asset.status)
+        self.assertTrue(asset.activation.active_path)
+
+        reload_result = reload_module_assets()
+
+        self.assertEqual("success", reload_result["status"])
+        self.assertEqual(3, reload_result["loadedCount"])
+        self.assertEqual(1, ModuleLoadSnapshot.objects.count())
+
+    def test_init_module_registry_samples_command_loads_fixture_data(self) -> None:
+        call_command("init_module_registry_samples", reset_existing=True, include_invalid=True, verbosity=0)
+
+        self.assertEqual(7, ModuleAsset.objects.count())
+        self.assertEqual(8, ModuleAssetVersion.objects.count())
+        self.assertTrue(ModuleAsset.objects.filter(module_id="prepare", active_version__isnull=False).exists())
+        self.assertTrue(ModuleAsset.objects.filter(module_id="broken-stage", active_version__isnull=False).exists())
+        self.assertTrue(ModuleAsset.objects.filter(module_id="prepare-build", active_version__isnull=True).exists())
+
+        snapshot = ModuleLoadSnapshot.objects.order_by("-started_at").first()
+
+        self.assertIsNotNone(snapshot)
+        self.assertEqual(ModuleLoadSnapshot.STATUS_PARTIAL_SUCCESS, snapshot.status)
+        self.assertEqual(6, snapshot.loaded_count)
+        self.assertEqual(1, snapshot.invalid_count)
+        self.assertEqual(1, snapshot.skipped_count)

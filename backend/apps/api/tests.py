@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
 
 from apps.buildmeta.models import (
@@ -10,6 +11,8 @@ from apps.buildmeta.models import (
     BambooBuildUnit,
     BuildUnit,
     BuildVersion,
+    ModuleAsset,
+    ModuleLoadSnapshot,
     Project,
     Repository,
     SystemSetting,
@@ -434,3 +437,82 @@ class ApiSmokeTest(TestCase):
         self.repository.refresh_from_db()
         self.assertEqual("SAMPLE2", self.repository.repo_key)
         self.assertEqual("sample-app-release", self.repository.coverity_stream)
+
+    def test_module_registry_upload_list_and_reload_endpoints(self) -> None:
+        stage_upload = SimpleUploadedFile(
+            "prepare.json",
+            b'{"apiVersion":"buildmod/v1alpha1","kind":"StageModule","metadata":{"id":"prepare","name":"Prepare"},"spec":{"order":10,"enabled":true,"jobs":["prepare-linux"]}}',
+            content_type="application/json",
+        )
+        job_upload = SimpleUploadedFile(
+            "prepare-linux.json",
+            b'{"apiVersion":"buildmod/v1alpha1","kind":"JobModule","metadata":{"id":"prepare-linux","name":"Prepare Linux"},"spec":{"ciProvider":"bamboo","enabled":true,"tasks":["bamboo-prepare-python"]}}',
+            content_type="application/json",
+        )
+        task_upload = SimpleUploadedFile(
+            "bamboo-prepare-python.json",
+            b'{"apiVersion":"buildmod/v1alpha1","kind":"BambooTaskModule","metadata":{"id":"bamboo-prepare-python","name":"Bamboo Prepare Python"},"spec":{"taskKind":"script"}}',
+            content_type="application/json",
+        )
+
+        upload_response = self.client.post(
+            "/api/v1/admin/modules/uploads",
+            data={
+                "assetKind": "stage_module",
+                "providerScope": "common",
+                "moduleId": "prepare",
+                "activateAfterUpload": "true",
+                "file": stage_upload,
+            },
+            **self.auth_headers,
+        )
+
+        self.assertEqual(200, upload_response.status_code)
+        upload_payload = upload_response.json()
+        self.assertEqual("valid", upload_payload["validationStatus"])
+
+        self.client.post(
+            "/api/v1/admin/modules/uploads",
+            data={
+                "assetKind": "job_module",
+                "providerScope": "common",
+                "moduleId": "prepare-linux",
+                "activateAfterUpload": "true",
+                "file": job_upload,
+            },
+            **self.auth_headers,
+        )
+        self.client.post(
+            "/api/v1/admin/modules/uploads",
+            data={
+                "assetKind": "task_module",
+                "providerScope": "bamboo",
+                "moduleId": "bamboo-prepare-python",
+                "activateAfterUpload": "true",
+                "file": task_upload,
+            },
+            **self.auth_headers,
+        )
+
+        list_response = self.client.get("/api/v1/admin/modules/", **self.auth_headers)
+        self.assertEqual(200, list_response.status_code)
+        list_payload = list_response.json()
+        self.assertEqual(3, len(list_payload))
+        self.assertEqual({"prepare", "prepare-linux", "bamboo-prepare-python"}, {item["moduleId"] for item in list_payload})
+
+        reload_response = self.client.post(
+            "/api/v1/admin/modules/reload",
+            data=json.dumps({}),
+            content_type="application/json",
+            **self.auth_headers,
+        )
+        self.assertEqual(200, reload_response.status_code)
+        reload_payload = reload_response.json()
+        self.assertEqual("success", reload_payload["status"])
+        self.assertEqual(3, reload_payload["loadedCount"])
+
+        status_response = self.client.get("/api/v1/admin/modules/load-status", **self.auth_headers)
+        self.assertEqual(200, status_response.status_code)
+        status_payload = status_response.json()
+        self.assertEqual(3, status_payload["activeAssetCount"])
+        self.assertEqual(1, ModuleLoadSnapshot.objects.count())

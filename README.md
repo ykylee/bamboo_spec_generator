@@ -16,7 +16,10 @@
 - Django/Ninja 기반 운영 백엔드 스캐폴딩, migration, 기본 API/UI, SQLite/PostgreSQL 스위치, 개발용 DB 초기화 명령이 추가되었습니다.
 - 운영 공통 설정을 저장하기 위한 `SystemSetting` 모델이 추가되었으며, Coverity Connect URL, Git clone URL 템플릿, repository linkage mode, Bamboo 서버 URL 같은 전역값을 DB로 관리할 수 있습니다.
 - 운영 API는 프로젝트 목록/상세 조회 외에 프로젝트 등록/수정, 활성 정의 조회, 준비 컨텍스트 조회, 실행 시작/종료, 정적분석 결과 적재, 운영 설정 조회/수정, Specs draft 초기화를 지원합니다.
+- 운영 API는 모듈 레지스트리 업로드/활성화/재로드/상태 조회 엔드포인트도 포함합니다.
 - 조회용 웹 UI는 Django 템플릿 기반으로 프로젝트 목록/상세, 저장소 상세, 빌드 상세, BuildInfo 목록/상세, Coverity/Bamboo 설정, Bamboo plan 상태/상세 화면을 제공합니다.
+- 조회용 웹 UI에는 `/settings/modules/` 모듈 관리 화면이 추가되어 선언형 module 파일과 script template 자산을 업로드하고 재로드 상태를 확인할 수 있습니다.
+- 모듈 레지스트리 샘플 fixture와 `init_module_registry_samples` 관리 명령이 추가되어 stage/job/task/script template 예제를 한 번에 적재할 수 있습니다.
 - 프로젝트 등록 UI는 여러 저장소를 한 번에 입력할 수 있고, 각 빌드는 특정 저장소 slug에 연결되도록 구성되어 있습니다.
 - 등록 메타데이터와 `BuildPlanBuildInfo`를 바탕으로 활성 정의, prepare context, Specs preview/export draft를 합성할 수 있습니다.
 - `backend/manage.py check`, `migrate` 기준의 기본 백엔드 진입점은 확인되었습니다.
@@ -200,6 +203,10 @@ MSBuild 기반 플랜은 생성된 inline Python 코드에서 실제 MSBuild 호
 - `GET /api/v1/build-plans/<planKey>/active-definition`: 활성 빌드 정의 조회
 - `GET /api/v1/build-plans/<planKey>/prepare-context`: 준비 스테이지 변수 조회
 - `GET /api/v1/build-plans/<planKey>/executions`: 빌드 실행 이력 조회
+- `GET /api/v1/admin/modules/`: 모듈 자산 목록 조회
+- `POST /api/v1/admin/modules/uploads`: 모듈 자산 업로드
+- `POST /api/v1/admin/modules/reload`: 활성 모듈 재로드
+- `GET /api/v1/admin/modules/load-status`: 최근 재로드 상태 조회
 
 UI 스크린샷 확인은 컨테이너에 시스템 Chrome이나 X server가 없을 수 있으므로, Playwright 전용 Firefox와 헤드리스 모드 기준으로 실행한다. 저장소에는 이를 위한 보조 스크립트 `scripts/capture_ui_screenshot.py`를 포함한다.
 
@@ -220,6 +227,7 @@ UI 스크린샷 확인은 컨테이너에 시스템 Chrome이나 X server가 없
 - Django
 - django-ninja
 - psycopg
+- PyYAML
 
 백엔드 환경 변수 예시는 `backend/.env.example`에 정리되어 있습니다.
 
@@ -365,6 +373,16 @@ python3 manage.py migrate
 python3 manage.py runserver
 ```
 
+모듈 레지스트리 샘플 데이터 적재:
+
+```bash
+cd backend
+python3 manage.py init_module_registry_samples --reset-existing
+python3 manage.py init_module_registry_samples --reset-existing --include-invalid
+```
+
+기본 샘플은 `prepare` stage의 2개 버전, Bamboo용 job/task 모듈, Python script template을 적재합니다. `--include-invalid`를 추가하면 `missing_job` 오류를 재현하는 `broken-stage` 샘플도 함께 적재되어 상세 화면과 재로드 상태 패널에서 오류 표시를 확인할 수 있습니다.
+
 기본 `local` 설정은 `SQLite`를 사용하므로, 별도 DB 정보 없이도 바로 시작할 수 있습니다.
 
 SQLite로 명시 실행:
@@ -470,6 +488,7 @@ python3 -m unittest discover -s tests/playwright -p 'test_*.py'
 - `init_postgres_db --force`는 PostgreSQL의 대상 schema를 삭제 후 재생성하므로 개발 환경에서만 사용해야 합니다.
 - 테스트 설정 `config.settings.test`는 SQLite를 사용하므로 로컬 PostgreSQL 자격증명 없이도 백엔드 기본 동작을 검증할 수 있습니다.
 - Playwright E2E 테스트는 Django response 테스트와 별도 `tests/playwright/` 스위트로 분리되어 있으며, 임시 SQLite DB와 `runserver` subprocess 위에서 Firefox 헤드리스 브라우저로 실행됩니다.
+- Playwright E2E에는 `/settings/modules/` 모듈 관리 시나리오가 포함되어 있으며, 테스트 내부에서 `init_module_registry_samples` 명령으로 샘플 데이터를 적재한 뒤 목록, 버전 diff, 최근 로딩 오류 패널을 검증합니다.
 
 Windows `cmd` 기준:
 

@@ -10,7 +10,7 @@
 
 ## 요약
 
-이 문서는 제품의 상세 설계를 한 곳에 모은다. 범위는 JSON 입력 스키마, 저장소 연결 및 브랜치 트리거, 작업 하위 경로, MSBuild 보정, 스크립트 자산 렌더링, 빌드 메타데이터 DB 모델, 운영 백엔드/API/조회 UI 설계, 다중 CI 도구 공통 모델 확장, 그리고 장기 확장 범위인 배포/릴리스 관리 상세 설계다.
+이 문서는 제품의 상세 설계를 한 곳에 모은다. 범위는 JSON 입력 스키마, 저장소 연결 및 브랜치 트리거, 작업 하위 경로, MSBuild 보정, 스크립트 자산 렌더링, 모듈형 stage/job/task 구성, 빌드 메타데이터 DB 모델, 운영 백엔드/API/조회 UI 설계, 다중 CI 도구 공통 모델 확장, 그리고 장기 확장 범위인 배포/릴리스 관리 상세 설계다.
 
 함수 단위 또는 특정 구현 흐름의 상세 설계가 필요할 때는 `detailed_designs/` 아래에 별도 문서를 추가한다.
 
@@ -24,12 +24,15 @@
   - [프로젝트 등록 및 Specs 생성 준비도](./detailed_designs/project_registration_and_generation_readiness.md)
 - 현재 추가된 제품 상세 설계:
   - [다중 CI 콘솔 모드 전환 및 공통 도메인 모델](./detailed_designs/multi_ci_console_and_provider_model.md)
+  - [모듈형 빌드 구성과 CI 도구별 Task 확장](./detailed_designs/modular_build_composition_and_tool_specific_tasks.md)
+  - [모듈 레지스트리 백엔드 모델과 관리자 API](./detailed_designs/module_registry_backend_and_api.md)
   - [CI/CD 공통 백엔드 모델 일반화 검토](./detailed_designs/backend_model_generalization_review.md)
   - [BuildUnit 중심 백엔드 모델 초안](./detailed_designs/buildunit_backend_model_draft.md)
   - [BuildUnit 중심 백엔드 모델 ERD](./detailed_designs/buildunit_backend_model_erd.md)
   - [저장소 연결 지원 방식 설계](./repository_connection_support.md)
 - 현재 추가된 결정사항 문서:
   - [다중 CI 콘솔 결정사항](./detailed_designs/multi_ci_console_decisions.md)
+  - [모듈형 빌드 구성 결정사항](./detailed_designs/modular_build_composition_decisions.md)
 - Jenkins 등록/모드 전환 상세 설계는 아직 별도 문서가 없으며 후속 상세 설계 범위다.
 - 백엔드 모델 전환은 기존 `BuildUnit` 계열 호환 유지가 아니라 `BuildUnit` 중심 재구축을 기본 전제로 한다.
 
@@ -192,6 +195,19 @@ scripts/plan_tasks/
 - `{{PREPARE_COMMAND}}`
 - `{{BUILD_COMMAND}}`
 - `{{TARGET_PLAN_KEY}}`
+
+### 모듈형 build composition 확장
+
+- build workflow의 선언 모델은 장기적으로 `stage -> job -> task` 계층으로 재구성한다.
+- `stage`와 `job`은 조합 가능한 모듈 단위로 보고, 각 모듈의 선언과 실제 구현은 분리한다.
+- `task`는 공통 단일 표준으로 묶지 않고 `ci_provider`별 전용 스키마를 사용한다.
+- 정해진 형식의 모듈 파일을 정해진 경로에 두면 자동 로딩하는 구조를 기본값으로 검토한다.
+- script 계열 task는 기본적으로 파일 기반 템플릿을 참조한다.
+- Python task는 OS 비종속 소스 본문을 입력으로 받고, 대상 OS에 따라 실행 헤더와 wrapper를 바꾸어 렌더링한다.
+- Linux 계열 기본 shebang은 `#!/usr/bin/env python3`를 사용한다.
+- Windows 계열은 `#!python` 또는 별도 wrapper를 허용한다.
+- 운영 웹 업로드는 선언형 모듈 정의와 스크립트 자산 범위를 우선 검토하고, 임의 코드 업로드는 기본 범위에서 제외한다.
+- 세부 registry와 provider renderer 구조는 [모듈형 빌드 구성과 CI 도구별 Task 확장](./detailed_designs/modular_build_composition_and_tool_specific_tasks.md) 문서를 따른다.
 
 ## 6. 빌드 메타데이터 DB 설계
 

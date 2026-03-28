@@ -2,3 +2,4 @@ Django
 django-ninja
 psycopg[binary]
 Pygments
+PyYAML

@@ -1,0 +1,130 @@
+{% extends "ui/base.html" %}
+
+{% block title %}모듈 상세 | CI Ops Console{% endblock %}
+{% block page_heading %}모듈 상세{% endblock %}
+
+{% block content %}
+<section class="signal-hero signal-hero--workspace">
+  <div class="signal-hero__content">
+    <p class="signal-hero__eyebrow">Module Detail</p>
+    <h1 class="hero__title">{{ moduleAsset.displayName|default:moduleAsset.moduleId }}</h1>
+    <p class="signal-hero__body">{{ moduleAsset.assetKind }} · {{ moduleAsset.providerScope }} · {{ moduleAsset.status }}</p>
+  </div>
+  <div class="signal-hero__actions">
+    <a class="action-button action-button--ghost" href="{% url 'module-registry-settings' %}">모듈 목록으로</a>
+  </div>
+</section>
+
+<section class="detail-grid detail-grid--resource">
+  <article class="panel panel--signal-list">
+    <div class="panel__header">
+      <h2 class="panel__title">버전 이력</h2>
+    </div>
+    <div class="table-wrapper">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Version</th>
+            <th>Filename</th>
+            <th>Status</th>
+            <th>Flags</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for version in moduleAsset.versions %}
+          <tr>
+            <td>
+              <a href="?version={{ version.versionId }}">v{{ version.versionNumber }}</a>
+              {% if moduleAsset.selectedVersionId == version.versionId %}
+              <span> · selected</span>
+              {% endif %}
+            </td>
+            <td>{{ version.sourceFilename }}</td>
+            <td>{{ version.validationStatus }}</td>
+            <td>
+              {% if version.isActive %}active{% endif %}
+              {% if version.isActive and version.isLatest %} · {% endif %}
+              {% if version.isLatest %}latest{% endif %}
+            </td>
+            <td>
+              {% if moduleAsset.selectedVersionId != version.versionId %}
+              <a href="?version={{ version.versionId }}">선택</a>
+              {% else %}
+              <span>선택됨</span>
+              {% endif %}
+              {% if moduleAsset.selectedVersionId and moduleAsset.selectedVersionId != version.versionId %}
+              <span> · </span>
+              <a href="?version={{ moduleAsset.selectedVersionId }}&compare={{ version.versionId }}">이 버전과 비교</a>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </article>
+
+  <article class="panel panel--signal-list">
+    <div class="panel__header">
+      <h2 class="panel__title">원본 미리보기</h2>
+    </div>
+    {% if moduleAsset.previewContent %}
+    <pre class="code-block"><code>{{ previewHtml }}</code></pre>
+    {% else %}
+    <p class="panel__body">선택한 버전의 원본을 읽을 수 없습니다.</p>
+    {% endif %}
+  </article>
+</section>
+
+<section class="detail-grid detail-grid--resource">
+  <article class="panel panel--signal-list">
+    <div class="panel__header">
+      <h2 class="panel__title">버전 비교</h2>
+    </div>
+    {% if moduleAsset.diffContent %}
+    <p class="panel__body">
+      기준 버전: {{ moduleAsset.selectedVersionId }}
+      {% if moduleAsset.compareVersionId %}
+      · 비교 대상: {{ moduleAsset.compareVersionId }}
+      {% endif %}
+    </p>
+    <pre class="code-block"><code>{{ diffHtml }}</code></pre>
+    {% else %}
+    <p class="panel__body">비교할 다른 버전을 선택하면 diff를 보여줍니다.</p>
+    {% endif %}
+  </article>
+
+  <article class="panel panel--signal-list">
+    <div class="panel__header">
+      <h2 class="panel__title">최근 로딩 오류</h2>
+    </div>
+    {% if moduleAsset.recentIssues %}
+    <div class="table-wrapper">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Status</th>
+            <th>Error Code</th>
+            <th>Message</th>
+            <th>Source Path</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for issue in moduleAsset.recentIssues %}
+          <tr>
+            <td>{{ issue.status }}</td>
+            <td>{{ issue.errorCode }}</td>
+            <td>{{ issue.errorMessage }}</td>
+            <td>{{ issue.sourcePath }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p class="panel__body">최근 기록된 로딩 오류가 없습니다.</p>
+    {% endif %}
+  </article>
+</section>
+{% endblock %}

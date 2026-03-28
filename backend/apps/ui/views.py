@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from django.core.paginator import Paginator
+from django.http import HttpRequest
 from django.shortcuts import redirect, render
 from django.utils.safestring import mark_safe
 from pygments import highlight
@@ -9,7 +10,7 @@ from pygments.lexers import get_lexer_by_name
 from pygments.lexers.special import TextLexer
 from pygments.util import ClassNotFound
 
-from apps.buildmeta.models import BambooBuildInfo, BambooBuildUnit, BambooPublishExecution, BuildExecution, Project, Repository
+from apps.buildmeta.models import BambooBuildInfo, BambooBuildUnit, BambooPublishExecution, BuildExecution, ModuleAsset, ModuleAssetVersion, Project, Repository
 from apps.buildmeta.selectors.definitions import get_build_plan_export_draft, get_build_plan_preview
 from apps.buildmeta.selectors.executions import (
     list_build_plan_summaries,
@@ -36,10 +37,17 @@ from apps.buildmeta.services import (
     get_repository_system_settings,
     initialize_specs_draft_data,
     initialize_specs_draft_for_plan,
+    activate_module_asset_version,
+    deactivate_module_asset,
     publish_bamboo_specs,
     queue_bamboo_plan_with_options,
+    get_module_load_status,
+    get_module_asset_detail,
+    list_module_assets,
+    reload_module_assets,
     set_system_setting,
     trigger_jenkins_job,
+    upload_module_asset,
     update_build_plan_metadata,
     update_project,
     upsert_build_info,
@@ -51,6 +59,7 @@ from .forms import (
     BuildInfoMetadataForm,
     BuildPlanMetadataForm,
     CoveritySystemSettingsForm,
+    ModuleAssetUploadForm,
     ProjectMetadataForm,
     ProjectRegistrationForm,
     RepositoryMetadataForm,
@@ -382,6 +391,77 @@ def jenkins_settings(request):
         "navProjectSearchItems": _build_nav_project_search_items(list_project_summaries()),
     }
     return render(request, "ui/jenkins_settings.html", context)
+
+
+def module_registry_settings(request: HttpRequest):
+    upload_form = ModuleAssetUploadForm()
+    message = ""
+    error = ""
+
+    if request.method == "POST":
+        form_kind = request.POST.get("form_kind", "").strip()
+        if form_kind == "upload_module":
+            upload_form = ModuleAssetUploadForm(request.POST, request.FILES)
+            if upload_form.is_valid():
+                try:
+                    result = upload_module_asset(
+                        asset_kind=upload_form.cleaned_data["asset_kind"],
+                        provider_scope=upload_form.cleaned_data["provider_scope"] or ModuleAsset.PROVIDER_COMMON,
+                        module_id=upload_form.cleaned_data["module_id"],
+                        upload=upload_form.cleaned_data["file"],
+                        uploaded_by=request.user if getattr(request, "user", None) and request.user.is_authenticated else None,
+                        activate_after_upload=upload_form.cleaned_data["activate_after_upload"],
+                    )
+                    message = f"모듈을 업로드했습니다. 검증 상태: {result['validationStatus']}"
+                    upload_form = ModuleAssetUploadForm()
+                except ValueError as exc:
+                    error = str(exc)
+        elif form_kind == "reload_modules":
+            result = reload_module_assets(
+                triggered_by=request.user if getattr(request, "user", None) and request.user.is_authenticated else None
+            )
+            message = f"모듈 재로드 완료: loaded={result['loadedCount']} invalid={result['invalidCount']} skipped={result['skippedCount']}"
+        elif form_kind == "activate_module":
+            asset_id = request.POST.get("asset_id", "").strip()
+            version_id = request.POST.get("version_id", "").strip()
+            asset = ModuleAsset.objects.get(pk=asset_id)
+            version = ModuleAssetVersion.objects.get(pk=version_id, asset=asset)
+            activate_module_asset_version(
+                asset=asset,
+                version=version,
+                activated_by=request.user if getattr(request, "user", None) and request.user.is_authenticated else None,
+            )
+            message = f"모듈 '{asset.module_id}'를 활성화했습니다."
+        elif form_kind == "deactivate_module":
+            asset_id = request.POST.get("asset_id", "").strip()
+            asset = ModuleAsset.objects.get(pk=asset_id)
+            deactivate_module_asset(asset=asset)
+            message = f"모듈 '{asset.module_id}'를 비활성화했습니다."
+
+    context = {
+        "uploadForm": upload_form,
+        "moduleAssets": list_module_assets(),
+        "moduleLoadStatus": get_module_load_status(),
+        "message": message,
+        "error": error,
+        "navProjectSearchItems": _build_nav_project_search_items(list_project_summaries()),
+    }
+    return render(request, "ui/module_registry_settings.html", context)
+
+
+def module_registry_asset_detail(request: HttpRequest, asset_id: str):
+    detail = get_module_asset_detail(
+        asset_id=asset_id,
+        version_id=request.GET.get("version", "").strip(),
+        compare_version_id=request.GET.get("compare", "").strip(),
+    )
+    context = {
+        "moduleAsset": detail,
+        "previewHtml": _highlight_code_block(detail["previewContent"], detail["previewLanguage"]),
+        "diffHtml": _highlight_code_block(detail["diffContent"], detail["diffLanguage"]),
+        "navProjectSearchItems": _build_nav_project_search_items(list_project_summaries()),
+    }
+    return render(request, "ui/module_registry_asset_detail.html", context)
 
 
 def project_detail(request, jira_project_key: str):
@@ -1349,6 +1429,7 @@ def _highlight_code_block(content: str, language: str) -> str:
         "python": "python",
         "shell": "bash",
         "batch": "batch",
+        "diff": "diff",
         "yaml": "yaml",
         "json": "json",
         "text": "text",

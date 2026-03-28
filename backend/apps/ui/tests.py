@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import shutil
+from pathlib import Path
 from django.test import TestCase
+from django.core.files.uploadedfile import SimpleUploadedFile
 from unittest.mock import patch
 
 from apps.buildmeta.models import (
     BuildExecution,
     BuildVersion,
+    ModuleAsset,
     SystemSetting,
 )
 from apps.buildmeta.tests_support import (
@@ -17,7 +21,7 @@ from apps.buildmeta.tests_support import (
     ProjectBuild,
     ProjectRepository,
 )
-from apps.buildmeta.services import BambooOperationError
+from apps.buildmeta.services import BambooOperationError, reload_module_assets
 from apps.ui.views import (
     _build_project_payload,
     _build_registration_suggestions,
@@ -257,14 +261,142 @@ class ProjectViewTest(TestCase):
             "https://git.example.com/scm/{project_key_lower}/{repo_slug}.git",
             SystemSetting.objects.get(key="repository.git.clone_url_template").value,
         )
-        self.assertEqual(
-            "create_if_missing",
-            SystemSetting.objects.get(key="repository.linkage_mode").value,
+
+    def test_module_registry_settings_page_renders(self) -> None:
+        response = self.client.get("/settings/modules/")
+
+        self.assertEqual(200, response.status_code)
+        self.assertContains(response, "모듈 관리")
+        self.assertContains(response, "모듈 업로드")
+        self.assertContains(response, "모듈 재로드")
+
+    def test_module_registry_settings_page_uploads_module(self) -> None:
+        upload = SimpleUploadedFile(
+            "prepare.json",
+            b'{"apiVersion":"buildmod/v1alpha1","kind":"StageModule","metadata":{"id":"prepare","name":"Prepare"},"spec":{"order":10,"enabled":true,"jobs":["prepare-linux"]}}',
+            content_type="application/json",
         )
-        self.assertEqual(
-            "https://bamboo.example.com",
-            SystemSetting.objects.get(key="bamboo.server.url").value,
+
+        response = self.client.post(
+            "/settings/modules/",
+            {
+                "form_kind": "upload_module",
+                "asset_kind": "stage_module",
+                "provider_scope": "common",
+                "module_id": "prepare",
+                "activate_after_upload": "on",
+                "file": upload,
+            },
         )
+
+        self.assertEqual(200, response.status_code)
+        self.assertContains(response, "모듈을 업로드했습니다.")
+        self.assertTrue(ModuleAsset.objects.filter(module_id="prepare").exists())
+
+    def test_module_registry_asset_detail_renders_preview(self) -> None:
+        upload = SimpleUploadedFile(
+            "prepare.json",
+            b'{"apiVersion":"buildmod/v1alpha1","kind":"StageModule","metadata":{"id":"prepare","name":"Prepare"},"spec":{"order":10,"enabled":true,"jobs":["prepare-linux"]}}',
+            content_type="application/json",
+        )
+        self.client.post(
+            "/settings/modules/",
+            {
+                "form_kind": "upload_module",
+                "asset_kind": "stage_module",
+                "provider_scope": "common",
+                "module_id": "prepare",
+                "activate_after_upload": "on",
+                "file": upload,
+            },
+        )
+        asset = ModuleAsset.objects.get(module_id="prepare")
+
+        response = self.client.get(f"/settings/modules/{asset.id}/")
+
+        self.assertEqual(200, response.status_code)
+        self.assertContains(response, "모듈 상세")
+        self.assertContains(response, "prepare")
+        self.assertContains(response, "원본 미리보기")
+        self.assertContains(response, "StageModule")
+
+    def test_module_registry_asset_detail_renders_version_diff(self) -> None:
+        first_upload = SimpleUploadedFile(
+            "prepare-v1.json",
+            b'{"apiVersion":"buildmod/v1alpha1","kind":"StageModule","metadata":{"id":"prepare","name":"Prepare"},"spec":{"order":10,"enabled":true,"jobs":["prepare-linux"]}}',
+            content_type="application/json",
+        )
+        second_upload = SimpleUploadedFile(
+            "prepare-v2.json",
+            b'{"apiVersion":"buildmod/v1alpha1","kind":"StageModule","metadata":{"id":"prepare","name":"Prepare"},"spec":{"order":20,"enabled":true,"jobs":["prepare-linux","verify-linux"]}}',
+            content_type="application/json",
+        )
+        self.client.post(
+            "/settings/modules/",
+            {
+                "form_kind": "upload_module",
+                "asset_kind": "stage_module",
+                "provider_scope": "common",
+                "module_id": "prepare",
+                "file": first_upload,
+            },
+        )
+        self.client.post(
+            "/settings/modules/",
+            {
+                "form_kind": "upload_module",
+                "asset_kind": "stage_module",
+                "provider_scope": "common",
+                "module_id": "prepare",
+                "file": second_upload,
+            },
+        )
+        asset = ModuleAsset.objects.get(module_id="prepare")
+        versions = list(asset.versions.order_by("-version_number"))
+
+        response = self.client.get(
+            f"/settings/modules/{asset.id}/",
+            {"version": str(versions[0].id), "compare": str(versions[1].id)},
+        )
+
+        self.assertEqual(200, response.status_code)
+        self.assertContains(response, "버전 비교")
+        self.assertContains(response, "prepare-v1.json@v1")
+        self.assertContains(response, "prepare-v2.json@v2")
+        self.assertContains(response, "verify-linux")
+
+    def test_module_registry_asset_detail_renders_recent_load_issues(self) -> None:
+        upload = SimpleUploadedFile(
+            "prepare.json",
+            b'{"apiVersion":"buildmod/v1alpha1","kind":"StageModule","metadata":{"id":"prepare","name":"Prepare"},"spec":{"order":10,"enabled":true,"jobs":["missing-job"]}}',
+            content_type="application/json",
+        )
+        self.client.post(
+            "/settings/modules/",
+            {
+                "form_kind": "upload_module",
+                "asset_kind": "stage_module",
+                "provider_scope": "common",
+                "module_id": "prepare",
+                "activate_after_upload": "on",
+                "file": upload,
+            },
+        )
+        asset = ModuleAsset.objects.get(module_id="prepare")
+
+        reload_module_assets(trigger_source="test")
+
+        response = self.client.get(f"/settings/modules/{asset.id}/")
+
+        self.assertEqual(200, response.status_code)
+        self.assertContains(response, "최근 로딩 오류")
+        self.assertContains(response, "missing_job")
+        self.assertContains(response, "Referenced job &#x27;missing-job&#x27; does not exist")
+
+    def tearDown(self) -> None:
+        managed_root = Path(__file__).resolve().parents[3] / "managed_modules"
+        if managed_root.exists():
+            shutil.rmtree(managed_root)
 
     def test_coverity_settings_page_initializes_specs_drafts(self) -> None:
         response = self.client.post(

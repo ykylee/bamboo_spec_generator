@@ -1,4 +1,5 @@
 from .core import SystemSetting, TimestampedModel
+from .module_registry import ModuleActivation, ModuleAsset, ModuleAssetVersion, ModuleLoadEntry, ModuleLoadSnapshot
 from .buildunit import (
     AuditEvent,
     BambooBuildInfo,
@@ -35,6 +36,11 @@ __all__ = [
     "JenkinsBuildUnit",
     "JenkinsNodeSnapshot",
     "JenkinsQueueItemSnapshot",
+    "ModuleActivation",
+    "ModuleAsset",
+    "ModuleAssetVersion",
+    "ModuleLoadEntry",
+    "ModuleLoadSnapshot",
     "Project",
     "Repository",
     "StaticAnalysisResult",

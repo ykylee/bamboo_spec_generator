@@ -42,7 +42,7 @@
 
 ### 개요
 
-현재 통합 CRS를 Jira 등록 가능한 단위로 분해한 초안이다. 상위 에픽 1건과 하위 스토리 11건으로 구성한다.
+현재 통합 CRS를 Jira 등록 가능한 단위로 분해한 초안이다. 상위 에픽 1건과 하위 스토리 12건으로 구성한다.
 
 ### 구현 상태
 
@@ -58,6 +58,8 @@
   - STORY-12
 - 현재 문서화 또는 부분 반영 수준:
   - STORY-08
+- 현재 신규 요구사항:
+  - STORY-34
 - 현재 미구현:
   - STORY-09
 
@@ -65,6 +67,7 @@
 
 - `유지`: STORY-01, STORY-02, STORY-03, STORY-06, STORY-07, STORY-10, STORY-11, STORY-12
 - `보강 필요`: STORY-04, STORY-08
+- `높음`: STORY-34
 - `신규 구현 필요`: STORY-09
 
 ### 추천 구현 순서
@@ -72,6 +75,7 @@
 1. STORY-08 저장소 연결 미등록 저장소 대응 보강
 2. STORY-09 브랜치별 연결 및 트리거 구성 생성
 3. STORY-04 산출물 구조와 저장소 연결 보조 메타데이터 정합성 보강
+4. STORY-34 모듈형 빌드 구성과 CI 도구별 Task 확장
 
 ### 이슈 목록
 
@@ -88,6 +92,7 @@
 - [STORY-10 MSBuild 플랜용 Directory.Build.targets 사전 생성 지원](./STORY-10-msbuild-directory-build-targets-override.md)
 - [STORY-11 빌드 작업 하위 경로 지정 지원](./STORY-11-build-working-subpath-support.md)
 - [STORY-12 플랜 스크립트 자산 분리 및 환경별 커스터마이징 관리](./STORY-12-plan-script-asset-management.md)
+- [STORY-34 모듈형 빌드 구성과 CI 도구별 Task 확장](./STORY-34-modular-build-composition-and-tool-specific-tasks.md)
 
 ## EPIC-02 빌드 메타데이터 DB 확장
 

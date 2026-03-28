@@ -21,6 +21,15 @@ from .jenkins import (
     get_jenkins_system_settings,
     trigger_jenkins_job,
 )
+from .module_registry import (
+    activate_module_asset_version,
+    deactivate_module_asset,
+    get_module_asset_detail,
+    get_module_load_status,
+    list_module_assets,
+    reload_module_assets,
+    upload_module_asset,
+)
 from .projects import create_project, update_project
 from .specs_drafts import initialize_specs_draft_data, initialize_specs_draft_for_plan
 from .system_settings import (
@@ -56,15 +65,22 @@ __all__ = [
     "initialize_specs_draft_for_plan",
     "JenkinsOperationError",
     "load_definition_import_records",
+    "list_module_assets",
     "publish_bamboo_specs",
     "queue_bamboo_plan",
     "queue_bamboo_plan_with_options",
     "record_static_analysis_results",
+    "reload_module_assets",
     "set_system_setting",
     "start_execution",
     "sync_definition_records",
     "trigger_jenkins_job",
+    "upload_module_asset",
     "upsert_build_info",
     "update_build_plan_metadata",
     "update_project",
+    "activate_module_asset_version",
+    "deactivate_module_asset",
+    "get_module_asset_detail",
+    "get_module_load_status",
 ]

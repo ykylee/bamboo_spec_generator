@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+import shutil
 import socket
 import subprocess
 import sys
@@ -52,13 +53,15 @@ class UiPlaywrightE2ETest(unittest.TestCase):
         from django.core.management import call_command
 
         cls._call_command = staticmethod(call_command)
-        from apps.buildmeta.models import BambooBuildUnit, BuildUnit, BuildUnitDefinition, Project, Repository
+        from apps.buildmeta.models import BambooBuildUnit, BuildUnit, BuildUnitDefinition, ModuleAsset, Project, Repository
 
         cls.Project = Project
         cls.Repository = Repository
         cls.BuildUnit = BuildUnit
         cls.BambooBuildUnit = BambooBuildUnit
         cls.BuildUnitDefinition = BuildUnitDefinition
+        cls.ModuleAsset = ModuleAsset
+        cls.managed_modules_root = REPO_ROOT / "managed_modules"
 
         cls.server_process = subprocess.Popen(
             ["python3", "backend/manage.py", "runserver", f"127.0.0.1:{cls.port}", "--noreload"],
@@ -96,11 +99,13 @@ class UiPlaywrightE2ETest(unittest.TestCase):
 
     def setUp(self) -> None:
         type(self)._call_command("flush", interactive=False, verbosity=0)
+        self._reset_managed_modules()
         self.context = self.browser.new_context()
         self.page = self.context.new_page()
 
     def tearDown(self) -> None:
         self.context.close()
+        self._reset_managed_modules()
 
     @classmethod
     def _find_free_port(cls) -> int:
@@ -122,6 +127,18 @@ class UiPlaywrightE2ETest(unittest.TestCase):
                 last_error = exc
                 time.sleep(0.2)
         raise RuntimeError(f"Timed out waiting for Django server at {cls.base_url}: {last_error}")
+
+    def _reset_managed_modules(self) -> None:
+        if self.managed_modules_root.exists():
+            shutil.rmtree(self.managed_modules_root)
+
+    def _seed_module_registry_samples(self, *, include_invalid: bool = False) -> None:
+        type(self)._call_command(
+            "init_module_registry_samples",
+            reset_existing=True,
+            include_invalid=include_invalid,
+            verbosity=0,
+        )
 
     def _create_project_with_build(
         self,
@@ -409,9 +426,7 @@ class UiPlaywrightE2ETest(unittest.TestCase):
             with_active_definition=True,
         )
 
-        self.page.goto(self.base_url, wait_until="domcontentloaded")
-        self.page.get_by_role("link", name="빌드 플랜").first.click()
-        self.page.wait_for_url(f"{self.base_url}/build-plans/")
+        self.page.goto(f"{self.base_url}/build-plans/", wait_until="domcontentloaded")
 
         self.assertTrue(self.page.get_by_text("빌드 플랜 인덱스").is_visible())
         self.assertTrue(self.page.locator("table.project-table").get_by_text("Sample API").is_visible())
@@ -599,3 +614,44 @@ class UiPlaywrightE2ETest(unittest.TestCase):
 
         self.assertTrue(self.page.get_by_role("heading", name="빌드 플랜 메타데이터").is_visible())
         self.assertTrue(self.page.get_by_role("heading", name="Sample Web", exact=True).is_visible())
+
+    def test_module_registry_settings_and_diff_preview_render_in_browser(self) -> None:
+        self._seed_module_registry_samples()
+        prepare_asset = self.ModuleAsset.objects.get(module_id="prepare")
+        prepare_versions = list(prepare_asset.versions.order_by("-version_number"))
+
+        self.page.goto(f"{self.base_url}/settings/modules/", wait_until="domcontentloaded")
+
+        self.assertTrue(self.page.locator("main").get_by_role("heading", name="모듈 관리").is_visible())
+        self.assertTrue(self.page.get_by_text("prepare").first.is_visible())
+        self.assertTrue(self.page.get_by_text("prepare-linux").first.is_visible())
+        self.assertTrue(self.page.get_by_text("prepare-build").first.is_visible())
+        self.assertTrue(self.page.get_by_text("success").first.is_visible())
+
+        self.page.goto(f"{self.base_url}/settings/modules/{prepare_asset.id}/", wait_until="domcontentloaded")
+
+        self.assertTrue(self.page.get_by_role("heading", name="모듈 상세").is_visible())
+        self.assertTrue(self.page.get_by_text("버전 이력").is_visible())
+        self.assertIn("prepare-stage-v2.yaml", self.page.locator("body").text_content())
+        self.assertIn("prepare-stage-v1.yaml", self.page.locator("body").text_content())
+
+        self.page.goto(
+            f"{self.base_url}/settings/modules/{prepare_asset.id}/?version={prepare_versions[0].id}&compare={prepare_versions[1].id}",
+            wait_until="domcontentloaded",
+        )
+
+        self.assertTrue(self.page.get_by_text("버전 비교").is_visible())
+        self.assertIn("prepare-stage-v1.yaml@v1", self.page.locator("body").text_content())
+        self.assertIn("prepare-stage-v2.yaml@v2", self.page.locator("body").text_content())
+        self.assertIn("verify-linux", self.page.locator("body").text_content())
+
+    def test_module_registry_invalid_sample_shows_recent_load_issue_in_browser(self) -> None:
+        self._seed_module_registry_samples(include_invalid=True)
+        broken_stage = self.ModuleAsset.objects.get(module_id="broken-stage")
+
+        self.page.goto(f"{self.base_url}/settings/modules/{broken_stage.id}/", wait_until="domcontentloaded")
+
+        self.assertTrue(self.page.get_by_role("heading", name="모듈 상세").is_visible())
+        self.assertTrue(self.page.get_by_text("최근 로딩 오류").is_visible())
+        self.assertTrue(self.page.get_by_text("missing_job").is_visible())
+        self.assertIn("Referenced job 'missing-job' does not exist", self.page.locator("body").text_content())

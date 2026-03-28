@@ -1,0 +1,10 @@
+apiVersion: buildmod/v1alpha1
+kind: StageModule
+metadata:
+  id: broken-stage
+  name: Broken Stage
+spec:
+  order: 90
+  enabled: true
+  jobs:
+    - missing-job

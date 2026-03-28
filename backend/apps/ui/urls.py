@@ -6,6 +6,8 @@ from .views import (
     build_plan_list,
     coverity_settings,
     jenkins_settings,
+    module_registry_asset_detail,
+    module_registry_settings,
     project_bamboo_plan_detail,
     project_build_detail,
     project_build_info_detail,
@@ -25,6 +27,8 @@ urlpatterns = [
     path("settings/", settings, name="settings"),
     path("settings/coverity/", coverity_settings, name="coverity-settings"),
     path("settings/jenkins/", jenkins_settings, name="jenkins-settings"),
+    path("settings/modules/", module_registry_settings, name="module-registry-settings"),
+    path("settings/modules/<uuid:asset_id>/", module_registry_asset_detail, name="module-registry-asset-detail"),
     path("projects/<str:jira_project_key>/", project_detail, name="project-detail"),
     path(
         "projects/<str:jira_project_key>/repositories/<str:repo_slug>/",
