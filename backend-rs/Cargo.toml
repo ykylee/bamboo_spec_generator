@@ -9,6 +9,8 @@ description = "bamboo_spec_generator Rust Backend"
 actix-web = "4.4"
 actix-rt = "2.10"
 actix-cors = "0.7"
+actix-web-httpauth = "0.8"
+actix-multipart = "0.7"
 
 # Async Runtime
 tokio = { version = "1.40", features = ["full"] }
@@ -25,6 +27,8 @@ sqlx = { version = "0.8", features = [
 # Serialization
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+serde_yaml = "0.9"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 
 # Error Handling
 thiserror = "2.0"
@@ -40,12 +44,18 @@ uuid = { version = "1.10", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
 async-trait = "0.1"
 base64 = "0.22"
+similar = "2.6"
+futures-util = "0.3"
+sha2 = "0.10"
+serde_urlencoded = "0.7"
+urlencoding = "2.1"
 
 # Environment
 dotenv = "0.15"
 
 [dev-dependencies]
 tempfile = "3.12"
+serial_test = "3.2"
 
 [lib]
 name = "bamboo_backend"

@@ -1,0 +1,9 @@
+{
+  "connectUrl": "https://coverity.example.com",
+  "onNewCert": "trust",
+  "commitEnabled": true,
+  "gitCloneUrlTemplate": "https://git.example.com/scm/{project_key_lower}/{repo_slug}.git",
+  "repositoryLinkageMode": "create_if_missing",
+  "bambooServerUrl": "",
+  "serverUrl": ""
+}

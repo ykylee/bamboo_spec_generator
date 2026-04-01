@@ -18,9 +18,11 @@
 - 운영 API는 프로젝트 목록/상세 조회 외에 프로젝트 등록/수정, 활성 정의 조회, 준비 컨텍스트 조회, 실행 시작/종료, 정적분석 결과 적재, 운영 설정 조회/수정, Specs draft 초기화를 지원합니다.
 - 운영 API는 모듈 레지스트리 업로드/활성화/재로드/상태 조회 엔드포인트도 포함합니다.
 - 조회용 웹 UI는 Django 템플릿 기반으로 프로젝트 목록/상세, 저장소 상세, 빌드 상세, BuildInfo 목록/상세, Coverity/Bamboo 설정, Bamboo plan 상태/상세 화면을 제공합니다.
+- `frontend/` 아래에 React + TypeScript + Vite 기반 운영 콘솔 초안이 추가되었고, 첫 화면은 Rust API의 프로젝트 목록/상세를 소비합니다.
 - 조회용 웹 UI에는 `/settings/modules/` 모듈 관리 화면이 추가되어 선언형 module 파일과 script template 자산을 업로드하고 재로드 상태를 확인할 수 있습니다.
 - 모듈 레지스트리 샘플 fixture와 `init_module_registry_samples` 관리 명령이 추가되어 stage/job/task/script template 예제를 한 번에 적재할 수 있습니다.
 - 프로젝트 등록 UI는 여러 저장소를 한 번에 입력할 수 있고, 각 빌드는 특정 저장소 slug에 연결되도록 구성되어 있습니다.
+- 프로젝트/빌드 메타데이터의 기준 용어는 `language`, `compiler`, `runtimeStack`이며, 예전 `buildType` 표기는 하위 호환용으로만 유지합니다.
 - 등록 메타데이터와 `BuildPlanBuildInfo`를 바탕으로 활성 정의, prepare context, Specs preview/export draft를 합성할 수 있습니다.
 - `backend/manage.py check`, `migrate` 기준의 기본 백엔드 진입점은 확인되었습니다.
 - 문서 기준 장기 목표는 상단 UI에서 `Bamboo 관리`와 `Jenkins 관리`를 전환할 수 있는 공통 CI 운영 콘솔입니다.
@@ -44,6 +46,7 @@
 - 입력 JSON: `build_info_json/<year>/<buildId>.json`
 - 생성기 코드: `src/bamboo_spec_generator/`
 - 운영 백엔드: `backend/`
+- React 프런트엔드: `frontend/`
 - 백엔드 의존성: `requirements-backend.txt`
 - 스크립트 자산: `scripts/plan_tasks/`
 - 테스트: `tests/`
@@ -194,6 +197,10 @@ MSBuild 기반 플랜은 생성된 inline Python 코드에서 실제 MSBuild 호
 - `/`: 프로젝트 목록
 - `/projects/<jiraProjectKey>/`: 프로젝트 상세
 
+React 프런트엔드 개발 서버 기준 진입점은 다음과 같습니다.
+
+- `http://127.0.0.1:4173/`: 프로젝트 작업면
+
 현재 운영 API 엔드포인트는 다음과 같습니다.
 
 - `GET /api/v1/projects/`: 프로젝트 목록 및 Specs 생성 준비도 조회
@@ -211,6 +218,44 @@ MSBuild 기반 플랜은 생성된 inline Python 코드에서 실제 MSBuild 호
 UI 스크린샷 확인은 컨테이너에 시스템 Chrome이나 X server가 없을 수 있으므로, Playwright 전용 Firefox와 헤드리스 모드 기준으로 실행한다. 저장소에는 이를 위한 보조 스크립트 `scripts/capture_ui_screenshot.py`를 포함한다.
 
 운영 API의 활성 빌드 정의 응답은 `definition` JSON 본문과 별도로 `year` 필드를 포함해야 하며, 생성기는 이 값을 내부 `BuildDefinition.year`로 사용합니다.
+
+## React 프런트엔드 실행
+
+React 콘솔은 Rust API를 직접 호출합니다. 기본 개발 환경 변수는 `frontend/.env.example`을 기준으로 맞춥니다.
+
+필수 환경 변수:
+
+- `VITE_API_BASE_URL`: Rust API 베이스 URL
+- `VITE_BAMBOO_API_TOKEN`: Rust API Bearer 토큰
+
+권장 실행 순서:
+
+```bash
+cd backend-rs
+cargo run
+```
+
+포트 충돌이 있으면 다음처럼 변경합니다.
+
+```bash
+cd backend-rs
+SERVER_PORT=18080 cargo run
+```
+
+프런트엔드 실행:
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+프로덕션 번들 확인:
+
+```bash
+cd frontend
+npm run build
+```
 
 ## 요구 환경
 

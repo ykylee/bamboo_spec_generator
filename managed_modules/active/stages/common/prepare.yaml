@@ -1,0 +1,11 @@
+apiVersion: buildmod/v1alpha1
+kind: StageModule
+metadata:
+  id: prepare
+  name: Prepare
+spec:
+  order: 20
+  enabled: true
+  jobs:
+    - prepare-linux
+    - verify-linux

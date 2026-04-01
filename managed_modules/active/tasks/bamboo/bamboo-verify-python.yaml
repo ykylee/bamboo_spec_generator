@@ -1,0 +1,7 @@
+apiVersion: buildmod/v1alpha1
+kind: BambooTaskModule
+metadata:
+  id: bamboo-verify-python
+  name: Bamboo Verify Python
+spec:
+  taskKind: python_script

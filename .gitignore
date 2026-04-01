@@ -27,6 +27,13 @@ compose.env
 # Rust build artifacts
 backend-rs/target/
 backend-rs/Cargo.lock
+backend-rs/.env
+
+# Frontend build artifacts
+frontend/node_modules/
+frontend/dist/
+frontend/.env
+frontend/*.tsbuildinfo
 
 # OpenCode
 .opencode/

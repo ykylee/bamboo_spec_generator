@@ -1,0 +1,41 @@
+{
+  "planKey": "SAMPAPI",
+  "project": {
+    "jiraProjectKey": "SAMPLE",
+    "bitbucketProjectKey": "SAMPLE",
+    "representativeRepoSlug": "sample-app-api"
+  },
+  "currentRepository": {
+    "repoSlug": "sample-app-api",
+    "coverityProject": "sample-app",
+    "coverityStream": "sample-app-dev",
+    "applicationLink": "BITBUCKET_SERVER",
+    "cloneUrl": "https://git.example.com/scm/sample/sample-app-api.git",
+    "linkageMode": "create_if_missing"
+  },
+  "projectBuild": {
+    "buildName": "backend",
+    "language": "java",
+    "compiler": "python",
+    "buildType": "python"
+  },
+  "repositories": [
+    {
+      "repoSlug": "sample-app-api",
+      "isRepresentative": true
+    }
+  ],
+  "variables": {
+    "JIRA_PROJECT_KEY": "SAMPLE",
+    "BITBUCKET_PROJECT_KEY": "SAMPLE",
+    "BITBUCKET_REPO_SLUG": "sample-app-api",
+    "BITBUCKET_APPLICATION_LINK": "BITBUCKET_SERVER",
+    "BITBUCKET_CLONE_URL": "https://git.example.com/scm/sample/sample-app-api.git",
+    "REPRESENTATIVE_REPO_SLUG": "sample-app-api",
+    "COVERITY_PROJECT": "sample-app",
+    "COVERITY_STREAM": "sample-app-dev",
+    "PROJECT_BUILD_NAME": "backend",
+    "PROJECT_BUILD_TYPE": "python",
+    "currentRepository.linkageMode": "create_if_missing"
+  }
+}

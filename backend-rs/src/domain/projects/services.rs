@@ -1,4 +1,4 @@
-use crate::domain::projects::entities::{Project, ProjectRepository, BuildUnit};
+use crate::domain::projects::entities::Project;
 
 pub trait ProjectRepositoryTrait: Send + Sync {
     fn list(&self) -> impl Future<Output = Result<Vec<Project>, Box<dyn std::error::Error>>> + Send;
@@ -18,7 +18,7 @@ impl<R: ProjectRepositoryTrait> ProjectService<R> {
         Self { repository }
     }
 
-    pub async fn list_projects(&self, ci_provider: Option<String>) -> Result<Vec<Project>, String> {
+    pub async fn list_projects(&self, _ci_provider: Option<String>) -> Result<Vec<Project>, String> {
         self.repository.list()
             .await
             .map_err(|e| e.to_string())

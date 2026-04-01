@@ -1,0 +1,7 @@
+apiVersion: buildmod/v1alpha1
+kind: BambooTaskModule
+metadata:
+  id: bamboo-prepare-python
+  name: Bamboo Prepare Python
+spec:
+  taskKind: python_script

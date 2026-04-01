@@ -1,0 +1,10 @@
+apiVersion: buildmod/v1alpha1
+kind: JobModule
+metadata:
+  id: verify-linux
+  name: Verify Linux
+spec:
+  ciProvider: bamboo
+  enabled: true
+  tasks:
+    - bamboo-verify-python

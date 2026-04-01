@@ -1,20 +1,9 @@
 use actix_web::{web, HttpResponse, Result};
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct ProjectSummary {
-    pub jira_project_key: String,
-    pub bitbucket_project_key: String,
-    pub ci_provider: String,
-    pub display_name: String,
-    pub build_count: i32,
-    pub repository_count: i32,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct ProjectListResponse {
-    pub projects: Vec<ProjectSummary>,
-}
+use crate::api::responses;
+use crate::infrastructure::repositories::project_repo;
+use crate::AppState;
 
 #[derive(Debug, Deserialize)]
 pub struct ListQuery {
@@ -23,90 +12,61 @@ pub struct ListQuery {
 }
 
 pub async fn list_projects(
+    state: web::Data<AppState>,
     web::Query(params): web::Query<ListQuery>,
 ) -> Result<HttpResponse> {
-    let projects = vec![];
-    Ok(HttpResponse::Ok().json(ProjectListResponse { projects }))
-}
-
-#[derive(Debug, Deserialize)]
-pub struct ProjectPath {
-    pub project_key: String,
-}
-
-#[derive(Debug, Serialize)]
-pub struct ProjectDetailResponse {
-    pub jira_project_key: String,
-    pub bitbucket_project_key: String,
-    pub ci_provider: String,
-    pub display_name: String,
-    pub description: Option<String>,
-    pub repositories: Vec<RepositorySummary>,
-    pub build_units: Vec<BuildUnitSummary>,
-}
-
-#[derive(Debug, Serialize)]
-pub struct RepositorySummary {
-    pub repo_slug: String,
-    pub coverity_project: Option<String>,
-    pub coverity_stream: Option<String>,
-}
-
-#[derive(Debug, Serialize)]
-pub struct BuildUnitSummary {
-    pub build_name: String,
-    pub plan_key: Option<String>,
-    pub job_path: Option<String>,
+    let Some(pool) = state.pool.as_ref() else {
+        return Ok(responses::service_unavailable_database());
+    };
+    match project_repo::list_project_summaries(pool, params.ci_provider.as_deref()).await {
+        Ok(projects) => Ok(HttpResponse::Ok().json(projects)),
+        Err(error) => Ok(responses::internal_error(error.to_string())),
+    }
 }
 
 pub async fn get_project(
-    web::Path(project_key): web::Path<String>,
+    state: web::Data<AppState>,
+    path: web::Path<String>,
+    web::Query(params): web::Query<ListQuery>,
 ) -> Result<HttpResponse> {
-    Ok(HttpResponse::NotFound().json(serde_json::json!({
-        "error": "Project not found"
-    })))
-}
-
-#[derive(Debug, Deserialize)]
-pub struct CreateProjectRequest {
-    pub jira_project_key: String,
-    pub bitbucket_project_key: String,
-    #[serde(default = "default_ci_provider")]
-    pub ci_provider: String,
-    pub display_name: String,
-    pub description: Option<String>,
-}
-
-fn default_ci_provider() -> String {
-    "bamboo".to_string()
+    let project_key = path.into_inner();
+    let Some(pool) = state.pool.as_ref() else {
+        return Ok(responses::service_unavailable_database());
+    };
+    match project_repo::get_project_detail(pool, &project_key, params.ci_provider.as_deref()).await {
+        Ok(Some(project)) => Ok(HttpResponse::Ok().json(project)),
+        Ok(None) => Ok(responses::not_found(format!("Project '{}' was not found.", project_key))),
+        Err(error) => Ok(responses::internal_error(error.to_string())),
+    }
 }
 
 pub async fn create_project(
-    web::Json(payload): web::Json<CreateProjectRequest>,
+    state: web::Data<AppState>,
+    web::Json(payload): web::Json<project_repo::ProjectCreateInput>,
 ) -> Result<HttpResponse> {
-    Ok(HttpResponse::Created().json(serde_json::json!({
-        "jira_project_key": payload.jira_project_key,
-        "bitbucket_project_key": payload.bitbucket_project_key,
-        "ci_provider": payload.ci_provider,
-        "display_name": payload.display_name,
-    })))
-}
-
-#[derive(Debug, Deserialize)]
-pub struct UpdateProjectRequest {
-    pub display_name: Option<String>,
-    pub description: Option<String>,
-    pub representative_repo_slug: Option<String>,
+    let Some(pool) = state.pool.as_ref() else {
+        return Ok(responses::service_unavailable_database());
+    };
+    match project_repo::create_project(pool, &payload).await {
+        Ok(project) => Ok(HttpResponse::Ok().json(project)),
+        Err(error) => Ok(responses::map_domain_error(&error)),
+    }
 }
 
 pub async fn update_project(
-    web::Path(project_key): web::Path<String>,
-    web::Json(payload): web::Json<UpdateProjectRequest>,
+    state: web::Data<AppState>,
+    path: web::Path<String>,
+    web::Json(payload): web::Json<project_repo::ProjectUpdateInput>,
 ) -> Result<HttpResponse> {
-    Ok(HttpResponse::Ok().json(serde_json::json!({
-        "jira_project_key": project_key,
-        "display_name": payload.display_name,
-    })))
+    let project_key = path.into_inner();
+    let Some(pool) = state.pool.as_ref() else {
+        return Ok(responses::service_unavailable_database());
+    };
+    match project_repo::update_project(pool, &project_key, &payload).await {
+        Ok(Some(project)) => Ok(HttpResponse::Ok().json(project)),
+        Ok(None) => Ok(responses::not_found(format!("Project '{}' was not found.", project_key))),
+        Err(error) => Ok(responses::map_domain_error(&error)),
+    }
 }
 
 pub fn configure(cfg: &mut web::ServiceConfig) {

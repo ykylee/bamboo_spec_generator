@@ -1,0 +1,82 @@
+{
+  "projectKey": "SAMPLE",
+  "name": "SAMPLE",
+  "description": "",
+  "ownerTeam": "",
+  "serviceType": "",
+  "ciProvider": "bamboo",
+  "status": "active",
+  "representativeRepoSlug": "sample-app-api",
+  "generation": {
+    "generationReady": true,
+    "generationReadinessIssues": [],
+    "readyBuildCount": 1,
+    "activeDefinitionCount": 0,
+    "totalBuildCount": 1
+  },
+  "repositories": [
+    {
+      "repoSlug": "sample-app-api",
+      "repositoryType": "git",
+      "repositoryProvider": "bitbucket",
+      "repoType": "bitbucket",
+      "repoKey": "SAMPLE",
+      "cloneUrl": "",
+      "defaultBranch": "dev",
+      "coverityProject": "sample-app",
+      "coverityStream": "sample-app-dev",
+      "isRepresentative": true
+    }
+  ],
+  "buildUnits": [
+    {
+      "externalKey": "SAMPAPI",
+      "displayName": "backend",
+      "description": "",
+      "unitType": "build",
+      "repositorySlug": "sample-app-api",
+      "language": "java",
+      "compiler": "python",
+      "runtimeStack": "java",
+      "lifecycleStatus": "active",
+      "isEnabled": true,
+      "latestVersion": "",
+      "latestSuccess": null,
+      "providerDetails": {
+        "planKey": "SAMPAPI",
+        "buildId": "sample-app-api",
+        "bambooProjectKey": "SAMPLE"
+      }
+    }
+  ],
+  "jiraProjectKey": "SAMPLE",
+  "bitbucketProjectKey": "SAMPLE",
+  "builds": [
+    {
+      "buildName": "backend",
+      "language": "java",
+      "compiler": "python",
+      "buildType": "python",
+      "runtimeStack": "java",
+      "repositorySlug": "sample-app-api",
+      "planKey": "SAMPAPI",
+      "buildId": "sample-app-api",
+      "jobPath": "SAMPAPI",
+      "jobType": "",
+      "folderPath": "",
+      "pipelineKind": "",
+      "externalKey": "SAMPAPI",
+      "generationReady": true,
+      "activeDefinitionYear": "",
+      "staticAnalysisToolVersion": "",
+      "coverityProject": "",
+      "repositoryLinkageModeOverride": "",
+      "buildInfoCount": 1,
+      "latestVersion": "",
+      "latestSuccess": null,
+      "buildInfoUrl": "",
+      "detailUrl": "/projects/SAMPLE/builds/SAMPAPI/",
+      "ciProvider": "bamboo"
+    }
+  ]
+}

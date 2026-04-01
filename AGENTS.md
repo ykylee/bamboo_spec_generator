@@ -28,12 +28,21 @@
 
 - 현재 표준 패키징 설정 파일은 없지만, Python 실행과 Django 관리 명령을 기준으로 작업합니다.
 - 백엔드와 UI E2E 의존성은 각각 `requirements-backend.txt`, `requirements-playwright.txt`로 관리합니다.
+- Rust 백엔드 작업은 `backend-rs/` 아래에서 `cargo` 명령을 기준으로 진행합니다.
+- React 프런트엔드 작업은 `frontend/` 아래에서 `npm` 명령을 기준으로 진행합니다.
 - Install: `python3 -m pip install -r requirements-backend.txt`
 - Build: `PYTHONPATH=. python3 -m src.bamboo_spec_generator.cli`
 - Lint: `현재 별도 린트 명령 없음`
 - Test: `PYTHONPATH=. python3 -m unittest discover -s tests`
 - Test: `(cd backend && python3 manage.py test --settings=config.settings.test)`
 - Check: `(cd backend && python3 manage.py check)`
+- Build: `(cd backend-rs && cargo build)`
+- Test: `(cd backend-rs && cargo test)`
+- Test: `(cd backend-rs && cargo test --test api_contract)`
+- Test: `(cd backend-rs && cargo test --test api_golden)`
+- Install: `(cd frontend && npm install)`
+- Build: `(cd frontend && npm run build)`
+- Run: `(cd frontend && npm run dev)`
 
 ## 코드 스타일
 
@@ -42,6 +51,7 @@
 - 주석은 꼭 필요한 경우에만 짧게 추가하고, 코드만으로 의도가 충분히 드러나면 생략합니다.
 - 프로젝트 방향상 타당한 이유가 없으면 큰 의존성이나 생성기를 추가하지 않습니다.
 - Bamboo 빌드 Task에서 스크립트를 사용할 때는 가능하면 Windows와 Linux에서 모두 호환될 수 있도록 shell 전용 스크립트보다 Python 스크립트 호출 방식을 우선합니다.
+- 빌드 메타데이터 용어는 가능하면 `language`, `compiler`, `runtimeStack`을 기준으로 사용하고, `buildType`은 기존 응답 호환이 꼭 필요할 때만 유지합니다.
 
 ## 테스트
 
@@ -111,6 +121,21 @@ backend-rs/
 └── .env.example
 ```
 
+### 프런트엔드 구조
+
+```
+frontend/
+├── src/
+│   ├── App.tsx
+│   ├── main.tsx
+│   ├── lib/
+│   │   └── api.ts
+│   └── types.ts
+├── package.json
+├── vite.config.ts
+└── .env.example
+```
+
 ### API 엔드포인트 매핑 (Django → Rust)
 
 | 기존 Django 엔드포인트 | Rust 엔드포인트 | 상태 |
@@ -122,11 +147,17 @@ backend-rs/
 | `GET /api/v1/build-plans/{plan_key}/active-definition` | 同 | 구현 |
 | `GET /api/v1/build-plans/{plan_key}/prepare-context` | 同 | 구현 |
 | `GET /api/v1/build-plans/{plan_key}/executions` | 同 | 구현 |
-| `GET /api/v1/admin/modules/` | `GET /api/v1/modules/` | 구현 |
-| `POST /api/v1/admin/modules/uploads` | `POST /api/v1/modules/upload` | 구현 |
-| `POST /api/v1/admin/modules/reload` | `POST /api/v1/modules/reload` | 구현 |
-| `GET /api/v1/system-settings/` | `GET /api/v1/settings/` | 구현 |
-| `PUT /api/v1/system-settings/{key}` | `PUT /api/v1/settings/{key}` | 구현 |
+| `GET /api/v1/admin/modules/` | `GET /api/v1/admin/modules/` | 구현 |
+| `POST /api/v1/admin/modules/uploads` | `POST /api/v1/admin/modules/uploads` | 구현 |
+| `POST /api/v1/admin/modules/reload` | `POST /api/v1/admin/modules/reload` | 구현 |
+| `GET /api/v1/system-settings/coverity` | `GET /api/v1/system-settings/coverity` | 구현 |
+| `PUT /api/v1/system-settings/coverity` | `PUT /api/v1/system-settings/coverity` | 구현 |
+| `POST /api/v1/system-settings/specs-drafts/initialize` | `POST /api/v1/system-settings/specs-drafts/initialize` | 구현 |
+| `GET /api/v1/jenkins-jobs/` | `GET /api/v1/jenkins-jobs/` | 구현 |
+| `GET /api/v1/jenkins-jobs/{job_path}/status` | 同 | 구현 |
+| `GET /api/v1/jenkins-jobs/{job_path}/details` | 同 | 구현 |
+| `POST /api/v1/jenkins-jobs/{job_path}/configure` | 同 | 구현 |
+| `POST /api/v1/jenkins-jobs/{job_path}/trigger` | 同 | 구현 |
 
 ### Rust 의존성
 
@@ -340,6 +371,6 @@ async fn list_projects(
 - [ ] 모듈 레지스트리 API
 - [ ] 시스템 설정 API
 - [ ] Jenkins 연동 API
-- [ ] Bamboo 연동 API
+- [x] Bamboo 연동 API
 - [ ] 인증/인가 레이어
 - [ ] 데이터 마이그레이션 스크립트
